@@ -14,7 +14,18 @@ export default defineSchema({
 		icon: v.optional(v.string()),
 		isPublished: v.boolean(),
 		typePropsID: v.optional(v.string()),
-		fileInspect: v.optional(v.string())
+		fileInspect: v.optional(v.object({
+			fileMentionedConcepts: v.array(v.id("concepts")),
+			blocks: v.array(v.object({
+				blockId: v.string(),
+				conceptSynced: v.boolean(),
+				edited: v.boolean(),
+				toRemove: v.boolean(),
+				blockMentionedConcepts: v.array(v.id("concepts")),
+				conceptKnowledge: v.record(v.id("concepts"), v.id("knowledgeDatas")),
+				references: v.array(v.id("references"))
+			}))
+		}))
 	})
 	.index("by_user", ["userId"])
 	.index("by_user_parent", ["userId","parentDocument"])
@@ -30,13 +41,19 @@ export default defineSchema({
 	concepts: defineTable({
 		userId: v.string(),
 		aliasList: v.array(v.string()),
+		aliasString: v.optional(v.string()),
 		objectTags: v.optional(v.array(v.id("objectTags"))),
 		description: v.optional(v.string()),
 		IsSynced: v.boolean(),
 		rootDocument: v.optional(v.id("documents")),
 	})
 	.index("by_user", ["userId"])
-	.index("by_alias", ["aliasList"]),
+	.index("by_alias", ["aliasList"])
+	.index("by_user_isSynced", ["userId", "IsSynced"])
+	.searchIndex("search_alias", {
+		searchField: "aliasString",
+		filterFields: ["userId"],
+	}),
 
 	objectTags: defineTable({
 		userId: v.string(),

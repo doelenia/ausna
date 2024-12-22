@@ -45,8 +45,7 @@ export const addConcept = action({
 		if (!identity) {
 			throw new Error("Not authenticated");
 		}
-
-
+		
 
 		const conceptId: Id<"concepts"> = await ctx.runMutation(api.concepts.createConcept, {
 			alias: args.alias,
@@ -105,6 +104,7 @@ export const createConcept = mutation({
 		const concept = await ctx.db.insert("concepts", {
 			userId: userId,
 			aliasList: args.alias,
+			aliasString: args.alias.join(" "),
 			objectTags: args.objectTags,
 			description: args.description,
 			IsSynced: args.isSynced,
@@ -123,39 +123,69 @@ export const syncConcept = action({
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
-		if (!identity) {
-			throw new Error("Not authenticated");
-		}
+		if (!identity) throw new Error("Not authenticated");
 
-		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
+		const concept = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
+		if (!concept) throw new Error("Concept not found");
+		if (concept.userId !== identity.subject) throw new Error("Unauthorized");
+		if (concept.IsSynced) return;
 
-		if (!concept) {
-			throw new Error("Concept not found");
-		}
+		// Get all knowledge data of this concept
+		const knowledgeDatas = await ctx.runQuery(api.knowledgeDatas.getKDsofConcept, {
+			conceptId: args.conceptId
+		});
 
-		if (concept.userId !== identity.subject) {
-			throw new Error("Unauthorized");
-		}
-
-		if (concept.IsSynced == true) {
-			return;
-		}
-
-		// TODO: SYNC CONCEPT SUMMARY
-		await ctx.runAction(api.objectTags.syncObjectTag, {conceptId: args.conceptId});
-		// TODO: SYNC CONCEPT RELATIONSHIP
-
-		// get all knowledge data of this concept
-		const knowledgeDatas = await ctx.runQuery(api.knowledgeDatas.getKDsofConcept, {conceptId: args.conceptId});
-
-		if (knowledgeDatas.length <= 0) {
+		// 1. Delete concept if no knowledge data
+		if (knowledgeDatas.length === 0) {
 			await ctx.runMutation(api.concepts.deleteConcept, {conceptId: args.conceptId});
-
 			return;
 		}
 
-		await ctx.runMutation(api.concepts.updateConcept, {conceptId: args.conceptId, IsSynced: true});
+		// 2. Process unprocessed knowledge data
+		for (const kd of knowledgeDatas) {
+			if (!kd.isProcessed && kd.sourceSection) {
+				const block = await ctx.runQuery(api.documents.getBlockById, {documentId: kd.sourceFile, blockId: kd.sourceSection});
 
+				const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {
+					block: JSON.stringify(block)
+				});
+				
+				const knowledge = await ctx.runAction(api.llm.fetchKDLLM, {
+					conceptId: args.conceptId,
+					sourceId: kd.sourceFile,
+					blockText: blockText
+				});
+
+				// Update knowledge data with processed content
+				await ctx.runMutation(api.knowledgeDatas.updateKD, {
+					knowledgeId: kd._id,
+					knowledge: knowledge,
+					isProcessed: false
+				});
+			}
+		}
+
+		// 3. TODO: Sync concept summary
+		
+		// 4. Sync object tags
+		await ctx.runAction(api.objectTags.syncObjectTag, {conceptId: args.conceptId});
+		
+		// 5. TODO: Sync concept relationships
+
+		// Mark concept as synced
+		await ctx.runMutation(api.concepts.updateConcept, {
+			conceptId: args.conceptId, 
+			IsSynced: true
+		});
+
+		for (const kd of knowledgeDatas) {
+			if (!kd.isProcessed && kd.sourceSection) {
+				await ctx.runMutation(api.knowledgeDatas.updateKD, {
+					knowledgeId: kd._id,
+					isProcessed: false
+				});
+			}
+		}
 	}
 });
 
@@ -256,5 +286,58 @@ export const deleteConcept = mutation({
 		await ctx.db.delete(args.conceptId);
 
 		return true;
+	}
+});
+
+export const getUnsyncedConcepts = query({
+	args: {
+		userId: v.string(),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const concepts = await ctx.db.query("concepts")
+		.withIndex("by_user_isSynced", (q) =>
+			q
+				.eq("userId", args.userId)
+				.eq("IsSynced", false)
+		)
+		.collect();
+
+		return concepts;
+	}
+});
+
+export const syncAllConcepts = action({
+	args: {
+		userId: v.string(),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const concepts = await ctx.runQuery(api.concepts.getUnsyncedConcepts, {userId: args.userId});
+		for (const concept of concepts) {
+			await ctx.runAction(api.concepts.syncConcept, {conceptId: concept._id});
+		}
+	}
+});
+
+export const searchConceptAlias = query({
+	args: {
+		userId: v.string(),
+		query: v.string(),
+	},
+	handler: async (ctx, args) => {
+		const concepts = await ctx.db.query("concepts")
+		.withSearchIndex("search_alias", (q) =>
+			q
+				.search("aliasString", args.query)
+				.eq("userId", args.userId)
+		)
+		.collect();
+
+		return concepts;
 	}
 });

@@ -17,3 +17,16 @@ export const removeAllRef = action({
 		return identity;
 	}
 });
+
+export const removeRef = mutation({
+	args: {
+		referenceId: v.id("references"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+		return identity;
+	}
+});

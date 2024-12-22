@@ -14,26 +14,9 @@ export const addKD = action({
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
 
-		if (!identity) {
-			throw new Error("Not authenticated");
-		}
-
-		const userId = identity.subject;
-
-		console.log("addKD: ", args.knowledge);
-
-		if (args.knowledge === null || args.knowledge === undefined) {
-			if (args.blockId) {
-				const block: Block | null = await ctx.runQuery(api.documents.getBlockById, {documentId: args.sourceId, blockId: args.blockId});
-
-				if (block) {
-					const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {block: block});
-					args.knowledge = await ctx.runAction(api.llm.fetchKDLLM, {conceptId: args.conceptId, sourceId: args.sourceId, blockText: blockText});
-				}
-			}
-		}
-
+		// Create knowledge data entry without processing
 		const knowledge: Id<"knowledgeDatas"> = await ctx.runMutation(api.knowledgeDatas.create, {
 			conceptId: args.conceptId,
 			sourceId: args.sourceId,
@@ -41,9 +24,11 @@ export const addKD = action({
 			knowledge: args.knowledge
 		});
 
-		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
-
-		concept.IsSynced = false;
+		// Mark concept as needing sync
+		await ctx.runMutation(api.concepts.updateConcept, {
+			conceptId: args.conceptId,
+			IsSynced: false
+		});
 
 		return knowledge;
 	}
@@ -106,8 +91,9 @@ export const addAllKD = action({
 		console.log("addAllKD - collectBlocks: ", blocksDictionary);
 
 		for (const [blockId, [block, documentId]] of Object.entries(blocksDictionary)) {
-			const knowledge = await ctx.runAction(api.llm.fetchKDLLM, {blockText: block.content as unknown as string, sourceId: documentId, conceptId: args.conceptId});
-			await ctx.runAction(api.knowledgeDatas.addKD, {conceptId: args.conceptId, sourceId: documentId, blockId: blockId, knowledge: knowledge});
+			const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {block: JSON.stringify(block)});
+
+			await ctx.runAction(api.knowledgeDatas.addKD, {conceptId: args.conceptId, sourceId: documentId, blockId: blockId});
 		}
 	}
 });
@@ -196,6 +182,21 @@ export const getKDsofConcept = query({
 		.collect();
 
 		return KDs;
+	}
+});
+
+export const updateKD = mutation({
+	args: {
+		knowledgeId: v.id("knowledgeDatas"),
+		knowledge: v.optional(v.string()),
+		isProcessed: v.optional(v.boolean())
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const { knowledgeId, ...updates } = args;
+		return await ctx.db.patch(knowledgeId, updates);
 	}
 });
 //fetchKD is at llm
