@@ -23,7 +23,7 @@ export const Navbar = () => {
 	return (
 		<div className={cn("z-50 bg-background fixed top-0 flex items-center w-full p-6", scrolled && "border-b shadow-sm")}>
 			<Logo />
-			<div className="md:ml-auto md:justify-end justify-between w-full flex gap-x-2 items-center">
+			<div className="md:ml-auto md:justify-end justify-between w-full flex md:gap-x-5 items-center">
 				{isLoading && <Spinner/> }
 				{!isAuthenticated && !isLoading && (
 					<>
@@ -43,7 +43,7 @@ export const Navbar = () => {
 
 				{isAuthenticated && !isLoading && (
 					<>
-						<Button variant="ghost" size="sm" asChild>
+						<Button size="sm" asChild>
 							<Link href="/documents">
 								Enter Ausna
 							</Link>
