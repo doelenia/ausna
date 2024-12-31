@@ -1,9 +1,15 @@
 import { Toaster } from "sonner";
+
 import { ConvexClientProvider } from "@/components/providers/convex-provider";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { ModalProvider } from "@/components/providers/modal-provider";
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+
+import { EdgeStoreProvider } from "@/lib/edgestore";
+
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,6 +56,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiase`}
       >
         <ConvexClientProvider>
+          <EdgeStoreProvider>
           <ThemeProvider
             attribute="class"
             defaultTheme="system"
@@ -57,8 +64,11 @@ export default function RootLayout({
             enableSystem
             disableTransitionOnChange
           >
+            <Toaster />
+            <ModalProvider />
             {children}
           </ThemeProvider>
+          </EdgeStoreProvider>
         </ConvexClientProvider>
       </body>
     </html>
