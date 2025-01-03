@@ -10,7 +10,7 @@ import {
   Plus,
   Trash,
 } from "lucide-react";
-import { useParams, usePathname } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useRef, ComponentRef, useState, useEffect, use } from "react";
 import { useMediaQuery } from "usehooks-ts";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,7 @@ import { useSettings } from "@/hooks/use-settings";
 import { Navbar } from "./navbar";
 
 export const Navigation = () => {
+  const router = useRouter();
   const search = useSearch();
   const settings = useSettings();
   const pathname = usePathname();
@@ -122,7 +123,8 @@ export const Navigation = () => {
   };
 
   const handleCreate = () => {
-    const promise = create({ title: "Untitled Page" });
+    const promise = create({ title: "Untitled Page" })
+      .then((documentId) => router.push(`/documents/${documentId}`));
 
     toast.promise(promise, {
       loading: "Creating new page...",
@@ -136,7 +138,7 @@ export const Navigation = () => {
       <aside
         ref={sidebarRef}
         className={cn(
-          "group/sidebar h-full bg-secondary overflow-y-auto relative flex w-60 flex-col z-[99999]",
+          "group/sidebar h-full bg-secondary overflow-y-auto relative flex w-60 flex-col z-[250]",
           isResetting && "transition-all ease-in-out duration-300",
           isMobile && "w-0",
           // isCollapsed && "w-16",
@@ -189,7 +191,7 @@ export const Navigation = () => {
       <div
         ref={navbarRef}
         className={cn(
-          "absolute top-0 z-[99999] left-60 w-[calc(100%-240px)]",
+          "absolute top-0 z-[250] left-60 w-[calc(100%-240px)]",
           isResetting && "transition-all ease-in-out duration-300",
           isMobile && "left-0 w-full",
         )}

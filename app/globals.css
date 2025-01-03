@@ -76,3 +76,6 @@ body {
     @apply bg-background text-foreground;
   }
 }
+.bn-editor {
+  --bn-colors-editor-background: #00000000;
+}
