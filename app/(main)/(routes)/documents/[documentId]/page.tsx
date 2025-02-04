@@ -10,6 +10,7 @@ import { Cover } from "@/components/cover";
 import { Skeleton } from "@/components/ui/skeleton";
 import dynamic from "next/dynamic";
 import { useMemo } from "react";
+import DocumentDebug from "@/components/document-debug";
 
 interface DocumentIdPageProps {
   params: Promise<{
@@ -65,9 +66,11 @@ const DocumentIdPage = ({
 			<Cover url={document.coverImage} />
 			<div className="md:max-w-3xl lg:max-w-4xl mx-auto">
 				<Toolbar initialData={document} />
+				<DocumentDebug initialData={document} />
 				<Editor
 					onChange={onChange}
 					initialContent={document.content}
+					documentId={rParams.documentId}
 				/>
 			</div>
 		</div>

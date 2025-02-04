@@ -17,6 +17,8 @@ import {
 } from "@/components/ui/command";
 
 import { useSearch } from "@/hooks/use-search";
+import { DialogTitle } from "@radix-ui/react-dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 
 export const SearchCommand = () => {
 	const { user } = useUser();
@@ -55,6 +57,11 @@ export const SearchCommand = () => {
 
 	return (
 		<CommandDialog open={isOpen} onOpenChange={onClose}>
+			<VisuallyHidden>
+				<DialogTitle>
+					To avoid error
+				</DialogTitle>
+			</VisuallyHidden>
 			<CommandInput
 				placeholder={`Search ${user?.fullName}'s Ausna`}
 			/>
@@ -64,7 +71,7 @@ export const SearchCommand = () => {
 					{documents?.map((document) => (
 						<CommandItem
 							key={document._id}
-							value={`${document.title}`}
+							value={`${document._id}`}
 							title={document.title}
 							onSelect={onSelect}
 						>

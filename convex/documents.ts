@@ -1,3 +1,4 @@
+/* trunk-ignore-all(prettier) */
 import {v} from "convex/values";
 
 import {mutation, query} from "./_generated/server";
@@ -102,9 +103,10 @@ export const create = mutation ({
 
 		const document = await ctx.db.insert("documents", {
 			title: args.title,
-			parentDocument: args.parentDocument,
-			userId,
+			userId: userId,
+			type: "page",
 			isArchived: false,
+			parentDocument: args.parentDocument,
 			isPublished: false,
 		});
 
@@ -374,6 +376,112 @@ export const removeCoverImage = mutation({
 		const documents = await ctx.db.patch(args.id, {
 			coverImage: undefined,
 		});
+
+		return documents;
+	}
+});
+
+// CONCEPTS
+
+export const createConcept = mutation({
+	args: {
+		title: v.string(),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+
+		const userId = identity.subject;
+
+		const concept_document = await ctx.db.insert("documents", {
+			title: args.title,
+			userId: userId,
+			type: "concept",
+			isArchived: false,
+			isPublished: false,
+		});
+
+		const concept = await ctx.db.insert("concepts", {
+			userId: userId,
+			aliaslist: [args.title],
+			IsSynced: false,
+			rootDocument: concept_document,
+		});
+
+		// set typePropsID of concept_document to concept as a string
+		await ctx.db.patch(concept_document, {
+			typePropsID: concept,
+		});
+
+		return concept_document;
+	}
+});
+
+export const addKnowledgeToConcept = mutation({
+	args: {
+		conceptId: v.id("documents"),
+		knowledgeId: v.id("knowledges"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+
+		const userId = identity.subject;
+
+		const concept = await ctx.db.get(args.conceptId);
+
+		if (!concept) {
+			throw new Error("Concept not found");
+		}
+
+		if (concept.userId !== userId) {
+			throw new Error("Unauthorized");
+		}
+
+		const documents = await ctx.db.patch(args.conceptId, {
+			props: {
+				knowledges: [
+					...(concept.props.knowledges || []),
+					{
+						knowledgeId: args.knowledgeId,
+					},
+				],
+			},
+		});
+
+		return documents;
+	}
+});
+
+export const getConceptSearch = query({
+	handler: async (ctx) => {
+		const identity = await ctx.auth.getUserIdentity();
+
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+
+		const userId = identity.subject;
+
+		const documents = await ctx.db.query("documents")
+			.withIndex("by_user", (q) =>
+				q
+					.eq("userId", userId)
+			)
+			.filter((q) =>
+				q.eq(q.field("isArchived"), false)
+			)
+			.filter((q) =>
+				q.eq(q.field("type"), "concept")
+			)
+			.order("desc")
+			.collect();
 
 		return documents;
 	}

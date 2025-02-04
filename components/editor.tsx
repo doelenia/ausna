@@ -1,14 +1,20 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import {
+	Block,
 	BlockNoteEditor,
+	BlockNoteSchema,
+	defaultInlineContentSpecs,
+	filterSuggestionItems,
 	PartialBlock,
 } from "@blocknote/core";
 
 import {
+	DefaultReactSuggestionItem,
+	SuggestionMenuController,
 	useCreateBlockNote
 } from "@blocknote/react";
 
@@ -20,19 +26,35 @@ import { useTheme } from "next-themes";
 
 import { useEdgeStore } from "@/lib/edgestore";
 
+import { ConceptKeyword } from "./ausna-features/inline/concept-keyword";
+import { query } from "@/convex/_generated/server";
+import { useMutation, useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { Id } from "@/convex/_generated/dataModel";
+import { toast } from "sonner";
+
 interface EditorProps {
+	documentId: Id<"documents">;
 	onChange: (value: string) => void;
 	initialContent?: string;
 	editable?: boolean;
 }
 
+
 const Editor = ({
+	documentId,
 	onChange,
 	initialContent,
 	editable
 }: EditorProps) => {
 	const { edgestore } = useEdgeStore();
 	const { resolvedTheme } = useTheme();
+	const concepts = useQuery(api.documents.getConceptSearch);
+	const createConcept = useMutation(api.documents.createConcept);
+	const createKnowledge = useMutation(api.knowledges.create);
+	const addKnowledge = useMutation(api.documents.addKnowledgeToConcept);
+
+	const [block, setBlock] = useState<Block>();
 
 	const handleUpload = async (file: File) => {
 		const res = await edgestore.publicFiles.upload({
@@ -42,8 +64,101 @@ const Editor = ({
 		return res.url;
 	}
 
+	const schema = BlockNoteSchema.create({
+		inlineContentSpecs: {
+			// Adds all default inline content.
+			...defaultInlineContentSpecs,
+			// Adds the mention tag.
+			conceptKeyword: ConceptKeyword,
+		},
+	});
+
+	//Inline Concept Keywords
+	const getConceptKeywordMenuItems = (
+		documentId: Id<"documents">,
+		editor: typeof schema.BlockNoteEditor,
+		query: string,
+		block: Block,
+	): DefaultReactSuggestionItem[] => {
+		console.log("finish 1");
+		const addNewConcept = (editor: typeof schema.BlockNoteEditor): DefaultReactSuggestionItem => ({
+			title: `Add "${query}" as a new concept`,
+
+			onItemClick: () => {
+				const promise = createConcept({
+					title: query,
+				});
+				promise.then((conceptId) => {
+					editor.insertInlineContent([
+						{
+							type: "conceptKeyword",
+							props: {
+								alias: query,
+								id: conceptId,
+							},
+						},
+						" ", // add a space after the concept keyword
+					]);
+					const promise = createKnowledge({
+						conceptId: conceptId,
+						sourceId: documentId,
+						blockId: block.id,
+					}).then((knowledgeId) => {
+						addKnowledge({
+							conceptId: conceptId,
+							knowledgeId: knowledgeId,
+						});
+					});
+					toast.promise(promise, {
+						loading: "Connecting a new knowledge to concept ...",
+						success: "Knowledge Connected",
+						error: "Failed to connect knowledge",
+					})
+				});
+			},
+		});
+		console.log("finish 2");
+		const menuItems = concepts?.map((concept) => ({
+			title: concept.title,
+			onItemClick: () => {
+				editor.insertInlineContent([
+					{
+						type: "conceptKeyword",
+						props: {
+							alias: concept.title,
+							id: concept._id,
+						},
+					},
+					" ", // add a space after the concept keyword
+				]);
+				const promise = createKnowledge({
+					conceptId: concept._id,
+					sourceId: documentId,
+					blockId: block.id,
+				}).then((knowledgeId) => {
+					addKnowledge({
+						conceptId: concept._id,
+						knowledgeId: knowledgeId,
+					});
+				});
+				toast.promise(promise, {
+					loading: "Connecting a new knowledge to concept ...",
+					success: "Knowledge Connected",
+					error: "Failed to connect knowledge",
+				})
+			},
+		}));
+		console.log("finish 3");
+		if (menuItems === undefined) {
+			return [addNewConcept(editor)];
+		}
+		menuItems.push(addNewConcept(editor));
+		return menuItems;
+	}
+
 
 	const editor: BlockNoteEditor = useCreateBlockNote({
+		schema,
 		initialContent:
 			initialContent
 			? JSON.parse(initialContent) as PartialBlock[]
@@ -52,6 +167,8 @@ const Editor = ({
 		uploadFile: handleUpload,
 	});
 
+	const [page, setPage] = useState<Block[]>(editor.document);
+
 
 	return (
 		<div>
@@ -59,8 +176,28 @@ const Editor = ({
 				editor={editor}
 				editable={editable}
 				theme={resolvedTheme === "dark" ? "dark" : "light"}
-				onChange={() => onChange(JSON.stringify(editor.document, null, 2))}
-			/>
+				onChange={() => {
+          setPage(editor.document);
+					onChange(JSON.stringify(editor.document, null, 2));
+				}}
+				onSelectionChange={() => {
+					setBlock(editor.getTextCursorPosition().block);
+				}}
+			>
+				<SuggestionMenuController
+					triggerCharacter={"@"}
+					getItems={async (query: string) =>
+						// Gets the mentions menu items
+						filterSuggestionItems(getConceptKeywordMenuItems(documentId, editor, query, block), query)
+					}
+				/>
+			</BlockNoteView>
+
+			<div className="text-sm">
+        <pre>
+          <code>{JSON.stringify(page, null, 2)}</code>
+        </pre>
+      </div>
 		</div>
 	)
 }
