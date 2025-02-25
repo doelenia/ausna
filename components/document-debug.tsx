@@ -13,7 +13,7 @@ export const DocumentDebug = ({
 	const toDisplay = {
 		Id: initialData._id,
 		Type: initialData.type,
-		Props: initialData.typeProps
+		Props: initialData.typePropsID
 	};
 
 	return (

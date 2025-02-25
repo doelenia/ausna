@@ -17,7 +17,15 @@ export default defineSchema({
 		fileInspect: v.optional(v.string())
 	})
 	.index("by_user", ["userId"])
-	.index("by_user_parent", ["userId","parentDocument"]),
+	.index("by_user_parent", ["userId","parentDocument"])
+	.searchIndex("search_content", {
+    searchField: "content",
+    filterFields: ["userId", "isArchived"],
+  })
+	.searchIndex("search_title", {
+    searchField: "title",
+    filterFields: ["userId", "isArchived"],
+  }),
 
 	concepts: defineTable({
 		userId: v.string(),
@@ -28,7 +36,7 @@ export default defineSchema({
 		rootDocument: v.optional(v.id("documents")),
 	})
 	.index("by_user", ["userId"])
-	.index("by_alias", ["aliaslist"]),
+	.index("by_alias", ["aliasList"]),
 
 	objectTags: defineTable({
 		userId: v.string(),
@@ -61,7 +69,8 @@ export default defineSchema({
 		contributions: v.optional(v.array(v.string())),
 		knowledge: v.optional(v.string()),
 	})
-	.index("by_concept", ["conceptId"])
+	.index("by_user", ["userId"])
+	.index("by_concept", ["userId", "conceptId"])
 	.index("by_source_file", ["sourceFile"]),
 
 	references: defineTable({
@@ -73,4 +82,10 @@ export default defineSchema({
 	})
 	.index("by_source_kd", ["sourceKDId"])
 	.index("by_ref_kd", ["refKDId"]),
+
+	apiKeys: defineTable({
+		server: v.string(),
+		key: v.string(),
+	})
+	.index("by_server", ["server"]),
 });

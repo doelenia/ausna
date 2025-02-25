@@ -1,8 +1,20 @@
 /* trunk-ignore-all(prettier) */
 import {v} from "convex/values";
 
-import {mutation, query} from "./_generated/server";
+import {action, mutation, query, QueryCtx} from "./_generated/server";
 import {Doc, Id} from "./_generated/dataModel";
+import {createConcept} from "./concepts";
+import { Block, InlineContent, StyledText, Link } from "@blocknote/core";
+import { api } from "../convex/_generated/api";
+import { is } from "@blocknote/core/types/src/i18n/locales";
+
+interface blockContent {
+	type: string;
+	text: string;
+	href: string;
+	alias: string;
+}
+
 
 export const archive = mutation({
 	args: { id: v.id("documents") },
@@ -91,6 +103,11 @@ export const create = mutation ({
 	args: {
 		title: v.string(),
 		parentDocument: v.optional(v.id("documents")),
+		type: v.optional(v.string()),
+		isArchived: v.optional(v.boolean()),
+		sourceFile: v.optional(v.string()),
+		content: v.optional(v.string()),
+		typePropsID: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -104,14 +121,13 @@ export const create = mutation ({
 		const document = await ctx.db.insert("documents", {
 			title: args.title,
 			userId: userId,
-			type: "page",
+			type: args.type? args.type : "page",
 			isArchived: false,
 			parentDocument: args.parentDocument,
 			isPublished: false,
+			typePropsID: args.typePropsID,
 		});
-
 		return document;
-
 	}
 });
 
@@ -344,11 +360,11 @@ export const removeIcon = mutation({
 			throw new Error("Unauthorized");
 		}
 
-		const document = await ctx.db.patch(args.id, {
+		const documents = await ctx.db.patch(args.id, {
 			icon: undefined,
 		});
 
-		return document;
+		return documents;
 	}
 });
 
@@ -381,86 +397,9 @@ export const removeCoverImage = mutation({
 	}
 });
 
-// CONCEPTS
-
-export const createConcept = mutation({
-	args: {
-		title: v.string(),
-	},
+export const searchDocumentTitle = query({
+	args: { title: v.string() },
 	handler: async (ctx, args) => {
-		const identity = await ctx.auth.getUserIdentity();
-
-		if (!identity) {
-			throw new Error("Not authenticated");
-		}
-
-		const userId = identity.subject;
-
-		const concept_document = await ctx.db.insert("documents", {
-			title: args.title,
-			userId: userId,
-			type: "concept",
-			isArchived: false,
-			isPublished: false,
-		});
-
-		const concept = await ctx.db.insert("concepts", {
-			userId: userId,
-			aliaslist: [args.title],
-			IsSynced: false,
-			rootDocument: concept_document,
-		});
-
-		// set typePropsID of concept_document to concept as a string
-		await ctx.db.patch(concept_document, {
-			typePropsID: concept,
-		});
-
-		return concept_document;
-	}
-});
-
-export const addKnowledgeToConcept = mutation({
-	args: {
-		conceptId: v.id("documents"),
-		knowledgeId: v.id("knowledges"),
-	},
-	handler: async (ctx, args) => {
-		const identity = await ctx.auth.getUserIdentity();
-
-		if (!identity) {
-			throw new Error("Not authenticated");
-		}
-
-		const userId = identity.subject;
-
-		const concept = await ctx.db.get(args.conceptId);
-
-		if (!concept) {
-			throw new Error("Concept not found");
-		}
-
-		if (concept.userId !== userId) {
-			throw new Error("Unauthorized");
-		}
-
-		const documents = await ctx.db.patch(args.conceptId, {
-			props: {
-				knowledges: [
-					...(concept.props.knowledges || []),
-					{
-						knowledgeId: args.knowledgeId,
-					},
-				],
-			},
-		});
-
-		return documents;
-	}
-});
-
-export const getConceptSearch = query({
-	handler: async (ctx) => {
 		const identity = await ctx.auth.getUserIdentity();
 
 		if (!identity) {
@@ -470,19 +409,154 @@ export const getConceptSearch = query({
 		const userId = identity.subject;
 
 		const documents = await ctx.db.query("documents")
-			.withIndex("by_user", (q) =>
-				q
-					.eq("userId", userId)
+			.withSearchIndex("search_title", (q) =>
+				q.search("title", args.title).eq("userId", userId)
 			)
-			.filter((q) =>
-				q.eq(q.field("isArchived"), false)
-			)
-			.filter((q) =>
-				q.eq(q.field("type"), "concept")
-			)
-			.order("desc")
 			.collect();
 
 		return documents;
+	}
+});
+
+export const getDocumentContainsKeyword = query({
+	args: { keyword: v.string() },
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+
+		const userId = identity.subject;
+
+		const documents = await ctx.db.query("documents")
+			.withSearchIndex("search_content", (q) =>
+				q.search("content", args.keyword).eq("userId", userId)
+			)
+			.collect();
+
+		return documents;
+	}
+});
+
+
+export const getBlocksContainsConcept = action({
+	args: { conceptId: v.id("concepts")},
+
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+
+		const userId = identity.subject;
+
+		const concept = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});;
+
+		if (!concept) {
+			throw new Error("GBCC: concept not existed");
+		}
+
+		const result: Record<string, [Block, Id<"documents">]> = {};
+
+		for (const keyword of concept.aliasList) {
+
+			const documents = await ctx.runQuery(api.documents.getDocumentContainsKeyword, {keyword: keyword});
+
+
+			async function searchBlocks(blocks: Block[], documentId: Id<"documents">): Promise<void> {
+				for (const block of blocks) {
+					if (block.content) {
+						const content = block.content as unknown as string;
+						if (content.includes(keyword)) {
+
+							const isContained = await ctx.runAction(api.knowledgeDatas.isContainConcept, {blockText: content, documentId: documentId, conceptId: args.conceptId})
+
+							if (isContained) {
+							result[block.id] = [block, documentId];
+								continue;
+							}
+						}
+					}
+					if (block.children && block.children.length > 0) {
+						await searchBlocks(block.children, documentId);
+					}
+				}
+			}
+
+			for (const document of documents) {
+				const docBlocks = document.content as unknown as Block[];
+				searchBlocks(docBlocks, document._id);
+			}
+		}
+    return result;
+	}
+});
+
+export const getBlockById = query({
+	args: { documentId: v.id("documents"), blockId: v.string() },
+
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+
+		if (!identity) {
+			throw new Error("Not authenticated");
+		}
+
+		const userId = identity.subject;
+
+		const document = await ctx.db.get(args.documentId);
+
+		if (!document) {
+			throw new Error("Document not found");
+		}
+
+		if (document.userId !== userId) {
+			throw new Error("Unauthorized");
+		}
+
+		const block = document.content as unknown as Block[];
+
+		const result = await findBlock(ctx, args.blockId, block);
+
+		return result as Block | null;
+	}
+});
+
+async function findBlock(ctx: QueryCtx, blockId: string, blocks: Block[]): Promise<Block | null> {
+  for (const block of blocks) {
+		if (block.id === blockId) {
+			return block;
+		}
+		if (block.children && block.children.length > 0) {
+			const found = findBlock(ctx, blockId, block.children);
+			if (found) {
+					return found;
+			}
+		}
+	}
+	return null;
+}
+
+export const getBlockTextFromBlock = action({
+	args: { block: v.any() },
+
+	handler: async (ctx, args) => {
+		const block = args.block as unknown as Block;
+		const blockContent = block.content as unknown as blockContent[];
+
+		return blockContent.map(content => {
+				switch (content.type) {
+						case "text":
+								return content.text;
+						case "link":
+								return `<LINK> ${content.href} <LINK>`;
+						case "conceptKeyword":
+								return `<CONCEPT> ${content.alias} <CONCEPT>`;
+						default:
+								return "";
+				}
+		}).join(" ");
 	}
 });

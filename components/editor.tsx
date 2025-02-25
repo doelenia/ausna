@@ -28,7 +28,7 @@ import { useEdgeStore } from "@/lib/edgestore";
 
 import { ConceptKeyword } from "./ausna-features/inline/concept-keyword";
 import { query } from "@/convex/_generated/server";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
@@ -49,10 +49,10 @@ const Editor = ({
 }: EditorProps) => {
 	const { edgestore } = useEdgeStore();
 	const { resolvedTheme } = useTheme();
-	const concepts = useQuery(api.documents.getConceptSearch);
-	const createConcept = useMutation(api.documents.createConcept);
-	const createKnowledge = useMutation(api.knowledges.create);
-	const addKnowledge = useMutation(api.documents.addKnowledgeToConcept);
+	const concepts = useQuery(api.concepts.getAllConcepts);
+	const addConcept = useAction(api.concepts.addConcept);
+	// const createKnowledge = useMutation(api.knowledgeDatas.addKD);
+	const addKD = useAction(api.knowledgeDatas.addKD);
 
 	const [block, setBlock] = useState<Block>();
 
@@ -85,8 +85,11 @@ const Editor = ({
 			title: `Add "${query}" as a new concept`,
 
 			onItemClick: () => {
-				const promise = createConcept({
-					title: query,
+				const promise = addConcept({
+					alias: [query],
+					isSynced: false,
+					sourceId: documentId,
+					blockId: block.id,
 				});
 				promise.then((conceptId) => {
 					editor.insertInlineContent([
@@ -99,47 +102,27 @@ const Editor = ({
 						},
 						" ", // add a space after the concept keyword
 					]);
-					const promise = createKnowledge({
-						conceptId: conceptId,
-						sourceId: documentId,
-						blockId: block.id,
-					}).then((knowledgeId) => {
-						addKnowledge({
-							conceptId: conceptId,
-							knowledgeId: knowledgeId,
-						});
-					});
-					toast.promise(promise, {
-						loading: "Connecting a new knowledge to concept ...",
-						success: "Knowledge Connected",
-						error: "Failed to connect knowledge",
-					})
 				});
 			},
 		});
-		console.log("finish 2");
+
 		const menuItems = concepts?.map((concept) => ({
-			title: concept.title,
+			title: concept.aliasList[0],
 			onItemClick: () => {
 				editor.insertInlineContent([
 					{
 						type: "conceptKeyword",
 						props: {
-							alias: concept.title,
+							alias: concept.aliasList[0],
 							id: concept._id,
 						},
 					},
 					" ", // add a space after the concept keyword
 				]);
-				const promise = createKnowledge({
+				const promise = addKD({
 					conceptId: concept._id,
 					sourceId: documentId,
 					blockId: block.id,
-				}).then((knowledgeId) => {
-					addKnowledge({
-						conceptId: concept._id,
-						knowledgeId: knowledgeId,
-					});
 				});
 				toast.promise(promise, {
 					loading: "Connecting a new knowledge to concept ...",
@@ -148,7 +131,7 @@ const Editor = ({
 				})
 			},
 		}));
-		console.log("finish 3");
+
 		if (menuItems === undefined) {
 			return [addNewConcept(editor)];
 		}
