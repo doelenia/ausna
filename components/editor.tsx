@@ -40,13 +40,12 @@ interface EditorProps {
 	editable?: boolean;
 }
 
-
-const Editor = ({
+export default function Editor({
 	documentId,
 	onChange,
 	initialContent,
 	editable
-}: EditorProps) => {
+}: EditorProps) {
 	const { edgestore } = useEdgeStore();
 	const { resolvedTheme } = useTheme();
 	const concepts = useQuery(api.concepts.getAllConcepts);
@@ -63,7 +62,8 @@ const Editor = ({
 	const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	
 	// Get the sync action
-	const syncConceptKeyword = useAction(api.documents.SyncConceptKeyword);
+	const syncAllConcepts = useAction(api.documents.syncAllConceptKeywords);
+
 
 	const handleUpload = async (file: File) => {
 		const res = await edgestore.publicFiles.upload({
@@ -173,18 +173,8 @@ const Editor = ({
 		uploadFile: handleUpload,
 	});
 
-	// Handler for editor changes
-	const handleEditorChange = async (editor: any) => {
-		// Get current cursor position to find current block
-		const selection = editor.getSelection();
-		let currentBlock: Block;
-		
-		if (selection) {
-			currentBlock = selection.blocks[0];
-		} else {
-			currentBlock = editor.getTextCursorPosition().block;
-		}
-
+	// Simplified handler for editor changes
+	const handleEditorChange = async () => {
 		// Clear previous timeout
 		if (syncTimeoutRef.current) {
 			clearTimeout(syncTimeoutRef.current);
@@ -193,24 +183,12 @@ const Editor = ({
 		// Set new timeout for sync
 		syncTimeoutRef.current = setTimeout(async () => {
 			try {
-				await syncConceptKeyword({
-					documentId,
-					blockId: currentBlock.id
-				});
+				await syncAllConcepts({ documentId });
 			} catch (error) {
 				console.error("Failed to sync concept keywords:", error);
 			}
 		}, 5000); // 5 seconds delay
 	};
-
-	// Cleanup timeout on unmount
-	useEffect(() => {
-		return () => {
-			if (syncTimeoutRef.current) {
-				clearTimeout(syncTimeoutRef.current);
-			}
-		};
-	}, []);
 
 	// Modify handleBlockChange to accept isDeleted parameter
 	const handleBlockChange = async (block: Block) => {
@@ -247,9 +225,7 @@ const Editor = ({
 		}
 	};
 
-
 	const [page, setPage] = useState<Block[]>(editor.document);
-
 
 	return (
 		<div>
@@ -262,7 +238,7 @@ const Editor = ({
 					onChange(JSON.stringify(editor.document, null, 2));
 					const changedBlock = editor.getTextCursorPosition().block;
 					handleBlockChange(changedBlock);
-					handleEditorChange(editor);
+					handleEditorChange();
 				}}
 				onSelectionChange={() => {
 					setBlock(editor.getTextCursorPosition().block);
@@ -287,5 +263,3 @@ const Editor = ({
 		</div>
 	)
 }
-
-export default Editor;

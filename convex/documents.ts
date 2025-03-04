@@ -921,12 +921,13 @@ export const SyncConceptKeyword = action({
 		// Get new concept IDs from conceptKeywords
 		const newConceptIds = conceptKeywords.map(([_, id]) => id);
 
-		// Update blocks with merged concept IDs
+		// Update blocks with merged concept IDs and mark as synced
 		const updatedBlocks = document.fileInspect.blocks.map(b =>
 			b.blockId === args.blockId
 				? {
 						...b,
 						edited: true,
+						conceptSynced: true, // Mark as synced
 						blockMentionedConcepts: Array.from(new Set([
 							...b.blockMentionedConcepts,
 							...newConceptIds
@@ -1083,6 +1084,36 @@ export const addConceptKeyword = mutation({
 				blocks: updatedBlocks
 			}
 		});
+
+		return true;
+	}
+});
+
+export const syncAllConceptKeywords = action({
+	args: {
+		documentId: v.id("documents")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const document = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		if (!document?.fileInspect) return;
+
+		// Find all blocks that need concept syncing
+		const unsyncedBlocks = document.fileInspect.blocks.filter(
+			block => block.conceptSynced === false
+		);
+
+		// Sync each unsynced block
+		for (const block of unsyncedBlocks) {
+			await ctx.runAction(api.documents.SyncConceptKeyword, {
+				documentId: args.documentId,
+				blockId: block.blockId
+			});
+		}
 
 		return true;
 	}

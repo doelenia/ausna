@@ -205,12 +205,7 @@ export const fetchConceptKeywords = action({
 				- entity_description: Comprehensive description of the entity's attributes and activities
 				Format each entity as ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
 				
-				2. Return output in English as a single list of all the entities identified in steps 1. The format should be like this:
-				[
-				tuple_1, 
-				tuple_2, 
-				...
-				]
+				2. Return output in English as a single list of all the entities identified in steps 1. 2. Use **{record_delimiter}** as the list delimiter.
 
 				 
 				######################
@@ -223,9 +218,7 @@ export const fetchConceptKeywords = action({
 				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
 				######################
 				Output:
-				[("entity"{tuple_delimiter}CENTRAL INSTITUTION{tuple_delimiter}ORGANIZATION{tuple_delimiter}The Central Institution is the Federal Reserve of Verdantis, which is setting interest rates on Monday and Thursday), 
-				("entity"{tuple_delimiter}MARTIN SMITH{tuple_delimiter}PERSON{tuple_delimiter}Martin Smith is the chair of the Central Institution), 
-				("entity"{tuple_delimiter}MARKET STRATEGY COMMITTEE{tuple_delimiter}ORGANIZATION{tuple_delimiter}The Central Institution committee makes key decisions about interest rates and the growth of Verdantis's money supply)]
+				("entity"{tuple_delimiter}CENTRAL INSTITUTION{tuple_delimiter}ORGANIZATION{tuple_delimiter}The Central Institution is the Federal Reserve of Verdantis, which is setting interest rates on Monday and Thursday)**{record_delimiter}**("entity"{tuple_delimiter}MARTIN SMITH{tuple_delimiter}PERSON{tuple_delimiter}Martin Smith is the chair of the Central Institution)**{record_delimiter}**("entity"{tuple_delimiter}MARKET STRATEGY COMMITTEE{tuple_delimiter}ORGANIZATION{tuple_delimiter}The Central Institution committee makes key decisions about interest rates and the growth of Verdantis's money supply)
 
 				######################
 				Example 2:
@@ -237,8 +230,7 @@ export const fetchConceptKeywords = action({
 				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
 				######################
 				Output:
-				[("entity"{tuple_delimiter}TECHGLOBAL{tuple_delimiter}ORGANIZATION{tuple_delimiter}TechGlobal is a stock now listed on the Global Exchange which powers 85% of premium smartphones), 
-				("entity"{tuple_delimiter}VISION HOLDINGS{tuple_delimiter}ORGANIZATION{tuple_delimiter}Vision Holdings is a firm that previously owned TechGlobal)]
+				("entity"{tuple_delimiter}TECHGLOBAL{tuple_delimiter}ORGANIZATION{tuple_delimiter}TechGlobal is a stock now listed on the Global Exchange which powers 85% of premium smartphones)**{record_delimiter}**("entity"{tuple_delimiter}VISION HOLDINGS{tuple_delimiter}ORGANIZATION{tuple_delimiter}Vision Holdings is a firm that previously owned TechGlobal)
 				`, // To be filled
 			question: `
 				{Entity Types}: ${entityTypeListStr}
@@ -249,9 +241,13 @@ export const fetchConceptKeywords = action({
 		});
 
 		const conceptKeywords: Array<[string, Id<"concepts">]> = [];
-		const tuples = entitiesStr.split("), (").map(t => t.replace(/[()]/g, ""));
+
+		console.log("entitiesStr: ", entitiesStr);
+
+		const tuples = entitiesStr.split(")**{record_delimiter}**(").map(t => t.replace(/[()]/g, ""));
 
 		for (const tuple of tuples) {
+			console.log("CURRENT TUPLE: ", tuple);
 			const [entity, name, type, description] = tuple.split("{tuple_delimiter}");
 			
 			// Get synonyms for entity
@@ -295,8 +291,11 @@ export const fetchConceptKeywords = action({
 				`, // To be filled
 				question: `${entity}, ${type}, ${description}`
 			});
+
+			console.log("synonymsStr: ", synonymsStr);
 			
-			// remove the first and last character of synonymsStr
+			// remove the first and last character of synonymsStr, in format [synonym_1, synonym_2, ...]
+
 			const synonyms = synonymsStr.slice(1, -1).split(",").map(s => s.trim());
 			console.log(synonyms);
 
@@ -310,11 +309,13 @@ export const fetchConceptKeywords = action({
 				concepts.forEach(c => matchingConcepts.add(c._id));
 			}
 
+			console.log("matchingConcepts: ", matchingConcepts);
+
 			let conceptId: Id<"concepts">;
 			if (matchingConcepts.size === 0) {
 				// Create new concept if no matches found
 				conceptId = await ctx.runAction(api.concepts.addConcept, {
-					alias: [name, ...synonyms],
+					alias: [name],
 					description: description,
 					isSynced: false,
 					sourceId: args.documentId
@@ -324,6 +325,9 @@ export const fetchConceptKeywords = action({
 				conceptId = Array.from(matchingConcepts)[0];
 			} else {
 				// Ask LLM to choose best match
+
+				console.log("ASKING FOR BEST MATCH");
+
 				const bestMatchStr = await ctx.runAction(api.llm.askLLM, {
 					role: `-Goal-
 					Given a text document that is potentially relevant to this activity and a entity, identify the best match concept from the list of candidates.
@@ -332,6 +336,8 @@ export const fetchConceptKeywords = action({
 					1. Identify the best match concept from the list of candidates.
 					
 					2. Return the concept id of the best match concept.
+
+					3. Return only strictly the concept id, no other text or characters.
 
 					######################
 					-Examples-
@@ -350,10 +356,15 @@ export const fetchConceptKeywords = action({
 					})
 				});
 				conceptId = bestMatchStr as Id<"concepts">;
+
+				console.log("conceptId: ", conceptId);
 			}
 
 			conceptKeywords.push([name, conceptId]);
+			console.log("FINISHED FOR CURRENT TUPLE: ", tuple);
 		}
+
+		console.log("FINISHED FOR ALL TUPLES");
 
 		return conceptKeywords;
 	}
