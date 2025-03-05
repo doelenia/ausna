@@ -1102,9 +1102,9 @@ export const syncAllConceptKeywords = action({
 		});
 		if (!document?.fileInspect) return;
 
-		// Find all blocks that need concept syncing
+		// Find all blocks that need concept syncing also not deleted
 		const unsyncedBlocks = document.fileInspect.blocks.filter(
-			block => block.conceptSynced === false
+			block => block.conceptSynced === false && !block.toRemove
 		);
 
 		// Sync each unsynced block
@@ -1114,6 +1114,101 @@ export const syncAllConceptKeywords = action({
 				blockId: block.blockId
 			});
 		}
+
+		return true;
+	}
+});
+
+export const syncFileInspect = action({
+	args: {
+		documentId: v.id("documents"),
+		blockId: v.string(),
+		prevBlocks: v.array(v.any()),
+		currentBlocks: v.array(v.any())
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const document = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		if (!document?.fileInspect) return;
+
+		const currentBlockIds = new Set(args.currentBlocks.map(block => block.id));
+		const prevBlockIds = new Set(args.prevBlocks.map(block => block.id));
+
+		// Create a new blocks array with all updates
+		let updatedBlocks = [...document.fileInspect.blocks];
+
+		// 1. Mark deleted blocks
+		updatedBlocks = updatedBlocks.map(blockInspect => 
+			!currentBlockIds.has(blockInspect.blockId)
+				? { ...blockInspect, edited: true, toRemove: true }
+				: blockInspect
+		);
+
+		// 2. Update or add new/modified blocks
+		for (const currentBlock of args.currentBlocks) {
+			const prevBlock = args.prevBlocks.find(b => b.id === currentBlock.id);
+			const existingBlockIndex = updatedBlocks.findIndex(b => b.blockId === currentBlock.id);
+			
+			// Check if block is new or content changed
+			const isModified = !prevBlockIds.has(currentBlock.id) || 
+				JSON.stringify(prevBlock?.content) !== JSON.stringify(currentBlock.content);
+
+			if (isModified) {
+				const blockUpdate = {
+					blockId: currentBlock.id,
+					edited: true,
+					conceptSynced: false,
+					toRemove: false,
+					conceptKnowledge: {},
+					blockMentionedConcepts: [],
+					references: []
+				};
+
+				if (existingBlockIndex === -1) {
+					// Add new block
+					updatedBlocks.push(blockUpdate);
+				} else {
+					// Update existing block
+					updatedBlocks[existingBlockIndex] = {
+						...updatedBlocks[existingBlockIndex],
+						...blockUpdate
+					};
+				}
+			}
+		}
+
+		// 3. Mark the input blockId as edited
+		const inputBlockIndex = updatedBlocks.findIndex(b => b.blockId === args.blockId);
+		if (inputBlockIndex === -1) {
+			updatedBlocks.push({
+				blockId: args.blockId,
+				edited: true,
+				conceptSynced: false,
+				toRemove: false,
+				conceptKnowledge: {},
+				blockMentionedConcepts: [],
+				references: []
+			});
+		} else {
+			updatedBlocks[inputBlockIndex] = {
+				...updatedBlocks[inputBlockIndex],
+				edited: true,
+				conceptSynced: false
+			};
+		}
+
+		// Update document with all changes in one mutation
+		await ctx.runMutation(api.documents.update, {
+			id: args.documentId,
+			fileInspect: {
+				...document.fileInspect,
+				blocks: updatedBlocks
+			}
+		});
 
 		return true;
 	}

@@ -205,7 +205,10 @@ export const fetchConceptKeywords = action({
 				- entity_description: Comprehensive description of the entity's attributes and activities
 				Format each entity as ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
 				
-				2. Return output in English as a single list of all the entities identified in steps 1. 2. Use **{record_delimiter}** as the list delimiter.
+				2. Return output in English as a single list of all the entities identified in steps 1. Use **{record_delimiter}** as the list delimiter. 
+				
+				-Warning-
+				If there is no additional entities, please strictly return '**No additional entities identified**'
 
 				 
 				######################
@@ -239,6 +242,11 @@ export const fetchConceptKeywords = action({
 				${blockText}
 			`
 		});
+
+		// if there is no additional entities (contains "**No additional entities identified**"), return an empty array
+		if (entitiesStr.includes("No additional entities identified")) {
+			return [];
+		}
 
 		const conceptKeywords: Array<[string, Id<"concepts">]> = [];
 

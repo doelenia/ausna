@@ -62,8 +62,24 @@ export default function Editor({
 	const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	
 	// Get the sync action
-	const syncAllConcepts = useAction(api.documents.syncAllConceptKeywords);
+	const syncAllConceptKeywords = useAction(api.documents.syncAllConceptKeywords);
 
+	const syncFileInspect = useAction(api.documents.syncFileInspect);
+
+	// Add debounce ref for file inspect sync
+	const fileInspectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+	// Cleanup timeouts on unmount
+	useEffect(() => {
+		return () => {
+			if (syncTimeoutRef.current) {
+				clearTimeout(syncTimeoutRef.current);
+			}
+			if (fileInspectTimeoutRef.current) {
+				clearTimeout(fileInspectTimeoutRef.current);
+			}
+		};
+	}, []);
 
 	const handleUpload = async (file: File) => {
 		const res = await edgestore.publicFiles.upload({
@@ -173,56 +189,42 @@ export default function Editor({
 		uploadFile: handleUpload,
 	});
 
-	// Simplified handler for editor changes
+	// Debounced handler for editor changes
 	const handleEditorChange = async () => {
-		// Clear previous timeout
 		if (syncTimeoutRef.current) {
 			clearTimeout(syncTimeoutRef.current);
 		}
 
-		// Set new timeout for sync
 		syncTimeoutRef.current = setTimeout(async () => {
 			try {
-				await syncAllConcepts({ documentId });
+				await syncAllConceptKeywords({ documentId });
 			} catch (error) {
 				console.error("Failed to sync concept keywords:", error);
 			}
-		}, 5000); // 5 seconds delay
+		}, 5000);
 	};
 
-	// Modify handleBlockChange to accept isDeleted parameter
+	// Debounced handler for block changes
 	const handleBlockChange = async (block: Block) => {
 		const currentBlocks = editor.document;
-		const currentBlockIds = new Set(currentBlocks.map(block => block.id));
-		var deletedBlock = false;
-		
-		// Check deleted blocks with Promise
-		const checkDeletedBlocks = async () => {
-			for (const block of prevBlocks) {
-				if (!currentBlockIds.has(block.id)) {
-					await markBlockEdited({
-						documentId,
-						blockId: block.id,
-						isDeleted: true
-					});
-					deletedBlock = true;
-				}
-			}
-		};
 
-		await checkDeletedBlocks();
-		setPrevBlocks(currentBlocks);
-
-		if (!deletedBlock) {
-			const updatedBlockInspect = await markBlockEdited({
-				documentId,
-				blockId: block.id,
-				isDeleted: false
-			});
-			if (updatedBlockInspect) {
-				console.log("Updated block inspect:", updatedBlockInspect);
-			}
+		if (fileInspectTimeoutRef.current) {
+			clearTimeout(fileInspectTimeoutRef.current);
 		}
+
+		fileInspectTimeoutRef.current = setTimeout(async () => {
+			try {
+				await syncFileInspect({
+					documentId,
+					blockId: block.id,
+					prevBlocks,
+					currentBlocks
+				});
+				setPrevBlocks(currentBlocks);
+			} catch (error) {
+				console.error("Failed to sync file inspect:", error);
+			}
+		}, 1000); // Shorter timeout for file inspect updates
 	};
 
 	const [page, setPage] = useState<Block[]>(editor.document);
