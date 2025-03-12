@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 
 import {
 	Block,
@@ -69,17 +69,85 @@ export default function Editor({
 	// Add debounce ref for file inspect sync
 	const fileInspectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-	// Cleanup timeouts on unmount
+	const inspectDocument = useAction(api.documents.InspectDocument);
+	const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const lastActivityRef = useRef<number>(Date.now());
+
+	// Cleanup function for all timeouts
 	useEffect(() => {
 		return () => {
-			if (syncTimeoutRef.current) {
-				clearTimeout(syncTimeoutRef.current);
-			}
-			if (fileInspectTimeoutRef.current) {
-				clearTimeout(fileInspectTimeoutRef.current);
-			}
+			if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+			if (fileInspectTimeoutRef.current) clearTimeout(fileInspectTimeoutRef.current);
+			if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
 		};
 	}, []);
+
+	// Handle route changes (document switching)
+	useEffect(() => {
+		const handleRouteChange = async () => {
+			try {
+				await inspectDocument({ documentId });
+			} catch (error) {
+				console.error("Failed to inspect document on route change:", error);
+			}
+		};
+
+		// Add listeners for route changes
+		window.addEventListener('beforeunload', handleRouteChange);
+		window.addEventListener('visibilitychange', () => {
+			if (document.visibilityState === 'hidden') {
+				handleRouteChange();
+			}
+		});
+
+		return () => {
+			window.removeEventListener('beforeunload', handleRouteChange);
+			window.removeEventListener('visibilitychange', handleRouteChange);
+			handleRouteChange(); // Run inspection when component unmounts
+		};
+	}, [documentId, inspectDocument]);
+
+	// Handle inactivity
+	const resetInactivityTimer = useCallback(() => {
+		if (inactivityTimeoutRef.current) {
+			clearTimeout(inactivityTimeoutRef.current);
+		}
+
+		lastActivityRef.current = Date.now();
+
+		inactivityTimeoutRef.current = setTimeout(async () => {
+			const timeSinceLastActivity = Date.now() - lastActivityRef.current;
+			if (timeSinceLastActivity >= 60000) { // 1 minute
+				try {
+					await inspectDocument({ documentId });
+				} catch (error) {
+					console.error("Failed to inspect document after inactivity:", error);
+				}
+			}
+		}, 60000); // Check every minute
+	}, [documentId, inspectDocument]);
+
+	// Add activity listeners
+	useEffect(() => {
+		const activityEvents = ['mousedown', 'keydown', 'mousemove', 'wheel', 'touchstart'];
+		
+		const handleActivity = () => {
+			resetInactivityTimer();
+		};
+
+		activityEvents.forEach(event => {
+			window.addEventListener(event, handleActivity);
+		});
+
+		// Start initial timer
+		resetInactivityTimer();
+
+		return () => {
+			activityEvents.forEach(event => {
+				window.removeEventListener(event, handleActivity);
+			});
+		};
+	}, [resetInactivityTimer]);
 
 	const handleUpload = async (file: File) => {
 		const res = await edgestore.publicFiles.upload({
@@ -189,8 +257,9 @@ export default function Editor({
 		uploadFile: handleUpload,
 	});
 
-	// Debounced handler for editor changes
+	// Update editor onChange to include activity tracking
 	const handleEditorChange = async () => {
+		resetInactivityTimer();
 		if (syncTimeoutRef.current) {
 			clearTimeout(syncTimeoutRef.current);
 		}
@@ -244,6 +313,7 @@ export default function Editor({
 				}}
 				onSelectionChange={() => {
 					setBlock(editor.getTextCursorPosition().block);
+					resetInactivityTimer();
 				}}
 			>
 				<SuggestionMenuController

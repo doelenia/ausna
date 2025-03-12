@@ -707,6 +707,11 @@ export const InspectDocument = action({
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
 
+		// First sync all concept keywords
+		await ctx.runAction(api.documents.syncAllConceptKeywords, {
+			documentId: args.documentId
+		});
+
 		const document = await ctx.runQuery(api.documents.getById, {
 			documentId: args.documentId
 		});
@@ -722,6 +727,8 @@ export const InspectDocument = action({
 					documentId: args.documentId,
 					blockInspect: blockInspect
 				});
+				//remove the blockInspect from the document.fileInspect.blocks
+				document.fileInspect.blocks = document.fileInspect.blocks.filter(b => b.blockId !== blockInspect.blockId);
 				continue;
 			}
 
@@ -874,6 +881,8 @@ export const removeBlock = action({
 		);
 
 		// 5. Update document's fileInspect
+		console.log("Updated blocks:", updatedBlocks);
+
 		await ctx.runMutation(api.documents.update, {
 			id: args.documentId,
 			fileInspect: {
@@ -881,6 +890,12 @@ export const removeBlock = action({
 				blocks: updatedBlocks
 			}
 		});
+
+		// fetch the document again and log the fileInspect
+		const updatedDocument = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		console.log("Updated document:", updatedDocument?.fileInspect);
 
 		return true;
 	}

@@ -55,40 +55,75 @@ export default defineSchema({
 		filterFields: ["userId"],
 	}),
 
-	objectTags: defineTable({
+	objectTagProperties: defineTable({
 		userId: v.string(),
-		conceptId: v.id("concepts"),
-		objectConceptId: v.id("concepts"),
+		objectTagId: v.id("objectTags"),
+		propertyName: v.optional(v.string()),
+		objectPropertiesTemplateId: v.optional(v.id("objectPropertiesTemplates")),
+		value: v.optional(v.any()),
+		type: v.optional(v.string()),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
-		templateID: v.optional(v.id("objectTemplates")),
-		propsList: v.optional(v.array(v.string())),
+		sourceKDsString: v.optional(v.string()),
 	})
 	.index("by_user", ["userId"])
-	.index("by_concept", ["conceptId"]),
+	.index("by_object_tag", ["userId", "objectTagId"])
+	.searchIndex("search_source_kd", {
+    searchField: "sourceKDsString",
+    filterFields: ["userId"],
+  }),
+
+	objectTags: defineTable({
+		userId: v.string(),
+		objectName: v.string(),
+		objectDescription: v.optional(v.string()),
+		conceptId: v.id("concepts"),
+		objectConceptId: v.id("concepts"),
+		sourceKDsString: v.optional(v.string()),
+		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
+		templateID: v.optional(v.id("objectTemplates")),
+	})
+	.index("by_user", ["userId"])
+	.index("by_concept", ["userId", "conceptId"])
+	.searchIndex("search_source_kd", {
+    searchField: "sourceKDsString",
+    filterFields: ["userId"],
+  }),
 
 	objectTemplates: defineTable({
 		userId: v.string(),
 		conceptId: v.id("concepts"),
 		templateName: v.string(),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
-		propsList: v.optional(v.array(v.string())),
+		description: v.optional(v.string()),
+		propsList: v.optional(v.array(v.id("objectPropertiesTemplates"))),
 	})
 	.index("by_user", ["userId"])
-	.index("by_concept", ["conceptId"]),
+	.index("by_concept", ["userId", "conceptId"]),
 
+	objectPropertiesTemplates: defineTable({
+		userId: v.string(),
+		objectTemplateId: v.id("objectTemplates"),
+		propertyName: v.string(),
+		type: v.string(),
+	})
+	.index("by_user", ["userId"])
+	.index("by_object_template", ["userId", "objectTemplateId"]),
 
 	knowledgeDatas: defineTable({
 		userId: v.string(),
 		sourceFile: v.id("documents"),
 		sourceSection: v.optional(v.string()),
 		isProcessed: v.boolean(),
+		isUpdated: v.boolean(),
 		conceptId: v.id("concepts"),
 		contributions: v.optional(v.array(v.string())),
 		knowledge: v.optional(v.string()),
 	})
 	.index("by_user", ["userId"])
 	.index("by_concept", ["userId", "conceptId"])
-	.index("by_source_file", ["sourceFile"]),
+	.index("by_source_file", ["sourceFile"])
+	.index("by_isProcessed_concept", ["userId", "conceptId", "isProcessed"])
+	.index("by_isUpdated_concept", ["userId", "conceptId", "isUpdated"]),
 
 	references: defineTable({
 		userId: v.string(),

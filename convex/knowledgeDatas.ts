@@ -58,6 +58,7 @@ export const create = mutation({
 			isProcessed: false,
 			conceptId: args.conceptId,
 			knowledge: args.knowledge,
+			isUpdated: false
 		});
 
 		return knowledge;
@@ -189,7 +190,8 @@ export const updateKD = mutation({
 	args: {
 		knowledgeId: v.id("knowledgeDatas"),
 		knowledge: v.optional(v.string()),
-		isProcessed: v.optional(v.boolean())
+		isProcessed: v.optional(v.boolean()),
+		isUpdated: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -200,3 +202,46 @@ export const updateKD = mutation({
 	}
 });
 //fetchKD is at llm
+
+export const getUpdatedKDbyConceptId = query({
+	args: {
+		conceptId: v.id("concepts"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const KDs = await ctx.db.query("knowledgeDatas")
+		.withIndex("by_isUpdated_concept", (q) =>
+			q
+				.eq("userId", userId)
+				.eq("conceptId", args.conceptId)
+				.eq("isUpdated", true)
+		)
+		.collect();
+
+		return KDs;
+	}	
+});
+
+export const getKDById = query({
+	args: {
+		knowledgeId: v.id("knowledgeDatas"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const knowledge = await ctx.db.get(args.knowledgeId);
+
+		if (!knowledge) throw new Error("Knowledge not existed");
+
+		if (knowledge.userId !== userId) throw new Error("Permission denied");
+
+		return knowledge;
+	}
+});
