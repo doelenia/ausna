@@ -7,6 +7,7 @@ import {api} from "../convex/_generated/api";
 export const createObjectTagProperty = mutation({
 	args: {
 		objectTagId: v.id("objectTags"),
+		conceptId: v.id("concepts"),
 		propertyName: v.string(),
 		value: v.any(),
 		type: v.string(),
@@ -23,6 +24,7 @@ export const createObjectTagProperty = mutation({
 
 		const propertyId = await ctx.db.insert("objectTagProperties", {
 			userId: identity.subject,
+			conceptId: args.conceptId,
 			objectTagId: args.objectTagId,
 			propertyName: args.propertyName,
 			value: args.value,

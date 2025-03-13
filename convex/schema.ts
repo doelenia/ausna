@@ -57,6 +57,7 @@ export default defineSchema({
 
 	objectTagProperties: defineTable({
 		userId: v.string(),
+		conceptId: v.id("concepts"),
 		objectTagId: v.id("objectTags"),
 		propertyName: v.optional(v.string()),
 		objectPropertiesTemplateId: v.optional(v.id("objectPropertiesTemplates")),

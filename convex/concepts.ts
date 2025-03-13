@@ -160,7 +160,8 @@ export const syncConcept = action({
 				await ctx.runMutation(api.knowledgeDatas.updateKD, {
 					knowledgeId: kd._id,
 					knowledge: knowledge,
-					isProcessed: false
+					isProcessed: true,
+					isUpdated: true
 				});
 			}
 		}
@@ -178,11 +179,16 @@ export const syncConcept = action({
 			IsSynced: true
 		});
 
-		for (const kd of knowledgeDatas) {
-			if (!kd.isProcessed && kd.sourceSection) {
+		// get all updated knowledge data
+		const updatedKnowledgeDatas = await ctx.runQuery(api.knowledgeDatas.getUpdatedKDbyConceptId, {
+			conceptId: args.conceptId
+		});
+
+		for (const kd of updatedKnowledgeDatas) {
+			if (kd.isUpdated) {
 				await ctx.runMutation(api.knowledgeDatas.updateKD, {
 					knowledgeId: kd._id,
-					isProcessed: false
+					isUpdated: false
 				});
 			}
 		}
