@@ -15,8 +15,10 @@ import { useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { MoreHorizontal, Trash, RefreshCw } from "lucide-react";
+import { MoreHorizontal, Trash, RefreshCw, ChevronLeft } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useRightSidebar } from "@/hooks/use-right-sidebar";
+import { cn } from "@/lib/utils";
 
 interface MenuProps {
 	documentId: Id<"documents">;
@@ -25,6 +27,7 @@ interface MenuProps {
 export const Menu = ({ documentId }: MenuProps) => {
 	const router = useRouter();
 	const { user } = useUser();
+	const rightSidebar = useRightSidebar();
 	
 	const archive = useMutation(api.documents.archive);
 	const inspectDocument = useAction(api.documents.InspectDocument);
@@ -59,6 +62,16 @@ export const Menu = ({ documentId }: MenuProps) => {
 				variant="ghost"
 			>
 				<RefreshCw className="h-4 w-4"/>
+			</Button>
+			<Button
+				onClick={rightSidebar.toggle}
+				size="sm"
+				variant="ghost"
+			>
+				<ChevronLeft className={cn(
+					"h-4 w-4 transition-transform",
+					rightSidebar.isOpen && "rotate-180"
+				)}/>
 			</Button>
 			<DropdownMenu>
 				<DropdownMenuTrigger asChild>

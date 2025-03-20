@@ -3,10 +3,8 @@ import {v} from "convex/values";
 
 import {action, mutation, query, QueryCtx} from "./_generated/server";
 import {Doc, Id} from "./_generated/dataModel";
-import {createConcept} from "./concepts";
 import { Block, InlineContent, StyledText, Link } from "@blocknote/core";
 import { api } from "../convex/_generated/api";
-import { is } from "@blocknote/core/types/src/i18n/locales";
 
 interface BlockContent {
 	type: string;
@@ -105,6 +103,9 @@ export const getSidebar = query({
 			.filter((q) =>
 				q.eq(q.field("isArchived"), false)
 			)
+			.filter((q) =>
+				q.eq(q.field("type"), "page")
+			)
 			.order("desc")
 			.collect();
 
@@ -141,6 +142,10 @@ export const create = mutation({
 				fileMentionedConcepts: [],
 				blocks: []
 			}
+		});
+
+		await ctx.runMutation(api.sideHelps.createSideHelp, {
+			documentId: document,
 		});
 
 		return document;
@@ -257,6 +262,10 @@ export const remove = mutation({
 		}
 
 		const document = await ctx.db.delete(args.id);
+
+		await ctx.runMutation(api.sideHelps.deleteSideHelp, {
+			documentId: args.id,
+		});
 
 		return document;
 	}
@@ -476,7 +485,9 @@ export const getBlocksContainsConcept = action({
 			throw new Error("GBCC: concept not existed");
 		}
 
-		const result: Record<string, [Block, Id<"documents">]> = {};
+
+		// result is a dictionary whiches value is Block, document Id, and a list of string
+		const result: Record<string, [Block, Id<"documents">, Array<string>]> = {};
 
 		for (const keyword of concept.aliasList) {
 
@@ -488,15 +499,12 @@ export const getBlocksContainsConcept = action({
 					console.log("block: ", block);
 					if (block.content) {
 						const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {block: JSON.stringify(block)});
-						if (blockText.includes(keyword)) {
 
-							console.log("includes keyword: ", blockText);
-							const isContained = await ctx.runAction(api.knowledgeDatas.isContainConcept, {blockText: blockText, documentId: documentId, conceptId: args.conceptId})
+						const aliasList = await ctx.runAction(api.llm.isContainConcept, {blockText: blockText, documentId: documentId, conceptId: args.conceptId})
 
-							if (isContained) {
-							result[block.id] = [block, documentId];
-								continue;
-							}
+						if (aliasList.length > 0) {
+							result[block.id] = [block, documentId, aliasList];
+							continue;
 						}
 					}
 					if (block.children && block.children.length > 0) {
@@ -575,7 +583,7 @@ function findBlock(blockId: string, blocks: Block[]): Block | null {
 export const getBlockTextFromBlock = action({
 	args: { block: v.any() },
 
-	handler: async (ctx, args) => {
+	handler: async (ctx, args) : Promise<string> => {
 
 		const block = typeof args.block === 'string' 
 			? JSON.parse(args.block) as Block 
@@ -635,7 +643,7 @@ export const InspectEditedBlock = action({
 		const toDelete = [];
 		// Handle existing knowledge data
 		for (const [conceptId, kdId] of Object.entries(args.blockInspect.conceptKnowledge)) {
-			await ctx.runMutation(api.concepts.updateConcept, {
+			await ctx.runAction(api.concepts.updateConcept, {
 				conceptId: conceptId as Id<"concepts">,
 				IsSynced: false
 			});
@@ -655,7 +663,7 @@ export const InspectEditedBlock = action({
 				knowledgeId: kdId
 			});
 
-			await ctx.runMutation(api.knowledgeDatas.updateKD, {
+			await ctx.runAction(api.knowledgeDatas.updateKD, {
 				knowledgeId: kdId,
 				knowledge: newKnowledge,
 				isProcessed: false
@@ -672,7 +680,7 @@ export const InspectEditedBlock = action({
 					blockText: blockText
 				});
 
-				const newKnowledgeData = await ctx.runMutation(api.knowledgeDatas.create, {
+				const newKnowledgeData = await ctx.runAction(api.knowledgeDatas.addKD, {
 					conceptId: conceptId,
 					sourceId: args.documentId,
 					blockId: args.blockInspect.blockId,
@@ -682,7 +690,7 @@ export const InspectEditedBlock = action({
 				args.blockInspect.conceptKnowledge[conceptId] = newKnowledgeData;
 
 				// Mark concept for syncing
-				await ctx.runMutation(api.concepts.updateConcept, {
+				await ctx.runAction(api.concepts.updateConcept, {
 					conceptId: conceptId,
 					IsSynced: false
 				});
@@ -712,6 +720,8 @@ export const InspectDocument = action({
 			documentId: args.documentId
 		});
 
+		let needUpdate = false;
+
 		const document = await ctx.runQuery(api.documents.getById, {
 			documentId: args.documentId
 		});
@@ -729,6 +739,7 @@ export const InspectDocument = action({
 				});
 				//remove the blockInspect from the document.fileInspect.blocks
 				document.fileInspect.blocks = document.fileInspect.blocks.filter(b => b.blockId !== blockInspect.blockId);
+				needUpdate = true;
 				continue;
 			}
 
@@ -747,27 +758,21 @@ export const InspectDocument = action({
 				document.fileInspect.blocks = document.fileInspect.blocks.map(b => 
 					b.blockId === blockInspect.blockId ? updatedBlockInspect : b
 				);
+				needUpdate = true;
 			}
 		}
 
-		// 2. Sync all affected concepts
-		for (const conceptId of conceptsToSync) {
-			const concept = await ctx.runQuery(api.concepts.getById, {
-				conceptId: conceptId
-			});
-			
-			if (concept && !concept.IsSynced) {
-				await ctx.runAction(api.concepts.syncConcept, {
-					conceptId: conceptId
-				});
-			}
-		}
+		await ctx.runAction(api.concepts.syncAllConcepts, {
+			userId: identity.subject
+		});
 
 		// Update document with new fileInspect
-		await ctx.runMutation(api.documents.update, {
-			id: args.documentId,
-			fileInspect: document.fileInspect
-		});
+		if (needUpdate) {
+			await ctx.runMutation(api.documents.update, {
+				id: args.documentId,
+				fileInspect: document.fileInspect
+			});
+		}
 
 		return true;
 	}
@@ -862,6 +867,7 @@ export const removeBlock = action({
 			});
 		}
 
+
 		// 2. Remove all references
 		for (const refId of args.blockInspect.references) {
 			await ctx.runMutation(api.references.removeRef, {
@@ -917,9 +923,21 @@ export const SyncConceptKeyword = action({
 		});
 		if (!block) throw new Error("Block not found");
 
+
+
+		await ctx.runAction(api.documents.markBlockAsConceptSynced, {
+			documentId: args.documentId,
+			blockId: args.blockId
+		});
+
+		// get block text
 		const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {
 			block: JSON.stringify(block)
 		});
+
+		if (blockText.trim() === "") {
+			return;
+		}
 
 		// 2. Get concept keywords
 		const conceptKeywords = await ctx.runAction(api.llm.fetchConceptKeywords, {
@@ -1225,6 +1243,60 @@ export const syncFileInspect = action({
 			}
 		});
 
+		return true;
+	}
+});
+
+export const getDocumentText = action({
+	args: {
+		documentId: v.id("documents")
+	},
+	handler: async (ctx, args) : Promise<string> => {
+		const document: Doc<"documents"> = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		if (!document) throw new Error("Document not found");
+
+		const blocks: Block[] = JSON.parse(document.content as unknown as string);
+
+		// concatinate title and content of all blocks using getBlockTextFromBlock
+		const allBlocksText: string = (await Promise.all(blocks.map(async block => await ctx.runAction(api.documents.getBlockTextFromBlock, {block: JSON.stringify(block)})))).join(" ");
+
+		const title = document.title;
+
+		return `${title}\n${allBlocksText}`;
+	}
+});
+
+export const markBlockAsConceptSynced = action({
+	args: {
+		documentId: v.id("documents"),
+		blockId: v.string()
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const document = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		if (!document) throw new Error("Document not found");
+
+		const block = await ctx.runQuery(api.documents.getBlockById, {
+			documentId: args.documentId,
+			blockId: args.blockId
+		});
+		if (!block) throw new Error("Block not found");
+
+		if (!document.fileInspect) return;
+
+		await ctx.runMutation(api.documents.update, {
+			id: args.documentId,
+			fileInspect: {
+				...document.fileInspect,
+				blocks: document.fileInspect?.blocks.map(b => b.blockId === args.blockId ? { ...b, conceptSynced: true } : b) || []
+			}
+		});
 		return true;
 	}
 });

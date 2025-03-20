@@ -29,6 +29,7 @@ import { TrashBox } from "./trash-box";
 import { useSearch } from "@/hooks/use-search";
 import { useSettings } from "@/hooks/use-settings";
 import { Navbar } from "./navbar";
+import { useRightSidebar } from "@/hooks/use-right-sidebar";
 
 export const Navigation = () => {
   const router = useRouter();
@@ -46,6 +47,7 @@ export const Navigation = () => {
   const showToast = () => toast("hello");
 
   const create = useMutation(api.documents.create);
+  const rightSidebar = useRightSidebar();
 
   useEffect(() => {
     if (isMobile) {
@@ -141,7 +143,6 @@ export const Navigation = () => {
           "group/sidebar h-full bg-secondary overflow-y-auto relative flex w-60 flex-col z-[250]",
           isResetting && "transition-all ease-in-out duration-300",
           isMobile && "w-0",
-          // isCollapsed && "w-16",
         )}
       >
         <div
@@ -158,7 +159,12 @@ export const Navigation = () => {
         <div>
           <UserItem />
           <Item label="Settings" icon={Settings} onClick={settings.onOpen} />
-          <Item label="Knowledge Base" icon={Brain} onClick={() => {}} />
+          <Item 
+            label="Knowledge Base" 
+            icon={Brain} 
+            onClick={() => router.push("/knowledge-base")}
+            active={pathname?.includes("/knowledge-base")}
+          />
           <Item label="Search" icon={Search} isSearch onClick={search.onOpen} />
           <Item onClick={handleCreate} label="New page" icon={PlusCircle} />
         </div>
@@ -211,7 +217,6 @@ export const Navigation = () => {
               />
             )}
           </nav>
-
         )}
       </div>
     </>

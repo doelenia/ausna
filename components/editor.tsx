@@ -50,7 +50,7 @@ export default function Editor({
 	const { resolvedTheme } = useTheme();
 	const concepts = useQuery(api.concepts.getAllConcepts);
 	const addConcept = useAction(api.concepts.addConcept);
-	// const createKnowledge = useMutation(api.knowledgeDatas.addKD);
+
 	const addKD = useAction(api.knowledgeDatas.addKD);
 	const addConceptKeyword = useMutation(api.documents.addConceptKeyword);
 
@@ -65,6 +65,8 @@ export default function Editor({
 	const syncAllConceptKeywords = useAction(api.documents.syncAllConceptKeywords);
 
 	const syncFileInspect = useAction(api.documents.syncFileInspect);
+
+	const syncSideHelp = useAction(api.llm.syncSideHelp);
 
 	// Add debounce ref for file inspect sync
 	const fileInspectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -86,24 +88,36 @@ export default function Editor({
 	useEffect(() => {
 		const handleRouteChange = async () => {
 			try {
+				console.log("inspecting document before leaving", documentId);
 				await inspectDocument({ documentId });
 			} catch (error) {
 				console.error("Failed to inspect document on route change:", error);
 			}
 		};
 
-		// Add listeners for route changes
-		window.addEventListener('beforeunload', handleRouteChange);
-		window.addEventListener('visibilitychange', () => {
+		// Only run inspection when the document becomes hidden (tab switch/close) or before unload
+		const handleVisibilityChange = () => {
 			if (document.visibilityState === 'hidden') {
 				handleRouteChange();
 			}
-		});
+		};
 
+		const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+			handleRouteChange();
+		};
+
+		// Add event listeners
+		window.addEventListener('visibilitychange', handleVisibilityChange);
+		window.addEventListener('beforeunload', handleBeforeUnload);
+
+		// Cleanup function
 		return () => {
-			window.removeEventListener('beforeunload', handleRouteChange);
-			window.removeEventListener('visibilitychange', handleRouteChange);
-			handleRouteChange(); // Run inspection when component unmounts
+			window.removeEventListener('visibilitychange', handleVisibilityChange);
+			window.removeEventListener('beforeunload', handleBeforeUnload);
+			
+			// Run inspection when unmounting the editor component
+			// This ensures we save changes when navigating away from a document
+			handleRouteChange();
 		};
 	}, [documentId, inspectDocument]);
 
@@ -119,6 +133,7 @@ export default function Editor({
 			const timeSinceLastActivity = Date.now() - lastActivityRef.current;
 			if (timeSinceLastActivity >= 60000) { // 1 minute
 				try {
+					console.log("inspecting document after inactivity of 1 minute");
 					await inspectDocument({ documentId });
 				} catch (error) {
 					console.error("Failed to inspect document after inactivity:", error);
@@ -267,6 +282,7 @@ export default function Editor({
 		syncTimeoutRef.current = setTimeout(async () => {
 			try {
 				await syncAllConceptKeywords({ documentId });
+				await syncSideHelp({ documentId });
 			} catch (error) {
 				console.error("Failed to sync concept keywords:", error);
 			}
@@ -327,11 +343,11 @@ export default function Editor({
 				/>
 			</BlockNoteView>
 
-			<div className="text-sm">
+			{/* <div className="text-sm">
 				<pre>
 					<code>{JSON.stringify(page, null, 2)}</code>
 				</pre>
-			</div>
+			</div> */}
 		</div>
 	)
 }

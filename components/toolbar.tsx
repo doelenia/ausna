@@ -111,6 +111,9 @@ export const Toolbar = ({
 					</Button>
 				)}
 			</div>
+			<div className="text-sm text-muted-foreground mb-2">
+				{initialData.type === "page" ? "Page" : "Concept"}
+			</div>
 			{isEditing && !preview ? (
 				<TextAreaAutoSize
 					ref={inputRef}

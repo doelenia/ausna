@@ -5,11 +5,12 @@ import {Doc, Id} from "./_generated/dataModel";
 import {api} from "../convex/_generated/api";
 
 export const createObjectTagProperty = mutation({
+	
 	args: {
 		objectTagId: v.id("objectTags"),
 		conceptId: v.id("concepts"),
 		propertyName: v.string(),
-		value: v.any(),
+		value: v.optional(v.any()),
 		type: v.string(),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas")))
 	},
@@ -96,12 +97,7 @@ export const getObjectTagPropertiesByObjectTagId = query({
 
 export const syncObjectTagProperties = action({
 	args: {
-		objectTag: v.object({
-			_id: v.id("objectTags"),
-			conceptId: v.id("concepts"),
-			objectName: v.string(),
-			objectDescription: v.optional(v.string())
-		})
+		conceptId: v.id("concepts")
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -109,22 +105,28 @@ export const syncObjectTagProperties = action({
 
 		// Get concept details
 		const concept = await ctx.runQuery(api.concepts.getById, {
-			conceptId: args.objectTag.conceptId
+			conceptId: args.conceptId
 		});
 		if (!concept) throw new Error("Concept not found");
 
 		// 1. Get all updated knowledge data
 		const updatedKDs = await ctx.runQuery(api.knowledgeDatas.getUpdatedKDbyConceptId, {
-			conceptId: args.objectTag.conceptId
+			conceptId: args.conceptId
 		});
 
-		// 2. Get all object tag properties
-		const properties = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByObjectTagId, {
-			objectTagId: args.objectTag._id
+		// 2. Get all properties by concept ID
+		const properties = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByConceptId, {
+			conceptId: args.conceptId
 		});
 
 		// Process each property
 		for (const property of properties) {
+			// Get object tag details for this property
+			const objectTag = await ctx.runQuery(api.objectTags.getById, {
+				objectTagId: property.objectTagId
+			});
+			if (!objectTag) continue; // Skip if object tag not found
+
 			// For each updated KD
 			for (const updatedKD of updatedKDs) {
 				// 1. Get knowledge string from all source KDs + current KD
@@ -156,12 +158,13 @@ export const syncObjectTagProperties = action({
 					propertyName = template.propertyName;
 					type = template.type;
 				}
+
 				// 2. Call fetchObjectTagProperties
 				const newValue = await ctx.runAction(api.llm.fetchObjectTagProperties, {
 					conceptName: concept.aliasList[0],
 					conceptDescription: concept.description || "",
-					objectTagName: args.objectTag.objectName,
-					objectTagDescription: args.objectTag.objectDescription || "",
+					objectTagName: objectTag.objectName,
+					objectTagDescription: objectTag.objectDescription || "",
 					propertyName: propertyName,
 					type: type,
 					knowledgeString: knowledgeString,
@@ -214,5 +217,24 @@ export const updateObjectTagProperty = mutation({
 		const { propertyId, ...updates } = args;
 
 		return await ctx.db.patch(propertyId, updates);
+	}
+});
+
+export const getObjectTagPropertiesByConceptId = query({
+	args: {
+		conceptId: v.id("concepts")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const properties = await ctx.db.query("objectTagProperties")
+		.withIndex("by_concept", (q) =>
+			q.eq("userId", identity.subject)
+			.eq("conceptId", args.conceptId)
+		)
+		.collect();
+
+		return properties;
 	}
 });
