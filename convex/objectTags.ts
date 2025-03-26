@@ -56,7 +56,7 @@ export const syncObjectTag = action({
 		}));
 
 		// Combine all knowledge data text
-		const knowledgeString = knowledgeDatas.map(kd => kd.knowledge).join(" ");
+		const knowledgeString = knowledgeDatas.map(kd => kd.extractedKnowledge).join(" ");
 
 		// 1. Get potential new object tags
 		const newTags = await ctx.runAction(api.llm.fetchObjectTags, {
@@ -66,60 +66,61 @@ export const syncObjectTag = action({
 			knowledgeString: knowledgeString
 		});
 
-		if (!newTags) return; // No new tags to add
-
-		// 2. Process each new tag
-		for (const [objectName, [parentName, parentDesc, _, objectDesc]] of Object.entries(newTags)) {
-			// 2.1 Search for related parent concepts
-			const relatedConcepts = await ctx.runAction(api.llm.fetchRelatedConcepts, {
-				name: parentName,
-				description: parentDesc
-			});
-
-			let parentConceptId: Id<"concepts">;
-
-			if (relatedConcepts.length === 0) {
-				// 2.2 No matching concepts found - create new object tag without parent concept
-				await ctx.runAction(api.objectTags.AddObjectTag, {
-					conceptId: args.conceptId,
-					objectName: objectName,
-					sourceKDs: knowledgeDatas.map(kd => kd._id),
-					objectDescription: objectDesc
-				});
-			} else {
-				// 2.3 Find best matching concept
-				const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
+		if (newTags) {
+			// 2. Process each new tag
+			for (const [objectName, [parentName, parentDesc, _, objectDesc]] of Object.entries(newTags)) {
+				// 2.1 Search for related parent concepts
+				const relatedConcepts = await ctx.runAction(api.llm.fetchRelatedConcepts, {
 					name: parentName,
-					description: parentDesc,
-					conceptIds: relatedConcepts
+					description: parentDesc
 				});
-
-				if (bestMatchId) {
-					// 2.3.1 Use matched concept
+	
+				let parentConceptId: Id<"concepts">;
+	
+				if (relatedConcepts.length === 0) {
+					// 2.2 No matching concepts found - create new object tag without parent concept
 					await ctx.runAction(api.objectTags.AddObjectTag, {
 						conceptId: args.conceptId,
 						objectName: objectName,
-						objectConceptId: bestMatchId,
 						sourceKDs: knowledgeDatas.map(kd => kd._id),
-						objectDescription: objectDesc
+						parentName: parentName,
+						objectDescription: objectDesc,
 					});
 				} else {
-					// 2.3.2 No good match - create without parent concept
-					await ctx.runAction(api.objectTags.AddObjectTag, {
-						conceptId: args.conceptId,
-						objectName: objectName,
-						sourceKDs: knowledgeDatas.map(kd => kd._id)
+					// 2.3 Find best matching concept
+					const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
+						name: parentName,
+						description: parentDesc,
+						conceptIds: relatedConcepts
 					});
+	
+					if (bestMatchId) {
+						// 2.3.1 Use matched concept
+						await ctx.runAction(api.objectTags.AddObjectTag, {
+							conceptId: args.conceptId,
+							objectName: objectName,
+							objectConceptId: bestMatchId,
+							sourceKDs: knowledgeDatas.map(kd => kd._id),
+							objectDescription: objectDesc
+						});
+					} else {
+						// 2.3.2 No good match - create without parent concept
+						await ctx.runAction(api.objectTags.AddObjectTag, {
+							conceptId: args.conceptId,
+							objectName: objectName,
+							sourceKDs: knowledgeDatas.map(kd => kd._id),
+							parentName: parentName,
+							parentDescription: parentDesc
+						});
+					}
 				}
 			}
 		}
 
-		// 3. loop through all object tags call syncObjectTagProperties
-		for (const tag of existingTags) {
-			await ctx.runAction(api.objectTagProperties.syncObjectTagProperties, {
-				objectTag: tag
-			});
-		}
+		// call syncObjectTagProperties for conceptId
+		await ctx.runAction(api.objectTagProperties.syncObjectTagProperties, {
+			conceptId: args.conceptId
+		});
 
 		return true;
 	}
@@ -291,8 +292,6 @@ export const checkObjectTagExists = query({
 	}
 });
 
-
-
 // Main function to add object tag
 export const AddObjectTag = action({
 	args: {
@@ -301,31 +300,43 @@ export const AddObjectTag = action({
 		objectConceptId: v.optional(v.id("concepts")),
 		objectTemplateId: v.optional(v.id("objectTemplates")),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
-		objectDescription: v.optional(v.string())
+		objectDescription: v.optional(v.string()),
+		parentDescription: v.optional(v.string()),
+		parentName: v.optional(v.string())
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
 
+		const concept = await ctx.runQuery(api.concepts.getById, {
+			conceptId: args.conceptId
+		});
+		if (!concept) throw new Error("Concept not found");
+
+		//make sure conceptId does not equal to objectConceptId
+		if (args.conceptId === args.objectConceptId) {
+			return;
+		}
+
 		// 1. Handle object concept creation if needed
-		let targetObjectConceptId = args.objectConceptId;
-		if (!targetObjectConceptId) {
-			targetObjectConceptId = await ctx.runAction(api.concepts.addConcept, {
-				alias: [args.objectName],
-				description: `Object concept for ${args.objectName}`,
+		let parentConceptId = args.objectConceptId;
+		if (!parentConceptId) {
+			parentConceptId = await ctx.runAction(api.concepts.addConcept, {
+				alias: [args.parentName || ""],
+				description: args.parentDescription || `${args.objectName} is an object concept for ${concept.aliasList[0]}`,
 				isSynced: false
 			});
 		}
 
 		// Get object concept
 		const objectConcept = await ctx.runQuery(api.concepts.getById, {
-			conceptId: targetObjectConceptId
+			conceptId: parentConceptId
 		});
 		if (!objectConcept) throw new Error("Object concept not found");
 
 		// Get existing templates
 		const existingTemplates: Doc<"objectTemplates">[] = await ctx.runQuery(api.objectTemplates.getObjectTemplates, {
-			conceptId: targetObjectConceptId
+			conceptId: parentConceptId
 		});
 
 		let targetTemplateId = args.objectTemplateId;
@@ -334,7 +345,7 @@ export const AddObjectTag = action({
 		if (existingTemplates.length === 0) {
 			// 2.1 Create new blank template if none exists
 			targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
-				conceptId: targetObjectConceptId,
+				conceptId: parentConceptId,
 				templateName: args.objectName,
 				description: `Template for ${args.objectName} objects`
 			});
@@ -381,7 +392,7 @@ export const AddObjectTag = action({
 
 			if (templateChoice.includes("new")) {
 				targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
-					conceptId: targetObjectConceptId,
+					conceptId: parentConceptId,
 					templateName: args.objectName,
 					description: `Template for ${args.objectName} objects`
 				});
@@ -411,13 +422,43 @@ export const AddObjectTag = action({
 		// Create object tag
 		const objectTagId: Id<"objectTags"> = await ctx.runMutation(api.objectTags.createObjectTag, {
 			conceptId: args.conceptId,
-			objectConceptId: targetObjectConceptId,
+			objectConceptId: parentConceptId,
 			objectTemplateId: targetTemplateId,
 			objectName: args.objectName,
 			objectDescription: args.objectDescription,
 			sourceKDs: args.sourceKDs
 		});
 
+		// create objectTagProperties for objectTagId and conceptId based on properties template
+		const propertiesTemplate: Doc<"objectPropertiesTemplates">[] = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateByObjectTemplateId, {
+			objectTemplateId: targetTemplateId
+		});
+
+		// loop through all properties
+		for (const property of propertiesTemplate) {
+			await ctx.runMutation(api.objectTagProperties.createObjectTagProperty, {
+				objectTagId: objectTagId,
+				conceptId: args.conceptId,
+				propertyName: property.propertyName,
+				type: property.type,
+				sourceKDs: args.sourceKDs
+			});
+		}
 		return objectTagId;
+	}
+});
+
+export const getById = query({
+	args: {
+		objectTagId: v.id("objectTags")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTag = await ctx.db.get(args.objectTagId);
+		if (!objectTag) throw new Error("Object tag not found");
+
+		return objectTag;
 	}
 });

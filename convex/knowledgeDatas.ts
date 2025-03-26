@@ -8,27 +8,33 @@ import { api } from "../convex/_generated/api";
 export const addKD = action({
 	args: {
 		conceptId: v.id("concepts"),
-		sourceId: v.id("documents"),
+		sourceId: v.string(),
 		blockId: v.optional(v.string()),
-		knowledge: v.optional(v.string())
+		knowledge: v.optional(v.string()),
+		sourceType: v.string(),
+		quotes: v.optional(v.array(v.string()))
 	},
-	handler: async (ctx, args) => {
+	handler: async (ctx, args) : Promise<Id<"knowledgeDatas">> => {
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
+
 
 		// Create knowledge data entry without processing
 		const knowledge: Id<"knowledgeDatas"> = await ctx.runMutation(api.knowledgeDatas.create, {
 			conceptId: args.conceptId,
 			sourceId: args.sourceId,
 			blockId: args.blockId,
-			knowledge: args.knowledge
+			knowledge: args.knowledge,
+			sourceType: args.sourceType,
+			quotes: args.quotes
 		});
 
-		// Mark concept as needing sync
-		await ctx.runMutation(api.concepts.updateConcept, {
-			conceptId: args.conceptId,
-			IsSynced: false
-		});
+		if (args.knowledge) {
+			// create a vector embedding for the knowledge
+			await ctx.runAction(api.vectorEmbed.addVectorEmbeddingforKnowledgeData, {
+				knowledgeDataId: knowledge
+			});
+		}
 
 		return knowledge;
 	}
@@ -37,9 +43,11 @@ export const addKD = action({
 export const create = mutation({
 	args: {
 		conceptId: v.id("concepts"),
-		sourceId: v.id("documents"),
+		sourceId: v.string(),
 		blockId: v.optional(v.string()),
-		knowledge: v.optional(v.string())
+		knowledge: v.optional(v.string()),
+		sourceType: v.string(),
+		quotes: v.optional(v.array(v.string()))
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -50,15 +58,18 @@ export const create = mutation({
 
 		const userId = identity.subject;
 
+		
 
 		const knowledge = await ctx.db.insert("knowledgeDatas", {
 			userId: userId,
-			sourceFile: args.sourceId,
+			sourceId: args.sourceId,
+			sourceType: args.sourceType,
 			sourceSection: args.blockId,
-			isProcessed: false,
+			isProcessed: args.knowledge ? true : false,
 			conceptId: args.conceptId,
-			knowledge: args.knowledge,
-			isUpdated: false
+			extractedKnowledge: args.knowledge,
+			isUpdated: args.knowledge ? true : false,
+			quotes: args.quotes
 		});
 
 		return knowledge;
@@ -87,29 +98,30 @@ export const addAllKD = action({
 
 		console.log("addAllKD - concept: ", concept, "");
 
-		const blocksDictionary: Record<string, [Block, Id<"documents">]> = await ctx.runAction(api.documents.getBlocksContainsConcept, {conceptId: args.conceptId});
+		const blocksDictionary: Record<string, [Block, Id<"documents">, Array<string>]> = await ctx.runAction(api.documents.getBlocksContainsConcept, {conceptId: args.conceptId});
 
 		console.log("addAllKD - collectBlocks: ", blocksDictionary);
 
-		for (const [blockId, [block, documentId]] of Object.entries(blocksDictionary)) {
-			const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {block: JSON.stringify(block)});
+		let finalAliasList: Set<string> = new Set([...concept.aliasList]);
 
-			await ctx.runAction(api.knowledgeDatas.addKD, {conceptId: args.conceptId, sourceId: documentId, blockId: blockId});
+		for (const [blockId, [block, documentId, aliasList]] of Object.entries(blocksDictionary)) {
+
+			await ctx.runAction(api.knowledgeDatas.addKD, {conceptId: args.conceptId, sourceId: documentId, blockId: blockId, sourceType: "document"});
+			
+			// update concept with aliasList appending to existing aliasList
+			for (const alias of aliasList) {	
+				finalAliasList.add(alias);
+			}
 		}
+
+		await ctx.runMutation(api.concepts.updateConceptMutation, {
+			conceptId: args.conceptId,
+			aliasList: Array.from(finalAliasList)
+		});
+
+		return;
 	}
 });
-
-export const isContainConcept = action({
-	args: {
-		blockText: v.string(),
-		documentId: v.optional(v.id("documents")),
-		conceptId: v.id("concepts"),
-	},
-	handler: async (ctx, args) => {
-		// TODO: implement this function
-		return true;
-	}
-})
 
 export const deleteKD = mutation({
 	args: {
@@ -151,6 +163,11 @@ export const removeKD = action({
 
 		const userId = identity.subject;
 
+		// remove vector embedding for the knowledge data
+		await ctx.runAction(api.vectorEmbed.deleteVectorEmbeddingforKnowledgeData, {
+			knowledgeDataId: args.knowledgeId
+		});
+
 		await ctx.runAction(api.objectTags.removeAllObjectTags, {knowledgeId: args.knowledgeId});
 
 		await ctx.runAction(api.references.removeAllRef, {knowledgeId: args.knowledgeId});
@@ -186,7 +203,33 @@ export const getKDsofConcept = query({
 	}
 });
 
-export const updateKD = mutation({
+export const updateKD = action({
+	args: {
+		knowledgeId: v.id("knowledgeDatas"),
+		knowledge: v.optional(v.string()),
+		isProcessed: v.optional(v.boolean()),
+		isUpdated: v.optional(v.boolean()),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		await ctx.runMutation(api.knowledgeDatas.updateKDMutation, {
+			knowledgeId: args.knowledgeId,
+			knowledge: args.knowledge,
+			isProcessed: args.isProcessed,
+			isUpdated: args.isUpdated
+		});
+
+		if (args.knowledge) {
+			await ctx.runAction(api.vectorEmbed.updateVectorEmbeddingforKnowledgeData, {
+				knowledgeDataId: args.knowledgeId
+			});
+		}
+	}
+});
+//fetchKD is at llm
+export const updateKDMutation = mutation({
 	args: {
 		knowledgeId: v.id("knowledgeDatas"),
 		knowledge: v.optional(v.string()),
@@ -201,7 +244,6 @@ export const updateKD = mutation({
 		return await ctx.db.patch(knowledgeId, updates);
 	}
 });
-//fetchKD is at llm
 
 export const getUpdatedKDbyConceptId = query({
 	args: {
@@ -243,5 +285,75 @@ export const getKDById = query({
 		if (knowledge.userId !== userId) throw new Error("Permission denied");
 
 		return knowledge;
+	}
+});
+
+
+export const getConceptKDbySource = query({
+	args: {
+		sourceType: v.string(),
+		sourceId: v.string(),
+		blockId: v.optional(v.string()),
+		conceptId: v.optional(v.id("concepts"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		if (args.conceptId) {
+			const KDs = await ctx.db.query("knowledgeDatas")
+		.withIndex("by_source_section", (q) =>
+			q
+				.eq("userId", userId)
+				.eq("sourceType", args.sourceType)
+				.eq("sourceId", args.sourceId)
+				.eq("sourceSection", args.blockId)
+				.eq("conceptId", args.conceptId!)
+			)
+			.collect();
+
+			return KDs;
+		} else {
+			const KDs = await ctx.db.query("knowledgeDatas")
+			.withIndex("by_source_section", (q) =>
+				q
+					.eq("userId", userId)
+					.eq("sourceType", args.sourceType)
+					.eq("sourceId", args.sourceId)
+					.eq("sourceSection", args.blockId)
+			)
+			.collect();
+
+			return KDs;
+		}
+	}
+});
+
+export const removeConceptKDbySource = action({
+	args: {
+		sourceType: v.string(),
+		sourceId: v.string(),
+		blockId: v.optional(v.string()),
+		conceptId: v.optional(v.id("concepts"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const KDs = await ctx.runQuery(api.knowledgeDatas.getConceptKDbySource, {
+			sourceType: args.sourceType,
+			sourceId: args.sourceId,
+			blockId: args.blockId,
+			conceptId: args.conceptId
+		});
+		
+
+		for (const kd of KDs) {
+			await ctx.runAction(api.knowledgeDatas.removeKD, {knowledgeId: kd._id});
+		}
 	}
 });

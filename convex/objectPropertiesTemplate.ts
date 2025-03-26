@@ -27,7 +27,7 @@ export const create = mutation({
 		return objectPropertiesTemplate;
 		
 	}
-})
+});
 
 export const getObjectPropertiesTemplateById = query({
 	args: {
@@ -47,4 +47,25 @@ export const getObjectPropertiesTemplateById = query({
 
 		return objectPropertiesTemplate;
 	}
-})
+});
+
+export const getObjectPropertiesTemplateByObjectTemplateId = query({
+	args: {
+		objectTemplateId: v.id("objectTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const objectPropertiesTemplate = await ctx.db.query("objectPropertiesTemplates")
+		.withIndex("by_object_template", (q) =>
+			q.eq("userId", userId)
+			.eq("objectTemplateId", args.objectTemplateId)
+		)
+		.collect();
+
+		return objectPropertiesTemplate;
+	}
+});

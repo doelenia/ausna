@@ -22,6 +22,8 @@ import type * as objectTagProperties from "../objectTagProperties.js";
 import type * as objectTags from "../objectTags.js";
 import type * as objectTemplates from "../objectTemplates.js";
 import type * as references from "../references.js";
+import type * as sideHelps from "../sideHelps.js";
+import type * as vectorEmbed from "../vectorEmbed.js";
 
 /**
  * A utility for referencing Convex functions in your app's API.
@@ -41,6 +43,8 @@ declare const fullApi: ApiFromModules<{
   objectTags: typeof objectTags;
   objectTemplates: typeof objectTemplates;
   references: typeof references;
+  sideHelps: typeof sideHelps;
+  vectorEmbed: typeof vectorEmbed;
 }>;
 export declare const api: FilterApi<
   typeof fullApi,
