@@ -56,7 +56,7 @@ export const syncObjectTag = action({
 		}));
 
 		// Combine all knowledge data text
-		const knowledgeString = knowledgeDatas.map(kd => kd.knowledge).join(" ");
+		const knowledgeString = knowledgeDatas.map(kd => kd.extractedKnowledge).join(" ");
 
 		// 1. Get potential new object tags
 		const newTags = await ctx.runAction(api.llm.fetchObjectTags, {

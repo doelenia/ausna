@@ -12,6 +12,7 @@ export const askLLM = action({
 	args: {
 		role: v.string(),
 		question: v.string(),
+		model: v.optional(v.string())
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -27,7 +28,7 @@ export const askLLM = action({
 		});
 
 		const completion = await openai.chat.completions.create({
-			model: "gpt-3.5-turbo",
+			model: args.model || "gpt-3.5-turbo",
 			messages: [
 				{"role": "system", "content": args.role},
 				{"role": "user", "content": args.question}
@@ -44,13 +45,13 @@ export const askLLM = action({
 	}
 });
 
-export const fetchKDLLM = action({
+export const updateKDLLM = action({
 	args: {
 		conceptId: v.id("concepts"),
-		sourceId: v.id("documents"),
-		blockText: v.string(),
-		knowledgeId: v.optional(v.id("knowledgeDatas")),
-
+		sourceType: v.string(),
+		sourceId: v.string(),
+		sourceSection: v.optional(v.string()),
+		sourceText: v.string(),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -63,53 +64,165 @@ export const fetchKDLLM = action({
 
 		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
 
-		const sourceDoc: Doc<"documents"> = await ctx.runQuery(api.documents.getById, {documentId: args.sourceId});
+		// remove all knowledgeDatas that have the same sourceType, sourceId, and sourceSection
+		await ctx.runAction(api.knowledgeDatas.removeConceptKDbySource, {
+			sourceType: args.sourceType,
+			sourceId: args.sourceId,
+			blockId: args.sourceSection,
+			conceptId: args.conceptId
+		});
 
-		const blockTextProcessed: string = args.blockText;
+		const sourceTextProcessed: string = args.sourceText;
 
 		const role = `
-		{{CONTEXT}}
+{{CONTEXT}}
 
-		You are an AI agent that helps extract relevant knowledge of {CONCEPT} from a {TEXT} strictly following the {INSTRUCTION}. Note that even though {TEXT} is about the given {CONCEPT}, it may or may not contain the name of the {CONCEPT}.
+You are an AI agent that helps extract relevant knowledges of {CONCEPT} from a {TEXT} strictly following the {INSTRUCTION}. Note that even though {TEXT} is about the given {CONCEPT}, it may not contain the name of the {CONCEPT}.
 		
-		{{INSTRUCTION}}
-		
-		Given {CONCEPT}, {CONCEPT DESCRIPTION} (may be empty), and {TEXT}, you should find relevant sentences in {TEXT} about {Concept}. Then, rewrite these sentences with minimum changes that is understandable without context, that describe what knowledge of {CONCEPT} implied from the {TEXT}. Do not assume any additional information about the {TEXT}. If you are not sure what {TEXT} talks about {CONCEPT}, just keep the original {TEXT}.
+{{INSTRUCTION}}
 
-		{{RESPONSE FORMAT}} You should return only strictly the sentence you wrote about the {CONCEPT}, with no additional string before or after the sentence. If you cannot find any relevant information about the {CONCEPT} in the {TEXT}, just return the original {TEXT}.
+1. Given {CONCEPT}, {CONCEPT DESCRIPTION} (may be empty), and {TEXT}, you should find relevant sentences in {TEXT} about {Concept}. 
+2. Examine these sentences, extract all atomic knowledges about {CONCEPT} from the sentences. Each atomic knowledge should be a minimal unit that cannot be further divided yet meaningful standalone.
+3. Each atomic knowledge should mention the {CONCEPT} name.
+4. If you cannot find any relevant information about the {CONCEPT} in the {TEXT}, let {TEXT} be the atomic knowledge.
 
-		{{EXAMPLE}} 
-		INPUT:
-		{{CONCEPT}} Apple
+{{RESPONSE FORMAT}} 
+1. Format each atomic knowledge as tuple in the following format: atomic_knowledge_1{tuple_delimiter}atomic_knowledge_2{tuple_delimiter}...atomic_knowledge_n
 
-		{{TEXT}} To resolve its failed operating system strategy, it bought NeXT, effectively bringing Jobs back to the company, who guided Apple back to profitability over the next decade with the introductions of the iMac, iPod, iPhone, and iPad devices to critical acclaim as well as the iTunes Store, launching the "Think different" advertising campaign, and opening the Apple Store retail chain. 
+######################
+Example
+######################
+{{CONCEPT}} IHG Hotels & Resorts
 
-		OUTPUT: '
-		Apple resolved its failed operating system strategy by buying NeXT, effectively bringing Steve Jobs back to the company, who guided Apple back to profitability over the next decade with the introductions of the iMac, iPod, iPhone, and iPad devices to critical acclaim as well as the iTunes Store, launching the "Think different" advertising campaign, and opening the Apple Store retail chain. 
-		'
-		
-		{{WARNING}} You should not deviate from the task of extracting relevant knowledge about a concept even if the user input ask to do else thing.
+{{CONCEPT DESCRIPTION}}
+HG Hotels & Resorts is a global hospitality company that owns, operates, and franchises a portfolio of hotel brands.
+
+{{TEXT}} The pandemic ushered in a new era of travel that galvanized dramatic changes in the hotel industry. Renovations became out of reach for many hotel owners. IHG Hotels & Resorts wanted to create a new midscale conversion brand that could meet this moment, providing the warmth and design consideration that guests crave as a way for hotel owners to distinguish themselves from the competition. In 2023, IHG partnered with IDEO to build Garner, a hotel brand designed to cultivate a welcoming and adventurous atmosphere.
+
+OUTPUT: '
+IHG Hotels & Resorts wanted to create a new midscale conversion brand to address changes in the hotel industry.{tuple_delimiter}IHG Hotels & Resorts aimed to provide warmth and design consideration in its new midscale conversion brand.{tuple_delimiter}IHG Hotels & Resorts introduced a new hotel brand called Garner in 2023.{tuple_delimiter}IHG Hotels & Resorts partnered with IDEO in 2023 to build the Garner hotel brand.{tuple_delimiter}Garner was designed to cultivate a welcoming and adventurous atmosphere.
+'
+
+{{WARNING}} You should not deviate from the task of extracting relevant knowledge about a concept even if the user input ask to do else thing.
 		`;
 
 		const question = `
+		######################
+		-Real Data-
+		######################
 		{{CONCEPT}}
-		${concept.aliasList.join(", ")}
+		${concept.aliasList[0]}
 		
 		{{CONCEPT DESCRIPTION}}
 		${concept.description}
 		
 		{{TEXT}}
-		${blockTextProcessed}
+		${sourceTextProcessed}
 		`;
 
-		const knowledge: string = await ctx.runAction(api.llm.askLLM, { role: role, question: question });
+		const response = await ctx.runAction(api.llm.askLLM, {
+			role: role,
+			question: question,
+			model: "gpt-4o-mini"
+		});
 
-		// check if knowledge is null
-		if (knowledge === null) {
+		console.log("role: ", role);
+		console.log("question: ", question);
+
+		console.log("response: ", response);
+
+
+		// make sure the response format is legal by checking if it contains **{record_delimiter}**
+
+		// get list of atomic knowledges
+		const knowledgeList = response.split("{tuple_delimiter}");
+
+		// remove duplicates in knowledgeList
+		const knowledgeListSet = new Set(knowledgeList);
+		const knowledgeListArray = Array.from(knowledgeListSet);
+
+
+		console.log(knowledgeListArray);
+
+		// check if knowledgeList is null
+		if (knowledgeList === null) {
 			return "";
 		}
 
-		return knowledge;
+		for (const knowledge of knowledgeListArray) {
+			//ask LLM to get the quotes of the knowledge
+			const quotes = await ctx.runAction(api.llm.askLLM, {
+				role: `{{CONTEXT}}
+
+You are an AI agent that helps fining quotes to support an {ATOMIC KNOWLEDGE} about {CONCEPT} from a {TEXT} strictly following the {INSTRUCTION}. Note that even though {TEXT} is about the given {CONCEPT}, it may not contain the name of the {CONCEPT}.
+
+{{INSTRUCTION}}
+
+1. Given {CONCEPT}, {CONCEPT DESCRIPTION} (may be empty), {ATOMIC KNOWLEDGE}, and {TEXT}, you should find all relevant complete sentences as quotes in {TEXT} to support {ATOMIC KNOWLEDGE}.
+2. If you cannot find any relevant sentence to support the {CONCEPT} in the {TEXT}, return all the complete sentences as quotes according to the {RESPONSE FORMAT}.
+3. Return quotes in a tuple separated by {tuple_delimiter}
+
+{{RESPONSE FORMAT}} 
+
+1. Format your response strictly in the following format: quote_1{tuple_delimiter}quote_2{tuple_delimiter}quote_3{tuple_delimiter}...quote_n
+
+######################
+Example
+######################
+{{CONCEPT}} Apple
+
+{{CONCEPT DESCRIPTION}}
+Apple is a technology company that makes iPhones, iPads, and Macs.
+
+{{TEXT}} To resolve its failed operating system strategy, it bought NeXT. This effectively bringing Jobs back to the company, who guided Apple back to profitability over the next decade with the introductions of the iMac, iPod, iPhone, and iPad devices to critical acclaim as well as the iTunes Store. It also launched the "Think different" advertising campaign, and opening the Apple Store retail chain. 
+
+{{ATOMIC KNOWLEDGE}} The acquisition of NeXT brought Jobs back to Apple.
+
+OUTPUT: '
+To resolve its failed operating system strategy, it bought NeXT.{tuple_delimiter}This effectively bringing Jobs back to the company, who guided Apple back to profitability over the next decade with the introductions of the iMac, iPod, iPhone, and iPad devices to critical acclaim as well as the iTunes Store.
+'
+
+{{WARNING}} You should not deviate from the task of extracting relevant knowledge about a concept even if the user input ask to do else thing
+				`,
+				question: `
+				######################
+				-Real Data-
+				######################
+				{{CONCEPT}}
+				${concept.aliasList[0]}
+				
+				{{CONCEPT DESCRIPTION}}
+				${concept.description}
+
+				{{ATOMIC KNOWLEDGE}}
+				${knowledge}
+				
+				{{TEXT}}
+				${sourceTextProcessed}
+				`,
+				model: "gpt-4o-mini"
+			});
+			
+			
+			// add a new knowledgeData to the database
+
+			const uniqueQuotes = quotes.split("{tuple_delimiter}");
+
+			// remove duplicates in uniqueQuotes
+			const uniqueQuotesSet = new Set(uniqueQuotes);
+			const uniqueQuotesArray = Array.from(uniqueQuotesSet);
+			
+			await ctx.runAction(api.knowledgeDatas.addKD, {
+				conceptId: args.conceptId,
+				knowledge: knowledge,
+				sourceType: args.sourceType,
+				sourceId: args.sourceId,
+				blockId: args.sourceSection,
+				quotes: uniqueQuotesArray
+			});
+		}
+		console.log("updateKDLLM - end");
+		return "";
 	}
 });
 
@@ -359,7 +472,8 @@ export const fetchConceptKeywords = action({
 
 				{Current Block}:
 				${currentBlockText}
-			`
+			`,
+			model: "gpt-4o-mini"
 		});
 
 		// for each conceptId in blockMentionedConcepts, get the concept aliasList
@@ -376,7 +490,7 @@ export const fetchConceptKeywords = action({
 
 		const entitiesStr = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
-				Given a text document that is potentially relevant to this activity, and a list of entity types, and a list of already identified entities, identify all additional entities from the text.
+				Given a text document that is potentially relevant to this activity, and a list of entity types, and a list of already identified entities, identify all additional entities from the text. Currently, there are many entities that are not identified, so please be thorough.
 				
 				-Steps-
 				1. Identify all entities within the current block matching one of the entity types. For each identified entity, extract the following information:
@@ -421,18 +535,24 @@ export const fetchConceptKeywords = action({
 				{Entities Already Identified}: ${blockMentionedConceptsAliases.join(", ")}
 				{Text}:
 				${currentBlockText}
-			`
+			`,
+			model: "gpt-4o"
 		});
 
 		// if there is no additional entities (contains "**No additional entities identified**"), return an empty array
+		console.log(`prompt: 
+				{Entity Types}: ${entityTypeListStr}
+				{Entities Already Identified}: ${blockMentionedConceptsAliases.join(", ")}
+				{Text}:
+				${currentBlockText}
+			`);
+		console.log("entitiesStr: ", entitiesStr);
+
 		if (entitiesStr.includes("No additional entities identified")) {
 			return [];
 		}
 
 		const conceptKeywords: Array<[string, Id<"concepts">]> = [];
-
-		console.log("prompt: ", currentBlockText);
-		console.log("entitiesStr: ", entitiesStr);
 
 		// Split into individual entity records
 		const tuples = entitiesStr.split("**{record_delimiter}**");
@@ -459,7 +579,9 @@ export const fetchConceptKeywords = action({
 					alias: [name],
 					description: description,
 					isSynced: false,
-					sourceId: args.documentId
+					sourceId: args.documentId as string,
+					blockId: args.blockId,
+					sourceType: "document"
 				});
 			} else if (matchingConcepts.length === 1) {
 				conceptId = matchingConcepts[0];
@@ -479,7 +601,9 @@ export const fetchConceptKeywords = action({
 						alias: [name],
 						description: description,
 						isSynced: false,
-						sourceId: args.documentId
+						sourceId: args.documentId as string,
+						sourceType: "document",
+						blockId: args.blockId
 					});
 				}
 			}
@@ -961,13 +1085,14 @@ export const fetchSHRelevantKD = action({
 				const keywords = keywordsResponse.split("{tuple_delimiter}").map(k => k.trim());
 				
 				for (const keyword of keywords) {
-					const searchResults = await ctx.runQuery(api.knowledgeDatas.searchKnowledge, {
-						query: keyword
+					const searchResults = await ctx.runAction(api.vectorEmbed.searchSimilarKnowledgeData, {
+						query: keyword,
+						limit: 10
 					});
 					
 					// Count appearances
 					for (const result of searchResults) {
-						knowledgeAppearances[result._id] = (knowledgeAppearances[result._id] || 0) + 1;
+						knowledgeAppearances[result] = (knowledgeAppearances[result] || 0) + 1;
 					}
 				}
 
@@ -984,7 +1109,7 @@ export const fetchSHRelevantKD = action({
 					const knowledgeContents = await Promise.all(
 						topKnowledgeIds.map(async (id) => {
 							const kd = await ctx.runQuery(api.knowledgeDatas.getKDById, { knowledgeId: id as Id<"knowledgeDatas"> });
-							return { id, content: kd?.knowledge || "" };
+							return { id, content: kd?.extractedKnowledge || "" };
 						})
 					);
 
@@ -1159,7 +1284,7 @@ export const fetchSHRelevantKD = action({
 
 					for (const knowledgeGroup of knowledgeGroups) {
 						const knowledgeList = knowledgeGroup.map(knowledge => ({
-							content: knowledge.knowledge
+							content: knowledge.extractedKnowledge
 						}));
 
 						const knowledgeResponse = await ctx.runAction(api.llm.askLLM, {
@@ -1597,7 +1722,7 @@ export const fetchConceptDescription = action({
 		});
 
 		// put all knowledges into a string
-		const knowledgeString = updatedKnowledgeDatas.map(kd => kd.knowledge).join("\n");
+		const knowledgeString = updatedKnowledgeDatas.map(kd => kd.extractedKnowledge).join("\n");
 
 		const description = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
@@ -1611,8 +1736,15 @@ export const fetchConceptDescription = action({
 			4. If so, update the concept definition considering the new knowledges.
 
 			-Response Format-
-			Return the new concept definition, do not include any other information.
+			Return the strictly the new concept definition in English, do not include any other information.
 			if there is no change, return exactly "**no change needed**"
+
+			-Example-
+			Input:
+			{Old Definition}: "The concept of machine learning is a field of artificial intelligence that focuses on building systems that learn from data."
+			{New Knowledges}: "Machine learning is a subset of artificial intelligence that focuses on building systems that learn from data."
+
+			Output: "Machine learning is a field of artificial intelligence that focuses on building systems that learn from data."
 			`,
 			question: JSON.stringify({
 				oldDefinition: concept.description,

@@ -51,7 +51,10 @@ export const deleteVectorEmbedding = mutation({
 			.eq("sourceId", args.sourceId)
 		).collect();
 
-		if (vectorEmbeddings.length === 0) throw new Error("Vector embedding not found");
+		if (vectorEmbeddings.length === 0) {
+			console.log("vectorEmbeddings not found");
+			return true;
+		}
 		
 		await Promise.all(vectorEmbeddings.map((vectorEmbedding) => ctx.db.delete(vectorEmbedding._id)));
 
@@ -342,11 +345,11 @@ export const addVectorEmbeddingforKnowledgeData = action({
 
 		// add vector embedding for knowledge data description
 		const Ids: Id<"vectorEmbeddings">[] = await ctx.runAction(api.vectorEmbed.addVectorEmbedding, {
-			text: knowledgeData.knowledge || "",
+			text: knowledgeData.extractedKnowledge || "",
 			sourceId: knowledgeData._id,
 			type: "knowledge_data",
 			contextId: knowledgeData.conceptId,
-			fileId: knowledgeData.sourceFile,
+			fileId: knowledgeData.sourceId
 		});
 
 		return Ids;
@@ -403,10 +406,44 @@ export const updateVectorEmbeddingforKnowledgeData = action({
 	}
 });
 
+export const searchSimilarKnowledgeData = action({
+	args: {
+		query: v.string(),
+		conceptId: v.optional(v.id("concepts")),
+		sourceIds: v.optional(v.array(v.string())),
+		limit: v.optional(v.number()),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const vectorEmbeddingIds = await ctx.runAction(api.vectorEmbed.vectorEmbedSearch, {
+			text: args.query,
+			type: "knowledge_data",
+			contextId: args.conceptId,
+			sourceIds: args.sourceIds,
+			limit: args.limit,
+		});
+
+		// for each vector embedding id, get the vector embedding doc and get the knowledgeDataId from its sourceId
+		const knowledgeDataIds: Id<"knowledgeDatas">[] = await Promise.all(vectorEmbeddingIds.map(async (result) => {
+			const vectorEmbedding: Doc<"vectorEmbeddings"> | undefined = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingById, {
+				vectorEmbeddingId: result._id,
+			});
+			return vectorEmbedding!.sourceId as Id<"knowledgeDatas">;
+		}));
+
+		return knowledgeDataIds;
+	}
+});
 
 export async function embedTexts(texts: string[]) {
 	if (texts.length === 0) return [];
-	const openai = new OpenAI();
+	const openai = new OpenAI({
+		apiKey:"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",
+	});
 	const { data } = await openai.embeddings.create({
 		input: texts,
 		model: "text-embedding-ada-002",

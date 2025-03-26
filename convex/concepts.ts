@@ -36,8 +36,9 @@ export const addConcept = action({
 		objectTags: v.optional(v.array(v.id("objectTags"))),
 		description: v.optional(v.string()),
 		isSynced: v.boolean(),
-		sourceId: v.optional(v.id("documents")),
+		sourceId: v.optional(v.string()),
 		blockId: v.optional(v.string()),
+		sourceType: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -84,13 +85,18 @@ export const addConcept = action({
 				conceptId: conceptId,
 				sourceId: args.sourceId,
 				blockId: args.blockId,
+				sourceType: "document"
 			});
 		}
+
+		console.log("finisged addKD: ", args);
 
 		// add vector embedding for concept description
 		await ctx.runAction(api.vectorEmbed.addVectorEmbeddingsforConcept, {
 			conceptId: conceptId,
 		});
+
+		console.log("finished addVectorEmbeddingsforConcept: ", args);
 
 		return conceptId;
 	}
@@ -131,6 +137,7 @@ export const createConcept = mutation({
 	}
 });
 
+// Process all knowledges first, and update everything about the concept based on the updated knowledge data
 export const syncConcept = action({
 	args: {
 		conceptId: v.id("concepts"),
@@ -158,36 +165,54 @@ export const syncConcept = action({
 					hidden: true
 				});
 			} else {
-				await ctx.runAction(api.concepts.removeConcept, {conceptId: args.conceptId});
+				// await ctx.runAction(api.concepts.removeConcept, {conceptId: args.conceptId});
 			}
 			return;
 		}
 
 		// 2. Process unprocessed knowledge data
-		for (const kd of knowledgeDatas) {
-			if (!kd.isProcessed && kd.sourceSection) {
-				const block = await ctx.runQuery(api.documents.getBlockById, {documentId: kd.sourceFile, blockId: kd.sourceSection});
 
-				const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {
-					block: JSON.stringify(block)
-				});
-				
-				const knowledge = await ctx.runAction(api.llm.fetchKDLLM, {
-					conceptId: args.conceptId,
-					sourceId: kd.sourceFile,
-					blockText: blockText
-				});
+		// filter knowledgeDatas by isProcessed = false
+		const unprocessedKnowledgeDatas = knowledgeDatas.filter((kd) => !kd.isProcessed);
 
-				// Update knowledge data with processed content
-				await ctx.runAction(api.knowledgeDatas.updateKD, {
-					knowledgeId: kd._id,
-					knowledge: knowledge,
-					isProcessed: true,
-					isUpdated: true
-				});
+		// Group unprocessed knowledge data by sourceType, sourceId and sourceSection
+		const groupedUnprocessedKnowledgeDatas = unprocessedKnowledgeDatas.reduce((acc, kd) => {
+			const key = `${kd.sourceType}<delimiter>${kd.sourceId}<delimiter>${kd.sourceSection}`;
+			if (!acc[key]) {
+				acc[key] = [];
 			}
-		}
+			acc[key].push(kd);
+			return acc;
+		}, {} as Record<string, typeof unprocessedKnowledgeDatas>);
+		
+		console.log("groupedUnprocessedKnowledgeDatas: ", groupedUnprocessedKnowledgeDatas);
 
+		// now process each group of unprocessed knowledge data
+		for (const key in groupedUnprocessedKnowledgeDatas) {
+
+			// get block from key split by "-"
+			// continue if any of the sourceType, sourceId, sourceSection is undefined
+			const [sourceType, sourceId, sourceSection] = key.split("<delimiter>");
+			if (!sourceType || !sourceId || !sourceSection) {
+				continue;
+			}
+			if (sourceType === undefined || sourceId === undefined || sourceSection === undefined) {
+				continue;
+			}
+
+			console.log("sourceId: ", sourceId);
+			console.log("sourceSection: ", sourceSection);
+			console.log("sourceType: ", sourceType);
+
+			const block = await ctx.runQuery(api.documents.getBlockById, {documentId: sourceId as Id<"documents">, blockId: sourceSection});
+
+			console.log("block: ", block);
+
+			const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {
+				block: JSON.stringify(block)
+			});
+		}
+		
 		// 3. TODO: Sync concept summary
 		
 		// 4. Sync object tags
@@ -262,11 +287,16 @@ export const updateConcept = action({
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
 
+		console.log("updateConcept: ", args);
+
 		const concept: Doc<"concepts"> | undefined = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
+
+		console.log("concept: ", concept);
+
 		if (!concept) throw new Error("Concept not found");
 		if (concept.userId !== identity.subject) throw new Error("Unauthorized");
 
-		await ctx.runAction(api.concepts.updateConcept, {
+		await ctx.runMutation(api.concepts.updateConceptMutation, {
 			conceptId: args.conceptId,
 			aliasList: args.aliasList,
 			objectTags: args.objectTags,

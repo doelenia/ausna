@@ -56,10 +56,12 @@ export default function Editor({
 
 	const [block, setBlock] = useState<Block>();
 	const [prevBlocks, setPrevBlocks] = useState<Block[]>([]);
-	const markBlockEdited = useMutation(api.documents.markBlockAsEdited);
 
-	// Reference to store timeout
+	// Reference to store timeout and current sync promise
 	const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const currentSyncPromiseRef = useRef<Promise<void> | null>(null);
+	const inspectionInProgressRef = useRef<Promise<void> | null>(null);
+	const hasChangedSinceLastInspectionRef = useRef<boolean>(false);
 	
 	// Get the sync action
 	const syncAllConceptKeywords = useAction(api.documents.syncAllConceptKeywords);
@@ -72,6 +74,33 @@ export default function Editor({
 	const fileInspectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
 	const inspectDocument = useAction(api.documents.InspectDocument);
+
+	// Wrapper for inspectDocument that manages the inspection promise
+	const runInspectDocument = async () => {
+		// Only run if there are changes since last inspection
+		if (!hasChangedSinceLastInspectionRef.current) {
+			return;
+		}
+
+		// Wait for any pending sync to complete
+		if (currentSyncPromiseRef.current) {
+			await currentSyncPromiseRef.current;
+		}
+
+		// Create a new inspection promise
+		inspectionInProgressRef.current = (async () => {
+			try {
+				await inspectDocument({ documentId });
+				// Reset the change flag after successful inspection
+				hasChangedSinceLastInspectionRef.current = false;
+			} finally {
+				inspectionInProgressRef.current = null;
+			}
+		})();
+
+		return inspectionInProgressRef.current;
+	};
+
 	const inactivityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const lastActivityRef = useRef<number>(Date.now());
 
@@ -89,7 +118,7 @@ export default function Editor({
 		const handleRouteChange = async () => {
 			try {
 				console.log("inspecting document before leaving", documentId);
-				await inspectDocument({ documentId });
+				await runInspectDocument();
 			} catch (error) {
 				console.error("Failed to inspect document on route change:", error);
 			}
@@ -134,7 +163,7 @@ export default function Editor({
 			if (timeSinceLastActivity >= 60000) { // 1 minute
 				try {
 					console.log("inspecting document after inactivity of 1 minute");
-					await inspectDocument({ documentId });
+					await runInspectDocument();
 				} catch (error) {
 					console.error("Failed to inspect document after inactivity:", error);
 				}
@@ -142,27 +171,37 @@ export default function Editor({
 		}, 60000); // Check every minute
 	}, [documentId, inspectDocument]);
 
-	// Add activity listeners
-	useEffect(() => {
-		const activityEvents = ['mousedown', 'keydown', 'mousemove', 'wheel', 'touchstart'];
-		
-		const handleActivity = () => {
-			resetInactivityTimer();
-		};
+	// Update editor onChange to include activity tracking
+	const handleEditorChange = async () => {
+		// Mark that changes have occurred
+		hasChangedSinceLastInspectionRef.current = true;
 
-		activityEvents.forEach(event => {
-			window.addEventListener(event, handleActivity);
+		// Wait for any inspection in progress
+		if (inspectionInProgressRef.current) {
+			await inspectionInProgressRef.current;
+		}
+
+		resetInactivityTimer();
+		if (syncTimeoutRef.current) {
+			clearTimeout(syncTimeoutRef.current);
+		}
+
+		// Create a new promise for the sync operation
+		currentSyncPromiseRef.current = new Promise<void>((resolve) => {
+			syncTimeoutRef.current = setTimeout(async () => {
+				try {
+					await syncAllConceptKeywords({ documentId });
+					await syncSideHelp({ documentId });
+					resolve();
+				} catch (error) {
+					console.error("Failed to sync concept keywords:", error);
+					resolve(); // Resolve even on error to prevent hanging
+				}
+			}, 5000);
 		});
 
-		// Start initial timer
-		resetInactivityTimer();
-
-		return () => {
-			activityEvents.forEach(event => {
-				window.removeEventListener(event, handleActivity);
-			});
-		};
-	}, [resetInactivityTimer]);
+		return currentSyncPromiseRef.current;
+	};
 
 	const handleUpload = async (file: File) => {
 		const res = await edgestore.publicFiles.upload({
@@ -247,6 +286,7 @@ export default function Editor({
 					conceptId: concept._id,
 					sourceId: documentId,
 					blockId: block.id,
+					sourceType: "document"
 				});
 				toast.promise(promise, {
 					loading: "Connecting a new knowledge to concept ...",
@@ -271,23 +311,6 @@ export default function Editor({
 		animations: false,
 		uploadFile: handleUpload,
 	});
-
-	// Update editor onChange to include activity tracking
-	const handleEditorChange = async () => {
-		resetInactivityTimer();
-		if (syncTimeoutRef.current) {
-			clearTimeout(syncTimeoutRef.current);
-		}
-
-		syncTimeoutRef.current = setTimeout(async () => {
-			try {
-				await syncAllConceptKeywords({ documentId });
-				await syncSideHelp({ documentId });
-			} catch (error) {
-				console.error("Failed to sync concept keywords:", error);
-			}
-		}, 5000);
-	};
 
 	// Debounced handler for block changes
 	const handleBlockChange = async (block: Block) => {

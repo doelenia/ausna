@@ -130,7 +130,7 @@ export const syncObjectTagProperties = action({
 			// For each updated KD
 			for (const updatedKD of updatedKDs) {
 				// 1. Get knowledge string from all source KDs + current KD
-				let knowledgeString = updatedKD.knowledge || "";
+				let knowledgeString = updatedKD.extractedKnowledge || "";
 				
 				if (property.sourceKDs && property.sourceKDs.length > 0) {
 					const sourceKDs = await Promise.all(
@@ -141,7 +141,7 @@ export const syncObjectTagProperties = action({
 					
 					const sourceKnowledge = sourceKDs
 						.filter(kd => kd !== null)
-						.map(kd => kd!.knowledge)
+						.map(kd => kd!.extractedKnowledge)
 						.join(" ");
 					
 					knowledgeString = `${sourceKnowledge} ${knowledgeString}`;

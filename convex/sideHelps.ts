@@ -141,10 +141,10 @@ export const processSHRelevantKnowledge = action({
 			});
 			if (!knowledgeData) throw new Error("Knowledge data not found");
 			const source: Doc<"documents"> = await ctx.runQuery(api.documents.getById, {
-				documentId: knowledgeData.sourceFile
+				documentId: knowledgeData.sourceId as Id<"documents">
 			});
 			if (!source) throw new Error("Source not found");
-			return { id: knowledge[0], confidence: knowledge[1], knowledge: knowledgeData.knowledge, sourceId: source._id, sourceTitle: source.title, sourceIcon: source.icon, sourceType: source.type, sourceSection: knowledgeData.sourceSection };
+			return { id: knowledge[0], confidence: knowledge[1], knowledge: knowledgeData.extractedKnowledge, sourceId: source._id, sourceTitle: source.title, sourceIcon: source.icon, sourceType: source.type, sourceSection: knowledgeData.sourceSection };
 		}));
 		
 		await ctx.runMutation(api.sideHelps.updateSHRelevantKnowledge, {

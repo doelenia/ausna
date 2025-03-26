@@ -22,7 +22,7 @@ interface Concept {
 interface KnowledgeData {
   _id: Id<"knowledgeDatas">;
   knowledge?: string;
-  sourceFile: Id<"documents">;
+  sourceFile: string;
   sourceSection?: string;
 }
 
@@ -60,11 +60,11 @@ const KnowledgeBlock = ({
   sourceSection
 }: {
   knowledge: string;
-  sourceId: Id<"documents">;
+  sourceId: string;
   sourceSection: string | undefined;
 }) => {
   const router = useRouter();
-  const sourceDocument = useQuery(api.documents.getById, { documentId: sourceId });
+  const sourceDocument = useQuery(api.documents.getById, { documentId: sourceId as Id<"documents"> });
 
   if (!sourceDocument) return null;
 
@@ -178,8 +178,8 @@ const KnowledgeTab = ({ documentId }: KnowledgeTabProps) => {
               {knowledges.map((kd) => (
                 <KnowledgeBlock
                   key={kd._id}
-                  knowledge={kd.knowledge || ""}
-                  sourceId={kd.sourceFile}
+                  knowledge={kd.extractedKnowledge || ""}
+                  sourceId={kd.sourceId}
                   sourceSection={kd.sourceSection}
                 />
               ))}

@@ -9,7 +9,9 @@ import { api } from "../convex/_generated/api";
 interface BlockContent {
 	type: string;
 	text?: string;
-	href?: string;
+	content?: {
+		text: string;
+	}
 	alias?: string;
 }
 
@@ -18,7 +20,6 @@ interface BlockInspect {
 	conceptSynced: boolean;
 	edited: boolean;
 	toRemove: boolean;
-	conceptKnowledge: Record<Id<"concepts">, Id<"knowledgeDatas">>;
 	blockMentionedConcepts: Id<"concepts">[];
 	references: Id<"references">[];
 }
@@ -141,7 +142,8 @@ export const create = mutation({
 			fileInspect: {
 				fileMentionedConcepts: [],
 				blocks: []
-			}
+			},
+			inspectInProgress: false
 		});
 
 		await ctx.runMutation(api.sideHelps.createSideHelp, {
@@ -342,10 +344,10 @@ export const update = mutation({
 				edited: v.boolean(),
 				toRemove: v.boolean(),
 				blockMentionedConcepts: v.array(v.id("concepts")),
-				conceptKnowledge: v.record(v.id("concepts"), v.id("knowledgeDatas")),
 				references: v.array(v.id("references"))
 			}))
-		}))
+		})),
+		inspectInProgress: v.optional(v.boolean())
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -598,7 +600,7 @@ export const getBlockTextFromBlock = action({
 				case "text":
 					return content.text;
 				case "link":
-					return `<LINK> ${content.href} <LINK>`;
+					return `<LINK> ${content.content!.text} <LINK>`;
 				case "conceptKeyword":
 					return `<CONCEPT> ${content.alias} <CONCEPT>`;
 				default:
@@ -616,7 +618,6 @@ export const InspectEditedBlock = action({
 			conceptSynced: v.boolean(),
 			edited: v.boolean(),
 			toRemove: v.boolean(),
-			conceptKnowledge: v.record(v.id("concepts"), v.id("knowledgeDatas")),
 			blockMentionedConcepts: v.array(v.id("concepts")),
 			references: v.array(v.id("references"))
 		}),
@@ -640,66 +641,15 @@ export const InspectEditedBlock = action({
 			block: JSON.stringify(block)
 		});
 
-		const toDelete = [];
-		// Handle existing knowledge data
-		for (const [conceptId, kdId] of Object.entries(args.blockInspect.conceptKnowledge)) {
-			await ctx.runAction(api.concepts.updateConcept, {
-				conceptId: conceptId as Id<"concepts">,
-				IsSynced: false
-			});
-
-			if (!args.blockInspect.blockMentionedConcepts.includes(conceptId as Id<"concepts">)) {
-				await ctx.runAction(api.knowledgeDatas.removeKD, {
-					knowledgeId: kdId
-				});
-				toDelete.push(conceptId);
-				continue;
-			}
-
-			const newKnowledge = await ctx.runAction(api.llm.fetchKDLLM, {
-				conceptId: conceptId as Id<"concepts">,
-				sourceId: args.documentId,
-				blockText: blockText,
-				knowledgeId: kdId
-			});
-
-			await ctx.runAction(api.knowledgeDatas.updateKD, {
-				knowledgeId: kdId,
-				knowledge: newKnowledge,
-				isProcessed: false
-			});
-		}
-
 		// Handle new concepts that don't have knowledge data yet
 		for (const conceptId of args.blockInspect.blockMentionedConcepts) {
-			if (!args.blockInspect.conceptKnowledge[conceptId]) {
-				// Create new knowledge data for this concept
-				const newKnowledge = await ctx.runAction(api.llm.fetchKDLLM, {
-					conceptId: conceptId,
-					sourceId: args.documentId,
-					blockText: blockText
-				});
-
-				const newKnowledgeData = await ctx.runAction(api.knowledgeDatas.addKD, {
-					conceptId: conceptId,
-					sourceId: args.documentId,
-					blockId: args.blockInspect.blockId,
-					knowledge: newKnowledge,
-				});
-
-				args.blockInspect.conceptKnowledge[conceptId] = newKnowledgeData;
-
-				// Mark concept for syncing
-				await ctx.runAction(api.concepts.updateConcept, {
-					conceptId: conceptId,
-					IsSynced: false
-				});
-			}
-		}
-
-		// Remove deleted concepts
-		for (const conceptId of toDelete) {
-			delete args.blockInspect.conceptKnowledge[conceptId as Id<"concepts">];
+			await ctx.runAction(api.llm.updateKDLLM, {
+				conceptId: conceptId,
+				sourceType: "document",
+				sourceId: args.documentId,
+				sourceSection: args.blockInspect.blockId,
+				sourceText: blockText
+			});
 		}
 
 		args.blockInspect.edited = false;
@@ -715,10 +665,20 @@ export const InspectDocument = action({
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
 
+		console.log("Inspecting the entire document:", args.documentId);
+		
+
 		// First sync all concept keywords
 		await ctx.runAction(api.documents.syncAllConceptKeywords, {
 			documentId: args.documentId
 		});
+
+		// wait till the inspectInProgress is false
+		while (await ctx.runQuery(api.documents.getInspectInProgress, {
+			documentId: args.documentId
+		})) {
+			await new Promise(resolve => setTimeout(resolve, 1000));
+		}
 
 		let needUpdate = false;
 
@@ -728,7 +688,6 @@ export const InspectDocument = action({
 		if (!document) throw new Error("Document not found");
 		if (!document.fileInspect) return;
 
-		const conceptsToSync = new Set<Id<"concepts">>();
 
 		// 1. Process blocks marked for removal
 		for (const blockInspect of document.fileInspect.blocks) {
@@ -748,10 +707,6 @@ export const InspectDocument = action({
 				const updatedBlockInspect = await ctx.runAction(api.documents.InspectEditedBlock, {
 					documentId: args.documentId,
 					blockInspect: blockInspect
-				});
-
-				updatedBlockInspect.blockMentionedConcepts.forEach(conceptId => {
-					conceptsToSync.add(conceptId);
 				});
 
 				// update the fileInspect with the updatedBlockInspect
@@ -791,57 +746,56 @@ export const getBlockInspect = query({
 	}
 });
 
-export const markBlockAsEdited = mutation({
-	args: {
-		documentId: v.id("documents"),
-		blockId: v.string(),
-		isDeleted: v.optional(v.boolean())
-	},
-	handler: async (ctx, args) => {
-		const document = await ctx.db.get(args.documentId);
-		if (!document?.fileInspect) return;
+// export const markBlockAsEdited = mutation({
+// 	args: {
+// 		documentId: v.id("documents"),
+// 		blockId: v.string(),
+// 		isDeleted: v.optional(v.boolean())
+// 	},
+// 	handler: async (ctx, args) => {
+// 		const document = await ctx.db.get(args.documentId);
+// 		if (!document?.fileInspect) return;
 
-		console.log("Marking block as edited:", args.blockId);
+// 		console.log("Marking block as edited:", args.blockId);
 
-		let updatedBlocks = document.fileInspect.blocks;
-		const existingBlock = updatedBlocks.find(block => block.blockId === args.blockId);
+// 		let updatedBlocks = document.fileInspect.blocks;
+// 		const existingBlock = updatedBlocks.find(block => block.blockId === args.blockId);
 
-		if (!existingBlock) {
-			// Initialize new block inspect
-			const newBlockInspect: BlockInspect = {
-				blockId: args.blockId,
-				conceptSynced: false,
-				edited: true,
-				toRemove: args.isDeleted ?? false,
-				conceptKnowledge: {},
-				blockMentionedConcepts: [],
-				references: []
-			};
-			updatedBlocks = [...updatedBlocks, newBlockInspect];
-		} else {
-			// Update existing block
-			updatedBlocks = updatedBlocks.map(block => 
-				block.blockId === args.blockId 
-					? { 
-						...block, 
-						edited: true,
-						toRemove: args.isDeleted ?? block.toRemove
-					}
-					: block
-			);
-		}
+// 		if (!existingBlock) {
+// 			// Initialize new block inspect
+// 			const newBlockInspect: BlockInspect = {
+// 				blockId: args.blockId,
+// 				conceptSynced: false,
+// 				edited: true,
+// 				toRemove: args.isDeleted ?? false,
+// 				blockMentionedConcepts: [],
+// 				references: []
+// 			};
+// 			updatedBlocks = [...updatedBlocks, newBlockInspect];
+// 		} else {
+// 			// Update existing block
+// 			updatedBlocks = updatedBlocks.map(block => 
+// 				block.blockId === args.blockId 
+// 					? { 
+// 						...block, 
+// 						edited: true,
+// 						toRemove: args.isDeleted ?? block.toRemove
+// 					}
+// 					: block
+// 			);
+// 		}
 
-		await ctx.db.patch(args.documentId, {
-			fileInspect: {
-				...document.fileInspect,
-				blocks: updatedBlocks
-			}
-		});
+// 		await ctx.db.patch(args.documentId, {
+// 			fileInspect: {
+// 				...document.fileInspect,
+// 				blocks: updatedBlocks
+// 			}
+// 		});
 
-		console.log("Updated block inspect:", updatedBlocks.find(block => block.blockId === args.blockId));
-		return updatedBlocks.find(block => block.blockId === args.blockId);
-	}
-});
+// 		console.log("Updated block inspect:", updatedBlocks.find(block => block.blockId === args.blockId));
+// 		return updatedBlocks.find(block => block.blockId === args.blockId);
+// 	}
+// });
 
 export const removeBlock = action({
 	args: {
@@ -851,7 +805,6 @@ export const removeBlock = action({
 			edited: v.boolean(),
 			conceptSynced: v.boolean(),
 			toRemove: v.boolean(),
-			conceptKnowledge: v.record(v.id("concepts"), v.id("knowledgeDatas")),
 			blockMentionedConcepts: v.array(v.id("concepts")),
 			references: v.array(v.id("references"))
 		})
@@ -861,12 +814,19 @@ export const removeBlock = action({
 		if (!identity) throw new Error("Not authenticated");
 
 		// 1. Remove all knowledge data
-		for (const kdId of Object.values(args.blockInspect.conceptKnowledge)) {
+		// fetch all knowledgeDatas with sourceId = args.documentId and blockId = args.blockInspect.blockId
+		const knowledgeDatas = await ctx.runQuery(api.knowledgeDatas.getConceptKDbySource, {
+			sourceType: "document",
+			sourceId: args.documentId,
+			blockId: args.blockInspect.blockId
+		});
+
+		// remove all knowledgeDatas
+		for (const kd of knowledgeDatas) {
 			await ctx.runAction(api.knowledgeDatas.removeKD, {
-				knowledgeId: kdId
+				knowledgeId: kd._id
 			});
 		}
-
 
 		// 2. Remove all references
 		for (const refId of args.blockInspect.references) {
@@ -916,19 +876,14 @@ export const SyncConceptKeyword = action({
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
 
+		console.log("Syncing concept keyword for block:", args.blockId);
+
 		// 1. Get block text
 		const block = await ctx.runQuery(api.documents.getBlockById, {
 			documentId: args.documentId,
 			blockId: args.blockId
 		});
 		if (!block) throw new Error("Block not found");
-
-
-
-		await ctx.runAction(api.documents.markBlockAsConceptSynced, {
-			documentId: args.documentId,
-			blockId: args.blockId
-		});
 
 		// get block text
 		const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {
@@ -944,6 +899,8 @@ export const SyncConceptKeyword = action({
 			blockId: args.blockId,
 			documentId: args.documentId
 		});
+
+		console.log(`Concept keywords: ${conceptKeywords} for block: ${args.blockId}`);
 
 		// 5. Mark block as edited in fileInspect and update concepts
 		const document = await ctx.runQuery(api.documents.getById, {
@@ -974,6 +931,8 @@ export const SyncConceptKeyword = action({
 			...document.fileInspect.fileMentionedConcepts,
 			...newConceptIds
 		]));
+
+		console.log(`Updated fileMentionedConcepts: ${updatedFileConcepts} for block: ${args.blockId}`);
 
 		await ctx.runMutation(api.documents.update, {
 			id: args.documentId,
@@ -1019,7 +978,6 @@ export const InspectAllBlock = action({
 					conceptSynced: false,
 					edited: true, // Mark as edited since we need to inspect it
 					toRemove: false,
-					conceptKnowledge: {},
 					blockMentionedConcepts: [],
 					references: []
 				};
@@ -1086,12 +1044,12 @@ export const addConceptKeyword = mutation({
 
 		if (!blockInspect) {
 			// Create new block inspect with empty conceptKnowledge
+			console.log("Creating new block inspect due to invalid blockInspect");
 			updatedBlocks = [...updatedBlocks, {
 				blockId: args.blockId,
 				edited: true,
 				conceptSynced: false,
 				toRemove: false,
-				conceptKnowledge: {}, // Initialize as empty object
 				blockMentionedConcepts: [args.conceptId],
 				references: []
 			}];
@@ -1134,6 +1092,14 @@ export const syncAllConceptKeywords = action({
 			documentId: args.documentId
 		});
 		if (!document?.fileInspect) return;
+		if (document.inspectInProgress) return;
+
+		await ctx.runMutation(api.documents.setInspectInProgress, {
+			documentId: args.documentId,
+			inspectInProgress: true
+		});
+
+		console.log("Syncing all concept keywords for document:", args.documentId);
 
 		// Find all blocks that need concept syncing also not deleted
 		const unsyncedBlocks = document.fileInspect.blocks.filter(
@@ -1147,6 +1113,11 @@ export const syncAllConceptKeywords = action({
 				blockId: block.blockId
 			});
 		}
+
+		await ctx.runMutation(api.documents.setInspectInProgress, {
+			documentId: args.documentId,
+			inspectInProgress: false
+		});
 
 		return true;
 	}
@@ -1174,14 +1145,7 @@ export const syncFileInspect = action({
 		// Create a new blocks array with all updates
 		let updatedBlocks = [...document.fileInspect.blocks];
 
-		// 1. Mark deleted blocks
-		updatedBlocks = updatedBlocks.map(blockInspect => 
-			!currentBlockIds.has(blockInspect.blockId)
-				? { ...blockInspect, edited: true, toRemove: true }
-				: blockInspect
-		);
-
-		// 2. Update or add new/modified blocks
+		// for updated blocks, create a new blockInspect and add or replace it in updatedBlocks
 		for (const currentBlock of args.currentBlocks) {
 			const prevBlock = args.prevBlocks.find(b => b.id === currentBlock.id);
 			const existingBlockIndex = updatedBlocks.findIndex(b => b.blockId === currentBlock.id);
@@ -1196,43 +1160,25 @@ export const syncFileInspect = action({
 					edited: true,
 					conceptSynced: false,
 					toRemove: false,
-					conceptKnowledge: {},
 					blockMentionedConcepts: [],
 					references: []
 				};
 
+				// push blockUpdate to updatedBlocks if it doesn't exist, otherwise replace it
 				if (existingBlockIndex === -1) {
-					// Add new block
 					updatedBlocks.push(blockUpdate);
 				} else {
-					// Update existing block
-					updatedBlocks[existingBlockIndex] = {
-						...updatedBlocks[existingBlockIndex],
-						...blockUpdate
-					};
+					updatedBlocks[existingBlockIndex] = blockUpdate;
 				}
 			}
 		}
 
-		// 3. Mark the input blockId as edited
-		const inputBlockIndex = updatedBlocks.findIndex(b => b.blockId === args.blockId);
-		if (inputBlockIndex === -1) {
-			updatedBlocks.push({
-				blockId: args.blockId,
-				edited: true,
-				conceptSynced: false,
-				toRemove: false,
-				conceptKnowledge: {},
-				blockMentionedConcepts: [],
-				references: []
-			});
-		} else {
-			updatedBlocks[inputBlockIndex] = {
-				...updatedBlocks[inputBlockIndex],
-				edited: true,
-				conceptSynced: false
-			};
-		}
+		// Mark deleted blocks
+		updatedBlocks = updatedBlocks.map(blockInspect => 
+			!currentBlockIds.has(blockInspect.blockId)
+				? { ...blockInspect, edited: true, toRemove: true }
+				: blockInspect
+		);
 
 		// Update document with all changes in one mutation
 		await ctx.runMutation(api.documents.update, {
@@ -1298,5 +1244,44 @@ export const markBlockAsConceptSynced = action({
 			}
 		});
 		return true;
+	}
+});
+
+export const setInspectInProgress = mutation({
+	args: {
+		documentId: v.id("documents"),
+		inspectInProgress: v.boolean()
+	},
+	handler: async (ctx, args) => {
+
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const document = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		if (!document) throw new Error("Document not found");
+
+		await ctx.runMutation(api.documents.update, {
+			id: args.documentId,
+			inspectInProgress: args.inspectInProgress
+		});
+		
+		return true;
+	}
+	
+});
+
+export const getInspectInProgress = query({
+	args: {
+		documentId: v.id("documents")
+	},
+	handler: async (ctx, args) => {
+		const document: Doc<"documents"> = await ctx.runQuery(api.documents.getById, {
+			documentId: args.documentId
+		});
+		if (!document) throw new Error("Document not found");
+
+		return document.inspectInProgress;
 	}
 });

@@ -14,6 +14,7 @@ export default defineSchema({
 		icon: v.optional(v.string()),
 		isPublished: v.boolean(),
 		typePropsID: v.optional(v.string()),
+		inspectInProgress: v.boolean(),
 		fileInspect: v.optional(v.object({
 			fileMentionedConcepts: v.array(v.id("concepts")),
 			blocks: v.array(v.object({
@@ -22,7 +23,6 @@ export default defineSchema({
 				edited: v.boolean(),
 				toRemove: v.boolean(),
 				blockMentionedConcepts: v.array(v.id("concepts")),
-				conceptKnowledge: v.record(v.id("concepts"), v.id("knowledgeDatas")),
 				references: v.array(v.id("references"))
 			}))
 		}))
@@ -143,22 +143,24 @@ export default defineSchema({
 
 	knowledgeDatas: defineTable({
 		userId: v.string(),
-		sourceFile: v.id("documents"),
+		sourceType: v.string(),
+		sourceId: v.string(),
 		sourceSection: v.optional(v.string()),
+		quotes: v.optional(v.array(v.string())),
 		isProcessed: v.boolean(),
 		isUpdated: v.boolean(),
 		conceptId: v.id("concepts"),
 		contributions: v.optional(v.array(v.string())),
-		knowledge: v.optional(v.string()),
+		extractedKnowledge: v.optional(v.string()),
 	})
 	.index("by_user", ["userId"])
 	.index("by_concept", ["userId", "conceptId"])
-	.index("by_source_file", ["sourceFile"])
+	.index("by_source_type_id", ["sourceType", "sourceId"])
 	.index("by_isProcessed_concept", ["userId", "conceptId", "isProcessed"])
 	.index("by_isUpdated_concept", ["userId", "conceptId", "isUpdated"])
-	.index("by_duplicate", ["userId", "conceptId", "sourceFile", "sourceSection"])
-	.searchIndex("search_knowledge", {
-		searchField: "knowledge",
+	.index("by_source_section", ["userId", "sourceType", "sourceId", "sourceSection", "conceptId"])
+	.searchIndex("search_extractedKnowledge", {
+		searchField: "extractedKnowledge",
 		filterFields: ["userId", "isProcessed", "isUpdated"],
 	}),
 
@@ -181,7 +183,7 @@ export default defineSchema({
 	vectorEmbeddings: defineTable({
 		userId: v.string(),
 		embedding: v.array(v.number()),
-		sourceId: v.string(),
+		sourceId: v.optional(v.string()),
 		type: v.string(),
 		contextId: v.optional(v.string()),
 		fileId: v.optional(v.string()),
