@@ -357,3 +357,26 @@ export const removeConceptKDbySource = action({
 		}
 	}
 });
+
+export const getKDbyIds = query({
+	args: {
+		knowledgeDataIds: v.array(v.id("knowledgeDatas"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		let knowledgeDatas: Doc<"knowledgeDatas">[] = [];
+
+		for (const knowledgeDataId of args.knowledgeDataIds) {
+			const knowledgeData = await ctx.db.get(knowledgeDataId);
+			if (!knowledgeData) throw new Error("Knowledge data not existed");
+
+			knowledgeDatas.push(knowledgeData);
+		}
+
+		return knowledgeDatas;
+	}
+});

@@ -40,7 +40,7 @@ export const addConcept = action({
 		blockId: v.optional(v.string()),
 		sourceType: v.optional(v.string()),
 	},
-	handler: async (ctx, args) => {
+	handler: async (ctx, args): Promise<Id<"concepts">> => {
 		const identity = await ctx.auth.getUserIdentity();
 
 		if (!identity) {
@@ -162,7 +162,8 @@ export const syncConcept = action({
 			if (concept.objectTags && concept.objectTags.length > 0) {
 				await ctx.runAction(api.concepts.updateConcept, {
 					conceptId: args.conceptId,
-					hidden: true
+					hidden: true,
+					IsSynced: true
 				});
 			} else {
 				// await ctx.runAction(api.concepts.removeConcept, {conceptId: args.conceptId});
@@ -210,6 +211,14 @@ export const syncConcept = action({
 
 			const blockText = await ctx.runAction(api.documents.getBlockTextFromBlock, {
 				block: JSON.stringify(block)
+			});
+			
+			// call updateKDLLM
+			await ctx.runAction(api.llm.updateKDLLM, {
+				sourceId: sourceId,
+				sourceType: sourceType,
+				conceptId: args.conceptId,
+				sourceText: blockText
 			});
 		}
 		
@@ -459,15 +468,19 @@ export const syncAllConcepts = action({
 
 export const searchConceptAlias = query({
 	args: {
-		userId: v.string(),
 		query: v.string(),
 	},
 	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
 		const concepts = await ctx.db.query("concepts")
 		.withSearchIndex("search_alias", (q) =>
 			q
 				.search("aliasString", args.query)
-				.eq("userId", args.userId)
+				.eq("userId", userId)
 		)
 		.collect();
 
@@ -571,3 +584,68 @@ export const getObjectConceptsByConceptId = query({
 		return concepts;
 	}
 });
+
+export const getConceptsAndDocumentsForTags = query({
+	args: {
+		conceptIds: v.array(v.id("concepts")),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+
+		// Fetch all concepts
+		const concepts = await Promise.all(
+			args.conceptIds.map(conceptId => 
+				ctx.db.get(conceptId)
+			)
+		);
+
+		// Fetch documents for concepts that have rootDocument
+		const documentIds = concepts
+			.map(concept => concept?.rootDocument)
+			.filter((id): id is Id<"documents"> => id !== undefined);
+
+		const documents = await Promise.all(
+			documentIds.map(docId => 
+				ctx.db.get(docId)
+			)
+		);
+
+		// Create a map of document titles by document ID
+		const documentTitles = new Map(
+			documents.map(doc => [doc!._id, doc!.title])
+		);
+
+		// Return concept IDs with their document titles
+		return args.conceptIds.map(conceptId => {
+			const concept = concepts.find(c => c?._id === conceptId);
+			const documentTitle = concept?.rootDocument 
+				? documentTitles.get(concept.rootDocument)
+				: undefined;
+
+			return {
+				conceptId,
+				documentTitle
+			};
+		});
+	},
+});
+
+export const getConceptsByIds = query({
+	args: {
+		conceptIds: v.array(v.id("concepts")),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const concepts = await ctx.db.query("concepts")
+		.withIndex("by_user", (q) => q.eq("userId", userId))
+		.collect();
+
+		return concepts.filter(concept => args.conceptIds.includes(concept._id));
+	}
+});	

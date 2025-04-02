@@ -9,6 +9,7 @@ import {
   Settings,
   Plus,
   Trash,
+  Database,
 } from "lucide-react";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useRef, ComponentRef, useState, useEffect, use } from "react";
@@ -164,6 +165,12 @@ export const Navigation = () => {
             icon={Brain} 
             onClick={() => router.push("/knowledge-base")}
             active={pathname?.includes("/knowledge-base")}
+          />
+          <Item 
+            label="Databases" 
+            icon={Database} 
+            onClick={() => router.push("/databases")}
+            active={pathname?.includes("/databases")}
           />
           <Item label="Search" icon={Search} isSearch onClick={search.onOpen} />
           <Item onClick={handleCreate} label="New page" icon={PlusCircle} />

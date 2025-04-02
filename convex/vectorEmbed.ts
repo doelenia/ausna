@@ -115,6 +115,11 @@ export const addVectorEmbedding = action({
 		if (!identity) throw new Error("Not authenticated");
 
 		const userId = identity.subject;
+
+		if (args.text.length === 0) {
+			console.log("text is empty");
+			return [];
+		}
 		
 		const embeddings = await embedTexts([args.text]);
 
@@ -164,6 +169,8 @@ export const addVectorEmbeddingsforConcept = action({
 			vectorEmbeddingIds = vectorEmbeddingIds.concat(Ids);
 		}
 
+		console.log("finished adding vector embeddings for concept alias");
+
 		// add vector embedding for concept description
 		const Ids = await ctx.runAction(api.vectorEmbed.addVectorEmbedding, {
 			text: concept.description || "",
@@ -171,6 +178,8 @@ export const addVectorEmbeddingsforConcept = action({
 			type: "concept_description",
 		});
 		vectorEmbeddingIds = vectorEmbeddingIds.concat(Ids);
+
+		console.log("finished adding vector embeddings for concept description");
 
 		return vectorEmbeddingIds;
 	}
@@ -282,6 +291,7 @@ export const searchSimilarConcepts = action({
 		name: v.string(),
 		description: v.string(),
 		limit: v.optional(v.number()),
+		scoreThreshold: v.optional(v.number()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -302,13 +312,18 @@ export const searchSimilarConcepts = action({
 		});
 
 		// remove duplicates
-		const similar_concepts: {
+		let similar_concepts: {
 			_id: Id<"vectorEmbeddings">;
 			_score: number;
 	}[] = Array.from(new Set([...concepts_with_similar_name, ...concepts_with_similar_description]));
 
 		//rank by score
 		similar_concepts.sort((a, b) => b._score - a._score);
+
+		// filter by score threshold if provided
+		if (args.scoreThreshold) {
+			similar_concepts = similar_concepts.filter((concept) => concept._score >= args.scoreThreshold!);
+		}
 
 		// return the top limit concepts ids
 		const top_vector_embeddings = similar_concepts.slice(0, args.limit).map((concept) => concept._id);
@@ -321,7 +336,10 @@ export const searchSimilarConcepts = action({
 			return vectorEmbedding!.sourceId as Id<"concepts">;
 		}));
 
-		return conceptIds;
+		// remove duplicates
+		let uniqueConceptIds = Array.from(new Set(conceptIds));
+
+		return uniqueConceptIds;
 	}
 });
 
@@ -439,6 +457,51 @@ export const searchSimilarKnowledgeData = action({
 	}
 });
 
+export const searchSimilarKnowledgeDatawithScore = action({
+	args: {
+		query: v.string(),
+		conceptId: v.optional(v.id("concepts")),
+		sourceIds: v.optional(v.array(v.string())),
+		scoreThreshold: v.optional(v.number()),
+		limit: v.optional(v.number()),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		let vectorEmbeddingIds = await ctx.runAction(api.vectorEmbed.vectorEmbedSearch, {
+			text: args.query,
+			type: "knowledge_data",
+			contextId: args.conceptId,
+			sourceIds: args.sourceIds,
+			limit: args.limit,
+		});
+
+		// filter by score threshold if provided
+		if (args.scoreThreshold) {
+			vectorEmbeddingIds = vectorEmbeddingIds.filter((result) => result._score >= args.scoreThreshold!);
+		}
+
+		// for each vector embedding id, get the vector embedding doc and get the knowledgeDataId from its sourceId
+		const knowledgeDataIds: {
+			_id: Id<"knowledgeDatas">;
+			_score: number;
+		}[] = await Promise.all(vectorEmbeddingIds.map(async (result) => {
+			const vectorEmbedding: Doc<"vectorEmbeddings"> | undefined = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingById, {
+				vectorEmbeddingId: result._id,
+			});
+			return {
+				_id: vectorEmbedding!.sourceId as Id<"knowledgeDatas">,
+				_score: result._score,
+			};
+		}));
+
+		return knowledgeDataIds;
+	}
+});
+
 export async function embedTexts(texts: string[]) {
 	if (texts.length === 0) return [];
 	const openai = new OpenAI({
@@ -466,7 +529,16 @@ export const vectorEmbedSearch = action({
 
 		const userId = identity.subject;
 
-		const [textEmbedding] = await embedTexts([args.text]);
+		// check if the text is empty
+		if (args.text.length === 0) {
+			console.log("text is empty");
+			return [];
+		}
+
+		// trim the text for newlines and spaces and non-alphabetic or numeric characters
+		const trimmedText = args.text.trim().replace(/[^a-zA-Z0-9\s]/g, '');
+
+		const [textEmbedding] = await embedTexts([trimmedText]);
 
 		let vectorEmbeddings: { _id: Id<"vectorEmbeddings">; _score: number; }[] = [];
 
@@ -502,3 +574,140 @@ export const vectorEmbedSearch = action({
 	}
 });
 
+export const vectorSearchRelevantKnowledgeData = action({
+	args: {
+		query: v.string(),
+		conceptId: v.optional(v.id("concepts")),
+		conceptName: v.string(),
+		conceptDescription: v.string(),
+		contextQuery: v.optional(v.string()),
+		contextSourceIds: v.optional(v.array(v.object({
+			sourceId: v.string(),
+			score: v.number(),
+		})))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		// 1. get similar concepts by conceptId
+
+		const similarConcepts = await ctx.runAction(api.vectorEmbed.searchSimilarConcepts, {
+			name: args.conceptName,
+			description: args.conceptDescription,
+			scoreThreshold: 0.5,
+			limit: 5,
+		});
+
+		const similarConceptsWithContext = await ctx.runAction(api.vectorEmbed.searchSimilarConcepts, {
+			name: args.conceptName,
+			description: args.conceptDescription + " " + args.contextQuery,
+			scoreThreshold: 0.5,
+			limit: 5,
+		});
+
+
+		// combine similar concepts and similar concepts with context
+		let combinedConcepts = Array.from(new Set([...similarConcepts, ...similarConceptsWithContext]));
+
+		// add conceptId to combined concepts if it exists
+		if (args.conceptId) {
+			combinedConcepts = Array.from(new Set([...combinedConcepts, args.conceptId]));
+		}
+
+		// 2. for each concept, get relevant knowledge data
+
+		let weightedrelevantKnowledgeDatawithScore: {
+			_id: Id<"knowledgeDatas">;
+			_score: number;
+		}[] = [];
+
+		await Promise.all(combinedConcepts.map(async (conceptId) => {
+			const knowledgeDataIds = await ctx.runAction(api.vectorEmbed.searchSimilarKnowledgeDatawithScore, {
+				query: args.query,
+				conceptId: conceptId,
+				limit: 10,
+			});
+			// for each knowledgeDataId, get the knowledge data and check if its sourceId is in the contextSourceIds, if it is, add them to weightedrelevantKnowledgeDatawithScore with original score + 0.5 * score from contextSourceIds, if not, add them with original score.
+			for (const knowledgeDataId of knowledgeDataIds) {
+				const knowledgeData = await ctx.runQuery(api.knowledgeDatas.getKDById, {
+					knowledgeId: knowledgeDataId._id,
+				});
+				if (args.contextSourceIds && args.contextSourceIds.length > 0 && args.contextSourceIds !== undefined) {
+					const contextSourceId = args.contextSourceIds.find((sourceId) => sourceId.sourceId === knowledgeData.sourceId);
+					if (contextSourceId) {
+						weightedrelevantKnowledgeDatawithScore.push({
+							_id: knowledgeDataId._id,
+							_score: knowledgeDataId._score + 0.5 * contextSourceId.score,
+						});
+					} else {
+						weightedrelevantKnowledgeDatawithScore.push({
+							_id: knowledgeDataId._id,
+							_score: knowledgeDataId._score,
+						});
+					}
+				}
+			}
+		}));
+
+		// sort weightedrelevantKnowledgeDatawithScore by score descending
+		weightedrelevantKnowledgeDatawithScore.sort((a, b) => b._score - a._score);
+
+		// remove duplicates
+		const uniqueKnowledgeDataIds = Array.from(new Set(weightedrelevantKnowledgeDatawithScore.map((knowledgeData) => knowledgeData._id)));
+
+		// return the top 5 knowledge data ids
+		return uniqueKnowledgeDataIds.slice(0, 10);
+	}
+});
+
+export const vectorSearchRelevantSources = action({
+	args: {
+		query: v.string(),
+		limit: v.optional(v.number()),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		// 1. get relevant knowledge data
+		const relevantKnowledgeData = await ctx.runAction(api.vectorEmbed.searchSimilarKnowledgeDatawithScore, {
+			query: args.query,
+			limit: args.limit || 50,
+		});
+
+		// 2. get the sourceIds from the relevant knowledge data, record the sourceId and the score of the knowledge data
+		const sourceIdsWithScore: {
+			sourceId: string;
+			score: number;
+		}[] = [];
+		for (const knowledgeDataId of relevantKnowledgeData) {
+			const knowledgeData = await ctx.runQuery(api.knowledgeDatas.getKDById, {
+				knowledgeId: knowledgeDataId._id,
+			});
+			sourceIdsWithScore.push({
+				sourceId: knowledgeData.sourceId,
+				score: knowledgeDataId._score,
+			});
+		}
+
+		// 3. group by sourceId and take max score
+		const groupedSourceIdsWithScore = sourceIdsWithScore.reduce((acc, curr) => {
+			acc[curr.sourceId] = Math.max(acc[curr.sourceId] || 0, curr.score);
+			return acc;
+		}, {} as Record<string, number>);
+
+		// 4. sort by score descending
+		const sortedSourceIdsWithScore = Object.entries(groupedSourceIdsWithScore).sort((a, b) => b[1] - a[1]);
+
+		// 5. return the top 10 sourceIds with score or the limit if provided in the format of {sourceId: string, score: number}
+		return sortedSourceIdsWithScore.slice(0, args.limit || 10).map(([sourceId, score]) => ({
+			sourceId: sourceId,
+			score: score,
+		}));
+	}
+});

@@ -91,9 +91,12 @@ export default defineSchema({
 		propertyName: v.optional(v.string()),
 		objectPropertiesTemplateId: v.optional(v.id("objectPropertiesTemplates")),
 		value: v.optional(v.any()),
+		autoFilledValue: v.optional(v.any()),
 		type: v.optional(v.string()),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
 		sourceKDsString: v.optional(v.string()),
+		autosync: v.string(),
+		prompt: v.optional(v.string()),
 	})
 	.index("by_user", ["userId"])
 	.index("by_object_tag", ["userId", "objectTagId"])
@@ -101,7 +104,8 @@ export default defineSchema({
     searchField: "sourceKDsString",
     filterFields: ["userId"],
   })
-	.index("by_concept", ["userId", "conceptId"]),
+	.index("by_concept", ["userId", "conceptId"])
+	.index("by_object_properties_template", ["userId", "objectPropertiesTemplateId"]),
 
 	objectTags: defineTable({
 		userId: v.string(),
@@ -116,6 +120,7 @@ export default defineSchema({
 	.index("by_user", ["userId"])
 	.index("by_concept", ["userId", "conceptId"])
 	.index("by_object_concept_id", ["userId", "objectConceptId"])
+	.index("by_template_id", ["userId", "templateID"])
 	.searchIndex("search_source_kd", {
     searchField: "sourceKDsString",
     filterFields: ["userId"],
@@ -128,6 +133,8 @@ export default defineSchema({
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
 		description: v.optional(v.string()),
 		propsList: v.optional(v.array(v.id("objectPropertiesTemplates"))),
+		isInitialized: v.optional(v.boolean()),
+		lastSyncedTime: v.optional(v.number()),
 	})
 	.index("by_user", ["userId"])
 	.index("by_concept", ["userId", "conceptId"]),
@@ -137,6 +144,8 @@ export default defineSchema({
 		objectTemplateId: v.id("objectTemplates"),
 		propertyName: v.string(),
 		type: v.string(),
+		autosync: v.boolean(),
+		prompt: v.optional(v.string()),
 	})
 	.index("by_user", ["userId"])
 	.index("by_object_template", ["userId", "objectTemplateId"]),

@@ -77,6 +77,11 @@ export default function Editor({
 
 	// Wrapper for inspectDocument that manages the inspection promise
 	const runInspectDocument = async () => {
+		// If there's already an inspection in progress, wait for it
+		if (inspectionInProgressRef.current) {
+			return inspectionInProgressRef.current;
+		}
+
 		// Only run if there are changes since last inspection
 		if (!hasChangedSinceLastInspectionRef.current) {
 			return;
@@ -90,7 +95,7 @@ export default function Editor({
 		// Create a new inspection promise
 		inspectionInProgressRef.current = (async () => {
 			try {
-				await inspectDocument({ documentId });
+				// await inspectDocument({ documentId });
 				// Reset the change flag after successful inspection
 				hasChangedSinceLastInspectionRef.current = false;
 			} finally {
@@ -118,7 +123,7 @@ export default function Editor({
 		const handleRouteChange = async () => {
 			try {
 				console.log("inspecting document before leaving", documentId);
-				await runInspectDocument();
+				// await runInspectDocument();
 			} catch (error) {
 				console.error("Failed to inspect document on route change:", error);
 			}
@@ -145,10 +150,9 @@ export default function Editor({
 			window.removeEventListener('beforeunload', handleBeforeUnload);
 			
 			// Run inspection when unmounting the editor component
-			// This ensures we save changes when navigating away from a document
 			handleRouteChange();
 		};
-	}, [documentId, inspectDocument]);
+	}, [documentId]);
 
 	// Handle inactivity
 	const resetInactivityTimer = useCallback(() => {
@@ -163,13 +167,13 @@ export default function Editor({
 			if (timeSinceLastActivity >= 60000) { // 1 minute
 				try {
 					console.log("inspecting document after inactivity of 1 minute");
-					await runInspectDocument();
+					// await runInspectDocument();
 				} catch (error) {
 					console.error("Failed to inspect document after inactivity:", error);
 				}
 			}
 		}, 60000); // Check every minute
-	}, [documentId, inspectDocument]);
+	}, [documentId]);
 
 	// Update editor onChange to include activity tracking
 	const handleEditorChange = async () => {
@@ -190,7 +194,7 @@ export default function Editor({
 		currentSyncPromiseRef.current = new Promise<void>((resolve) => {
 			syncTimeoutRef.current = setTimeout(async () => {
 				try {
-					await syncAllConceptKeywords({ documentId });
+					// await syncAllConceptKeywords({ documentId });
 					await syncSideHelp({ documentId });
 					resolve();
 				} catch (error) {
