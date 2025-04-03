@@ -106,6 +106,12 @@ export const addAllKD = action({
 
 		for (const [blockId, [block, documentId, aliasList]] of Object.entries(blocksDictionary)) {
 
+			// check if blockId is not null and valid
+			if (!blockId) {
+				console.log("no sourceId or blockId");
+				continue;
+			}
+
 			await ctx.runAction(api.knowledgeDatas.addKD, {conceptId: args.conceptId, sourceId: documentId, blockId: blockId, sourceType: "document"});
 			
 			// update concept with aliasList appending to existing aliasList

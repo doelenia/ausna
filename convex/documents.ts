@@ -669,16 +669,16 @@ export const InspectDocument = action({
 		
 
 		// First sync all concept keywords
-		await ctx.runAction(api.documents.syncAllConceptKeywords, {
-			documentId: args.documentId
-		});
+		// await ctx.runAction(api.documents.syncAllConceptKeywords, {
+		// 	documentId: args.documentId
+		// });
 
 		// wait till the inspectInProgress is false
-		while (await ctx.runQuery(api.documents.getInspectInProgress, {
-			documentId: args.documentId
-		})) {
-			await new Promise(resolve => setTimeout(resolve, 1000));
-		}
+		// while (await ctx.runQuery(api.documents.getInspectInProgress, {
+		// 	documentId: args.documentId
+		// })) {
+		// 	await new Promise(resolve => setTimeout(resolve, 1000));
+		// }
 
 		let needUpdate = false;
 
@@ -717,9 +717,9 @@ export const InspectDocument = action({
 			}
 		}
 
-		await ctx.runAction(api.concepts.syncAllConcepts, {
-			userId: identity.subject
-		});
+		// await ctx.runAction(api.concepts.syncAllConcepts, {
+		// 	userId: identity.subject
+		// });
 
 		// Update document with new fileInspect
 		if (needUpdate) {

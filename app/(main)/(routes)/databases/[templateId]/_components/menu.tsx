@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/clerk-react";
-import { useMutation } from "convex/react";
+import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,9 +24,17 @@ interface MenuProps {
 export const Menu = ({ templateId }: MenuProps) => {
   const router = useRouter();
   const { user } = useUser();
+  const removeObjectTemplate = useAction(api.objectTemplates.removeObjectTemplate);
 
   const onDelete = () => {
-    // TODO: Implement delete functionality
+    const promise = removeObjectTemplate({ templateId });
+
+    toast.promise(promise, {
+      loading: "Deleting database...",
+      success: "Database deleted successfully.",
+      error: "Failed to delete database."
+    });
+
     router.push("/databases");
   };
 

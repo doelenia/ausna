@@ -64,6 +64,11 @@ export const updateKDLLM = action({
 
 		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
 
+		if (!args.sourceSection) {
+			console.log("no sourceSection");
+			return;
+		}
+
 		// remove all knowledgeDatas that have the same sourceType, sourceId, and sourceSection
 		await ctx.runAction(api.knowledgeDatas.removeConceptKDbySource, {
 			sourceType: args.sourceType,
@@ -211,7 +216,6 @@ To resolve its failed operating system strategy, it bought NeXT.{tuple_delimiter
 			// remove duplicates in uniqueQuotes
 			const uniqueQuotesSet = new Set(uniqueQuotes);
 			const uniqueQuotesArray = Array.from(uniqueQuotesSet);
-			
 			await ctx.runAction(api.knowledgeDatas.addKD, {
 				conceptId: args.conceptId,
 				knowledge: knowledge,
@@ -330,7 +334,7 @@ export const fetchBestMatchedConcept = action({
 			-Steps-
 			1. Analyze entity name and description and fully understand what entity specifically refers to.
 
-			2. Carefully compare the entity with each candidate concept, determine if there is a candidate concept refers the exact same entity.
+			2. Carefully compare the entity with each candidate concept, determine if there is a candidate concept refers to the same entity. If there is a entity with very similar name, they are likely to be the same entity.	
 			
 			3. If there is a good match, return only the concept index of the best match.
 			
@@ -370,7 +374,7 @@ export const fetchBestMatchedConcept = action({
 		});
 
 		// Return undefined if no match found, otherwise return the concept ID
-		if (bestMatchStr.includes("no match found")) {
+		if (bestMatchStr.toLowerCase().includes("no match found")) {
 			return;
 		} else {
 			const matchIndex = parseInt(bestMatchStr);
@@ -432,7 +436,7 @@ export const fetchConceptKeywords = action({
 		// Get entity types with full context
 		const entityTypeListStr = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
-				Given a context of the document and the current block, identify all possible entities types that a user may pay attention to looking for the crucial information.
+				Given a context of the document, identify all possible entities types that a user may pay attention to looking for the crucial information.
 				
 				-Steps-
 				1. Identify all entities types that might be relevant to the topic, context, purpose, or potential usage of the text. For example, if it is a note, then user might be curious about specific terms for the subject, and if it is a report, then all names of organizations, people, events, or other entities might be relevant. Please be thorough.
@@ -441,7 +445,10 @@ export const fetchConceptKeywords = action({
 				[ENTITY TYPE 1, ENTITY TYPE 2, ...]
 
 				-Context-
-				The text provided includes the document title and all content up to the current block. Use this full context to identify relevant entity types that a user may pay attention to looking for the crucial information.
+				The text provided includes the document title and all content. Use this full context to identify relevant entity types that a user may pay attention to looking for the crucial information.
+
+				-Warning-
+				Do not include Datetime or other data type as the entity type as they are properties of the entity.
 				 
 				######################
 				-Examples-
@@ -454,11 +461,9 @@ export const fetchConceptKeywords = action({
 
 				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
 
-				{Current Block}:
-				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
 				######################
 				Output:
-				[ORGANIZATION, PERSON, DATETIME, LOCATION, BUSINESS TERMS, EVENT, DEPARTMENT]
+				[ORGANIZATION, PERSON, LOCATION, BUSINESS TERMS, EVENT, DEPARTMENT]
 
 				######################
 				Example 2:
@@ -468,19 +473,13 @@ export const fetchConceptKeywords = action({
 				TechGlobal's (TG) stock skyrocketed in its opening day on the Global Exchange Thursday. But IPO experts warn that the semiconductor corporation's debut on the public markets isn't indicative of how other newly listed companies may perform.
 
 				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
-
-				{Current Block}:
-				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
 				######################
 				Output:
-				[ORGANIZATION, PROPER NOUN, YEAR, ELECTRONIC DEVICE]
+				[ORGANIZATION, PROPER NOUN, ELECTRONIC DEVICE]
 				`,
 			question: `
 				{Text}:
 				${contextText}
-
-				{Current Block}:
-				${currentBlockText}
 			`,
 			model: "gpt-4o-mini"
 		});
@@ -511,8 +510,9 @@ export const fetchConceptKeywords = action({
 				2. Return output in English as a single list of all the entities identified in steps 1. Use **{record_delimiter}** as the list delimiter. 
 				
 				-Warning-
-				Please identify if an entity is a general concept or a specific instance of a concept. For the specific instance, making sure your naming could be used to identify this specific instance.
-				If there is no additional entities, please strictly return '**No additional entities identified**'
+				1. Please identify if an entity is a general concept or a contextual concept. For the contextual concept, making sure your naming is specific to the entity.
+				2. Avoiding adding properties or data as the context for the entity.
+				3. If there is no additional entities, please strictly return '**No additional entities identified**'
 
 				######################
 				-Examples-
@@ -545,7 +545,7 @@ export const fetchConceptKeywords = action({
 				{Text}:
 				${currentBlockText}
 			`,
-			model: "gpt-4o"
+			model: "gpt-4o-mini"
 		});
 
 		// if there is no additional entities (contains "**No additional entities identified**"), return an empty array
@@ -557,7 +557,7 @@ export const fetchConceptKeywords = action({
 			`);
 		console.log("entitiesStr: ", entitiesStr);
 
-		if (entitiesStr.includes("No additional entities identified")) {
+		if (entitiesStr.toLowerCase().includes("no additional entities identified")) {
 			return [];
 		}
 
@@ -628,22 +628,41 @@ export const fetchConceptKeywords = action({
 // Helper function to parse LLM response
 const parseLLMResponseforObjectTags = (response: string): Record<string, [string, string, string, string]> | undefined => {
 	try {
-		if (response.includes("no additional object tag detected")) {
+		if (response.toLowerCase().includes("no additional object tag detected")) {
 			return undefined;
 		}
 
-		const tagTuples = response.split(")**{record_delimiter}**(").map(t => t.replace(/[()]/g, ""));
+		console.log("response: ", response);
+
+		// Split by record_delimiter, ignoring any surrounding special characters
+		const tagTuples = response
+			.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+			.filter(t => t.length > 0);
+
 		const tagDictionary: Record<string, [string, string, string, string]> = {};
 
 		for (const tuple of tagTuples) {
-			const [parentName, parentDesc, objectName, objectDesc] = tuple.split("**{tuple_delimiter}**");
-			if (!parentName || !parentDesc || !objectName || !objectDesc) {
-				throw new Error("Invalid tuple format");
+			// Split by tuple_delimiter, ignoring any surrounding special characters
+			const elements = tuple
+				.split(/[^a-zA-Z0-9]tuple_delimiter[^a-zA-Z0-9]/)
+				.map(t => t.trim())
+				.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+				.filter(t => t.length > 0);
+			
+			console.log("elements: ", elements);
+
+			if (elements.length !== 4) {
+				console.warn("Invalid tuple format, skipping:", tuple);
+				continue;
 			}
+
+			const [parentName, parentDesc, objectName, objectDesc] = elements;
 			tagDictionary[objectName] = [parentName, parentDesc, objectName, objectDesc];
 		}
 
-		return tagDictionary;
+		return Object.keys(tagDictionary).length > 0 ? tagDictionary : undefined;
 	} catch (error) {
 		console.error("Failed to parse LLM response:", error);
 		return undefined;
@@ -667,60 +686,60 @@ export const fetchObjectTags = action({
 		// First attempt
 		const response = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
-			Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
-
-			-Context-
-			A tag represents that an entity is an instance of the parent entity that the tag refers to and can be used to learn about the parent entity's instances (For example, a tag "Financial Report Review Status" belong to parent entity "Financial Report" can be used to track the review status of all financial reports). These tags help group similar instances of the parent entity for specific usage purposes.
-
-			-Steps-
-			1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
-			2. Analyze new knowledges about the entity to determine if the entity is an instance of some parent entities.
-			3. For each parent entity, reason to check if new knowledges indicate a use case for the database of parent entity.
-			4. Check if the new tags are already in the list of existing tags.
-			5. Drafting all new tags' name and description that indicate how the entity could be used as a instance of the parent entity.
-			6. For each new tag, specify:
-			   - Parent entity name and description
-			   - Tag name (should mention the parent entity's name) and description.
-
-			-Response Format-
-			Return either:
-			1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
-			2. Exactly "**no additional object tag detected**" if no new tags found
-
-			-Warning-
-			Tags should be general to all instances of the parent entity and only indicate the usage of the entity.
-
-			#####################
-			-Examples-
-			#####################
-			Example 1:
-{Entity}: Q1 2024 Audit Summary  
-{Entity Description}: A document compiling key findings from internal audits in the first quarter of 2024.  
-{Updated Knowledges}: Includes a checklist of identified compliance gaps, remediation timelines, and audit owner contact information.  
-{Existing Tags}: [  
-  {Name: Audit Summary Status, Description: Tracks the review and approval status of audit summaries},  
-  {Name: Q1 2024 Financial Report Reference, Description: Links to financial reports from Q1 2024}  
-]
-
-			#####################
-			Output:
-			("Audit"**{tuple_delimiter}**"Records generated from formal internal audit activities for compliance, risk, or performance evaluation"**{tuple_delimiter}**"Internal Audit Record Remediation Tracker"**{tuple_delimiter}**"Tracks remediation actions and ownership for each internal audit record")**{record_delimiter}**("Audit Summary Status"**{tuple_delimiter}**"Tracks the review and approval status of audit summaries"**{tuple_delimiter}**" Financial Report Reference"**{tuple_delimiter}**"Links to financial reports")
- 
-
-
-			Example 2:
-{Entity}: Marketing Campaign Alpha  
-{Entity Description}: A digital marketing campaign launched in late 2023 targeting Gen Z consumers.  
-{Updated Knowledges}: Recently updated with new banner designs and additional social media analytics.  
-{Existing Tags}: [  
-  {Name: Campaign Performance Overview, Description: Summarizes campaign performance metrics},  
-  {Name: Campaign Launch Timeline, Description: Tracks the timeline and phases of marketing campaign deployment}  
-]
- 
-			#####################
-			Output:
-			**no additional object tag detected**
-			`,
+				Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
+	
+				-Context-
+				A tag represents that an entity is an instance of the parent entity that the tag refers to and can be used to learn about the parent entity's instances (For example, a tag "Financial Report Review Status" belong to parent entity "Financial Report" can be used to track the review status of all financial reports). These tags help group similar instances of the parent entity for specific usage purposes.
+	
+				-Steps-
+				1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
+				2. Analyze new knowledges about the entity to determine if the entity is an instance of some parent entities.
+				3. For each parent entity, reason to check if new knowledges indicate a use case for the database of parent entity.
+				4. Check if the new tags are already in the list of existing tags.
+				5. Drafting all new tags' name and description that indicate how the entity could be used as a instance of the parent entity.
+				6. For each new tag, specify:
+					 - Parent entity name and description
+					 - Tag name (should mention the parent entity's name) and description.
+	
+				-Response Format-
+				Return either:
+				1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
+				2. Exactly "**no additional object tag detected**" if no new tags found
+	
+				-Warning-
+				Tags should be general to all instances of the parent entity and only indicate the usage of the entity.
+	
+				#####################
+				-Examples-
+				#####################
+				Example 1:
+	{Entity}: Q1 2024 Audit Summary  
+	{Entity Description}: A document compiling key findings from internal audits in the first quarter of 2024.  
+	{Updated Knowledges}: Includes a checklist of identified compliance gaps, remediation timelines, and audit owner contact information.  
+	{Existing Tags}: [  
+		{Name: Audit Summary Status, Description: Tracks the review and approval status of audit summaries},  
+		{Name: Q1 2024 Financial Report Reference, Description: Links to financial reports from Q1 2024}  
+	]
+	
+				#####################
+				Output:
+				("Audit"**{tuple_delimiter}**"Records generated from formal internal audit activities for compliance, risk, or performance evaluation"**{tuple_delimiter}**"Internal Audit Record Remediation Tracker"**{tuple_delimiter}**"Tracks remediation actions and ownership for each internal audit record")**{record_delimiter}**("Audit Summary Status"**{tuple_delimiter}**"Tracks the review and approval status of audit summaries"**{tuple_delimiter}**" Financial Report Reference"**{tuple_delimiter}**"Links to financial reports")
+	 
+	
+	
+				Example 2:
+	{Entity}: Marketing Campaign Alpha  
+	{Entity Description}: A digital marketing campaign launched in late 2023 targeting Gen Z consumers.  
+	{Updated Knowledges}: Recently updated with new banner designs and additional social media analytics.  
+	{Existing Tags}: [  
+		{Name: Campaign Performance Overview, Description: Summarizes campaign performance metrics},  
+		{Name: Campaign Launch Timeline, Description: Tracks the timeline and phases of marketing campaign deployment}  
+	]
+	 
+				#####################
+				Output:
+				**no additional object tag detected**
+				`,
 			question: JSON.stringify({
 				'{Entity}': args.conceptName,
 				'{Entity Description}': args.description,
@@ -940,7 +959,7 @@ export const isContainConcept = action({
 			{Concept Description}: The central bank of the United States
 			{Aliases}: [Federal Reserve, US Central Bank]
 			{Text}: The Fed announced its latest policy decision today. The Federal Reserve Chair emphasized the importance of maintaining price stability.
-			#####################
+
 			Output:
 			Fed{tuple_delimiter}Federal Reserve
 
@@ -949,7 +968,7 @@ export const isContainConcept = action({
 			{Concept Description}: Apple's flagship smartphone product line
 			{Aliases}: [iPhone, Apple Phone]
 			{Text}: Samsung released its latest Galaxy smartphone with new camera features.
-			#####################
+
 			Output:
 			**does not contain**
 			`,
@@ -958,7 +977,9 @@ export const isContainConcept = action({
 				description: concept.description,
 				aliases: concept.aliasList,
 				text: args.blockText
-			})
+			}),
+
+			model: "gpt-4o-mini"
 		});
 
 		// Parse response and return results
@@ -969,6 +990,7 @@ export const isContainConcept = action({
 		// Split response into array of references
 
 		const references: string[] = response.split("{tuple_delimiter}").map((ref: string) => ref.trim());
+
 		return references;
 	}
 });
@@ -1043,7 +1065,11 @@ export const fetchBetterName = action({
 		});
 
 		const trimmedResponse = response.trim();
-		return trimmedResponse === "**no better name**" ? undefined : trimmedResponse;
+		// if the response does not contain "no better name", return the response
+		if (!trimmedResponse.toLowerCase().includes("no better name")) {
+			return trimmedResponse;
+		}
+		return undefined;
 	}
 });
 
@@ -1113,7 +1139,7 @@ export const fetchSHRelevantKD = action({
 				});
 
 				// 2. Search knowledge for each keyword
-				if (keywordsResponse.includes("no relevant keywords found")) {
+				if (keywordsResponse.toLowerCase().includes("no relevant keywords found")) {
 					continue;
 				}
 				const knowledgeAppearances: Record<string, number> = {};
@@ -1205,7 +1231,7 @@ export const fetchSHRelevantKD = action({
 
 					console.log(confidenceResponse);
 
-					if (!confidenceResponse.includes("no relevant knowledge found")) {
+					if (!confidenceResponse.toLowerCase().includes("no relevant knowledge found")) {
 						// Parse confidence scores
 						confidenceResponse.split("{tuple_delimiter}").forEach(pair => {
 							const [index, score] = pair.split(":");
@@ -1292,7 +1318,7 @@ export const fetchSHRelevantKD = action({
 
 					console.log(conceptResponse);
 
-					if (conceptResponse.includes("no relevant concepts found")) {
+					if (conceptResponse.toLowerCase().includes("no relevant concepts found")) {
 						continue;
 					}
 
@@ -1378,7 +1404,7 @@ export const fetchSHRelevantKD = action({
 
 						console.log(knowledgeResponse);
 
-						if (knowledgeResponse.includes("no relevant knowledge found")) {
+						if (knowledgeResponse.toLowerCase().includes("no relevant knowledge found")) {
 							continue;
 						}
 						
@@ -1563,7 +1589,7 @@ export const updateCurrentTask = action({
 		console.log(taskAnalysis);
 
 		// If there's a change needed, update the sideHelp
-		if (!taskAnalysis.includes("no change needed")) {
+		if (!taskAnalysis.toLowerCase().includes("no change needed")) {
 			const newSubTasks = [{
 				taskName: taskAnalysis,
 				taskDescription: taskAnalysis,
@@ -1993,7 +2019,7 @@ export const selectInheritedConcepts = action({
 			})
 		});
 
-		if (response.includes("no instance found")) {
+		if (response.toLowerCase().includes("no instance found")) {
 			return [];
 		}
 
@@ -2275,10 +2301,10 @@ export const fetchObjectTagPropertiesAdvanced = action({
 
 			}),
 
-			model: "gpt-4o"
+			model: "gpt-4o-mini"
 		});
 
-		if (response.includes("no relevant knowledge found")) {
+		if (response.toLowerCase().includes("no relevant knowledge found")) {
 			return true;
 		}
 
@@ -2325,7 +2351,7 @@ export const fetchObjectTagPropertiesAdvanced = action({
 				'{Relevant Knowledges}': knowledgeDatas.map((knowledgeData, index) => index + 1 + ". " + knowledgeData.extractedKnowledge).join('\n')
 			}),
 
-			model: "gpt-4o"
+			model: "gpt-4o-mini"
 		});
 
 		// split the relevant knowledge response by **{record_delimiter}**

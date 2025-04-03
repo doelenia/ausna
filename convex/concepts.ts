@@ -39,6 +39,7 @@ export const addConcept = action({
 		sourceId: v.optional(v.string()),
 		blockId: v.optional(v.string()),
 		sourceType: v.optional(v.string()),
+		isSoft: v.optional(v.boolean()),
 	},
 	handler: async (ctx, args): Promise<Id<"concepts">> => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -55,6 +56,45 @@ export const addConcept = action({
 		if (betterName) {
 			args.alias = [betterName, ...args.alias.map((alias) => alias.trim())];
 		}
+
+		if (args.isSoft) {
+			const concepts_with_similar_name = await ctx.runAction(api.vectorEmbed.vectorEmbedSearch, {
+				text: args.alias[0],
+				type: "concept_alias",
+				limit: 1,
+			});
+
+			if (concepts_with_similar_name.length > 0) {
+				console.log("args.alias: ", args.alias);
+				console.log("concepts_with_similar_name: ", concepts_with_similar_name);
+				
+				if (concepts_with_similar_name[0]._score > 0.9) {
+					const vectorEmbedding = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingById, {
+						vectorEmbeddingId: concepts_with_similar_name[0]._id,
+					});
+
+					if (vectorEmbedding) {
+						if (args.sourceId && args.blockId) {
+							
+							await ctx.runAction(api.knowledgeDatas.addKD, {
+								conceptId: vectorEmbedding.sourceId as Id<"concepts">,
+								sourceId: args.sourceId,
+								blockId: args.blockId,
+								sourceType: "document"
+							});
+							await ctx.runAction(api.concepts.updateConcept, {
+								conceptId: vectorEmbedding.sourceId as Id<"concepts">,
+								IsSynced: false
+							});
+						}
+
+						return vectorEmbedding.sourceId as Id<"concepts">;
+						
+					}
+				}
+			}
+		}
+
 
 		const conceptId: Id<"concepts"> = await ctx.runMutation(api.concepts.createConcept, {
 			alias: args.alias,
@@ -80,7 +120,7 @@ export const addConcept = action({
 
 		console.log("addConcept: ", args);
 
-		if (args.sourceId) {
+		if (args.sourceId && args.blockId) {
 			await ctx.runAction(api.knowledgeDatas.addKD, {
 				conceptId: conceptId,
 				sourceId: args.sourceId,
@@ -176,6 +216,8 @@ export const syncConcept = action({
 		// filter knowledgeDatas by isProcessed = false
 		const unprocessedKnowledgeDatas = knowledgeDatas.filter((kd) => !kd.isProcessed);
 
+		console.log("unprocessedKnowledgeDatas: ", unprocessedKnowledgeDatas);
+
 		// Group unprocessed knowledge data by sourceType, sourceId and sourceSection
 		const groupedUnprocessedKnowledgeDatas = unprocessedKnowledgeDatas.reduce((acc, kd) => {
 			const key = `${kd.sourceType}<delimiter>${kd.sourceId}<delimiter>${kd.sourceSection}`;
@@ -222,18 +264,15 @@ export const syncConcept = action({
 			});
 		}
 		
-		// 3. TODO: Sync concept summary
 		
-		// 4. Sync object tags
-		await ctx.runAction(api.objectTags.syncObjectTag, {conceptId: args.conceptId});
 		
 		// 5. TODO: Sync concept relationships
 
 		// Mark concept as synced
-		await ctx.runAction(api.concepts.updateConcept, {
-			conceptId: args.conceptId, 
-			IsSynced: true
-		});
+		// await ctx.runAction(api.concepts.updateConcept, {
+		// 	conceptId: args.conceptId, 
+		// 	IsSynced: true
+		// });
 
 		// get all updated knowledge data
 		const updatedKnowledgeDatas = await ctx.runQuery(api.knowledgeDatas.getUpdatedKDbyConceptId, {
@@ -244,15 +283,6 @@ export const syncConcept = action({
 		await ctx.runAction(api.llm.fetchConceptDescription, {
 			conceptId: args.conceptId
 		});
-
-		for (const kd of updatedKnowledgeDatas) {
-			if (kd.isUpdated) {
-				await ctx.runAction(api.knowledgeDatas.updateKD, {
-					knowledgeId: kd._id,
-					isUpdated: false
-				});
-			}
-		}
 	}
 });
 
@@ -453,15 +483,34 @@ export const getUnsyncedConcepts = query({
 
 export const syncAllConcepts = action({
 	args: {
-		userId: v.string(),
+		userId: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
 
-		const concepts = await ctx.runQuery(api.concepts.getUnsyncedConcepts, {userId: args.userId});
+		const userId = args.userId || identity.subject;
+
+		const concepts = await ctx.runQuery(api.concepts.getUnsyncedConcepts, {userId: userId});
 		for (const concept of concepts) {
 			await ctx.runAction(api.concepts.syncConcept, {conceptId: concept._id});
+		}
+	}
+});
+
+export const syncAllObjectTags = action({
+	args: {
+		userId: v.optional(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = args.userId || identity.subject;
+
+		const concepts = await ctx.runQuery(api.concepts.getUnsyncedConcepts, {userId: userId});
+		for (const concept of concepts) {
+			await ctx.runAction(api.objectTags.syncObjectTag, {conceptId: concept._id});
 		}
 	}
 });

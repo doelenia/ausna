@@ -27,11 +27,15 @@ export const getObjectTagsbyConceptId = query({
 
 export const syncObjectTag = action({
 	args: {
-		conceptId: v.id("concepts")
+		conceptId: v.id("concepts"),
+		userId: v.optional(v.string())
 	},
 	handler: async (ctx, args) => {
-		const identity = await ctx.auth.getUserIdentity();
-		if (!identity) throw new Error("Not authenticated");
+		if (!args.userId) {
+			const userId = await ctx.auth.getUserIdentity();
+			if (!userId) throw new Error("Not authenticated");
+			args.userId = userId.subject;
+		}
 
 		// Get concept details
 		const concept = await ctx.runQuery(api.concepts.getById, {
@@ -69,11 +73,16 @@ export const syncObjectTag = action({
 		if (newTags) {
 			// 2. Process each new tag
 			for (const [objectName, [parentName, parentDesc, templateName, templateDesc]] of Object.entries(newTags)) {
+
 				// 2.1 Search for related parent concepts
 				const relatedConcepts = await ctx.runAction(api.llm.fetchRelatedConcepts, {
 					name: parentName,
 					description: parentDesc
 				});
+
+				console.log(`Syncing object name: ${objectName} with parent: ${parentName} and template: ${templateName}`);
+
+				console.log(`Related concepts: ${relatedConcepts}`);
 	
 				let parentConceptId: Id<"concepts">;
 	
@@ -122,6 +131,21 @@ export const syncObjectTag = action({
 		await ctx.runAction(api.objectTagProperties.syncObjectTagProperties, {
 			conceptId: args.conceptId
 		});
+
+		// mark concept as synced
+		await ctx.runAction(api.concepts.updateConcept, {
+			conceptId: args.conceptId,
+			IsSynced: true
+		});
+
+		for (const kd of knowledgeDatas) {
+			if (kd.isUpdated) {
+				await ctx.runAction(api.knowledgeDatas.updateKD, {
+					knowledgeId: kd._id,
+					isUpdated: false
+				});
+			}
+		}
 
 		return true;
 	}
@@ -250,6 +274,42 @@ export const createObjectTag = mutation({
 	}
 });
 
+export const removeObjectTag = action({
+	args: {
+		objectTagId: v.id("objectTags")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTag = await ctx.runQuery(api.objectTags.getById, {
+			objectTagId: args.objectTagId
+		});
+		if (!objectTag) throw new Error("Object tag not found");
+
+		// delete all objectTagProperties that have this objectTag
+		
+		// first, get all objectTagProperties that have this objectTag
+		const objectTagProperties = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByObjectTagId, {
+			objectTagId: args.objectTagId
+		});
+
+		// delete all objectTagProperties that have this objectTag
+		for (const property of objectTagProperties) {
+			await ctx.runMutation(api.objectTagProperties.deleteObjectTagProperty, {
+				propertyId: property._id
+			});
+		}
+
+		// delete the objectTag
+		await ctx.runMutation(api.objectTags.deleteObjectTag, {
+			objectTagId: args.objectTagId
+		});
+
+		return true;
+	}
+});
+
 export const deleteObjectTag = mutation({
 	args: {
 		objectTagId: v.id("objectTags")
@@ -325,7 +385,8 @@ export const AddObjectTag = action({
 			parentConceptId = await ctx.runAction(api.concepts.addConcept, {
 				alias: [args.parentName || ""],
 				description: args.parentDescription || `${args.parentName} is an object concept for ${concept.aliasList[0]}`,
-				isSynced: false
+				isSynced: false,
+				isSoft: true
 			});
 		}
 
@@ -350,77 +411,79 @@ export const AddObjectTag = action({
 				templateName: args.templateName || args.parentName,
 				description: args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`
 			});
-		} else if (!targetTemplateId && existingTemplates.length > 1) {
+		} 
+// 		else if (!targetTemplateId && existingTemplates.length > 1) {
 			
-			// TODO: Add source KDs to the question
+// 			// TODO: Add source KDs to the question
 
-			const templateChoice = await ctx.runAction(api.llm.askLLM, {
-				role: `-Goal-
-				Given a entity name and description, a suggested database name and description to contain this entity, a list of existing databases, decide whether there is a suitable exisitng database for this entity.
+// 			const templateChoice = await ctx.runAction(api.llm.askLLM, {
+// 				role: `-Goal-
+// 				Given a entity name and description, a suggested database name and description to contain this entity, a list of existing databases, decide whether there is a suitable exisitng database for this entity.
 				
-				-Steps-
-				1. Analyze the entity name and description, the suggested database name and description, and fully understand what database is intended to contain and be used for.
-				2. Carefully analyze each existing database, determine if there is a database suitable for this entity.
-				3. If there is a good match, return the database index.
-				4. If there is no good match, return "**new**"
+// 				-Steps-
+// 				1. Analyze the entity name and description, the suggested database name and description, and fully understand what database is intended to contain and be used for.
+// 				2. Carefully analyze each existing database, determine if there is a database suitable for this entity.
+// 				3. If there is a good match, return the database index.
+// 				4. If there is no good match, return "**new**"
 				
-				-Output Format-
-				Return only the template ID or "**new**"
+// 				-Output Format-
+// 				Return only the template ID or "**new**"
 				
-				######################
-				-Examples-
-				######################
-				Example 1:
-				{Entity Name}: 2023 Environmental Impact Report – West Coast Operations  
-{Entity Description}: A comprehensive annual report detailing carbon emissions, water usage, and sustainability initiatives across West Coast facilities.  
-{Suggested Database Name}: Sustainability Reports  
-{Suggested Database Description}: A database containing sustainability, environmental, and ESG reports from all regional operations.  
-{Existing Databases}: [  
-  {Index: 0, Name: ESG Performance Records, Description: Stores records of environmental, social, and governance-related performance metrics and documents},  
-  {Index: 1, Name: Internal Operations Reports, Description: Includes weekly and monthly reports on operations from all business units},  
-  {Index: 2, Name: Annual Financial Reports, Description: Contains official yearly financial statements and disclosures}  
-]
-				######################
-				Output:0
+// 				######################
+// 				-Examples-
+// 				######################
+// 				Example 1:
+// 				{Entity Name}: 2023 Environmental Impact Report – West Coast Operations  
+// {Entity Description}: A comprehensive annual report detailing carbon emissions, water usage, and sustainability initiatives across West Coast facilities.  
+// {Suggested Database Name}: Sustainability Reports  
+// {Suggested Database Description}: A database containing sustainability, environmental, and ESG reports from all regional operations.  
+// {Existing Databases}: [  
+//   {Index: 0, Name: ESG Performance Records, Description: Stores records of environmental, social, and governance-related performance metrics and documents},  
+//   {Index: 1, Name: Internal Operations Reports, Description: Includes weekly and monthly reports on operations from all business units},  
+//   {Index: 2, Name: Annual Financial Reports, Description: Contains official yearly financial statements and disclosures}  
+// ]
+// 				######################
+// 				Output:0
 				
-				Example 2:
-{Entity Name}: Supplier Risk Evaluation - AlphaTech  
-{Entity Description}: An evaluation report assessing AlphaTech’s financial stability, delivery reliability, and compliance status for Q2 2024.  
-{Suggested Database Name}: Supplier Risk Assessments  
-{Suggested Database Description}: A dedicated database for tracking periodic risk evaluations of third-party vendors and suppliers.  
-{Existing Databases}: [  
-  {Index: 0, Name: Vendor Contact Directory, Description: A directory of supplier and vendor contact details and onboarding status},  
-  {Index: 1, Name: Procurement Requests, Description: Contains logs of procurement orders, approval workflows, and payment status},  
-  {Index: 2, Name: Partner Agreements Archive, Description: Stores signed contracts and terms of engagement with partners and collaborators}  
-]
-				######################
-				Output:**new**
-				`,
-				question: JSON.stringify({
-					'{Entity Name}': args.parentName,
-					'{Entity Description}': args.parentDescription || `${args.parentName} is an object concept for ${concept.aliasList[0]}`,
-					'{Suggested Database Name}': args.templateName || args.parentName,
-					'{Suggested Database Description}': args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`,
-					'{Existing Databases}': existingTemplates.map((t, index) => ({
-						index: index,
-						name: t.templateName,
-						description: t.description
-					}))
-				})
-			});
+// 				Example 2:
+// {Entity Name}: Supplier Risk Evaluation - AlphaTech  
+// {Entity Description}: An evaluation report assessing AlphaTech’s financial stability, delivery reliability, and compliance status for Q2 2024.  
+// {Suggested Database Name}: Supplier Risk Assessments  
+// {Suggested Database Description}: A dedicated database for tracking periodic risk evaluations of third-party vendors and suppliers.  
+// {Existing Databases}: [  
+//   {Index: 0, Name: Vendor Contact Directory, Description: A directory of supplier and vendor contact details and onboarding status},  
+//   {Index: 1, Name: Procurement Requests, Description: Contains logs of procurement orders, approval workflows, and payment status},  
+//   {Index: 2, Name: Partner Agreements Archive, Description: Stores signed contracts and terms of engagement with partners and collaborators}  
+// ]
+// 				######################
+// 				Output:**new**
+// 				`,
+// 				question: JSON.stringify({
+// 					'{Entity Name}': args.parentName,
+// 					'{Entity Description}': args.parentDescription || `${args.parentName} is an object concept for ${concept.aliasList[0]}`,
+// 					'{Suggested Database Name}': args.templateName || args.parentName,
+// 					'{Suggested Database Description}': args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`,
+// 					'{Existing Databases}': existingTemplates.map((t, index) => ({
+// 						index: index,
+// 						name: t.templateName,
+// 						description: t.description
+// 					}))
+// 				})
+// 			});
 
-			if (templateChoice.includes("new")) {
-				targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
-					conceptId: parentConceptId,
-					templateName: args.templateName || args.parentName,
-					description: args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`
-				});
-			} else if (parseInt(templateChoice) >= 0 && parseInt(templateChoice) < existingTemplates.length) { // check if index are valid
-				targetTemplateId = existingTemplates[parseInt(templateChoice)]._id;
-			} else {
-				throw new Error("Invalid template choice");
-			}
-		} else if (!targetTemplateId) {
+// 			if (templateChoice.includes("new")) {
+// 				targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
+// 					conceptId: parentConceptId,
+// 					templateName: args.templateName || args.parentName,
+// 					description: args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`
+// 				});
+// 			} else if (parseInt(templateChoice) >= 0 && parseInt(templateChoice) < existingTemplates.length) { // check if index are valid
+// 				targetTemplateId = existingTemplates[parseInt(templateChoice)]._id;
+// 			} else {
+// 				throw new Error("Invalid template choice");
+// 			}
+// 		} 
+		else if (!targetTemplateId) {
 			// Use the only existing template if only one exists
 			targetTemplateId = existingTemplates[0]._id;
 		}

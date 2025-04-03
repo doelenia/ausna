@@ -31,6 +31,10 @@ export const Menu = ({ documentId }: MenuProps) => {
 	
 	const archive = useMutation(api.documents.archive);
 	const inspectDocument = useAction(api.documents.InspectDocument);
+	const syncAllConceptKeywords = useAction(api.documents.syncAllConceptKeywords);
+	const syncAllConcepts = useAction(api.concepts.syncAllConcepts);
+
+	const syncAllObjectTags = useAction(api.concepts.syncAllObjectTags);
 
 	const onArchive = () => {
 		const promise = archive({ id: documentId });
@@ -44,14 +48,47 @@ export const Menu = ({ documentId }: MenuProps) => {
 		router.push("/documents");
 	};
 
-	const onSync = () => {
-		const promise = inspectDocument({ documentId });
+	const onSync = async () => {
+		try {
+			// First action: Connect to concepts
+			const conceptsPromise = syncAllConceptKeywords({ documentId });
+			toast.promise(conceptsPromise, {
+				loading: "0/4 Connecting to concepts...",
+				success: "1/4 Concepts connected successfully.",
+				error: "Failed to connect concepts.",
+			});
+			await conceptsPromise;
 
-		toast.promise(promise, {
-			loading: "Syncing document...",
-			success: "Document synced successfully.",
-			error: "Failed to sync document.",
-		});
+			// Second action: Update knowledges
+			const inspectPromise = inspectDocument({ documentId });
+			toast.promise(inspectPromise, {
+				loading: "1/4 Updating knowledges...",
+				success: "2/4 Knowledges updated successfully.",
+				error: "Failed to update knowledges.",
+			});
+			await inspectPromise;
+
+			// Third action: Connect knowledges
+			const syncPromise = syncAllConcepts({});
+			toast.promise(syncPromise, {
+				loading: "2/4 Connecting knowledges...",
+				success: "3/4Knowledges connected successfully.",
+				error: "Failed to connect knowledges.",
+			});
+			await syncPromise;
+
+			// Fourth action: Sync object tags
+			const syncObjectTagsPromise = syncAllObjectTags({});
+			toast.promise(syncObjectTagsPromise, {
+				loading: "3/4 Syncing concept relationships...",
+				success: "4/4 Concept relationships synced successfully.",
+				error: "Failed to sync concept relationships.",
+			});
+			await syncObjectTagsPromise;
+
+		} catch (error) {
+			console.error("Sync failed:", error);
+		}
 	};
 	
 	return (

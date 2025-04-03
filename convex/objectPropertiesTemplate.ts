@@ -31,6 +31,48 @@ export const create = mutation({
 	}
 });
 
+export const removeObjectPropertiesTemplate = action({
+	args: {
+		objectPropertiesTemplateId: v.id("objectPropertiesTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const properties = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByPropertyTemplateId, {
+			propertyTemplateId: args.objectPropertiesTemplateId
+		});
+
+		// for each property, delete the property
+		for (const property of properties) {
+			await ctx.runMutation(api.objectTagProperties.deleteObjectTagProperty, {
+				propertyId: property._id
+			});
+		}
+
+		await ctx.runMutation(api.objectPropertiesTemplate.deleteObjectPropertiesTemplate, {
+			objectPropertiesTemplateId: args.objectPropertiesTemplateId
+		});
+
+		return true;
+	}
+});
+
+export const deleteObjectPropertiesTemplate = mutation({
+	args: {
+		objectPropertiesTemplateId: v.id("objectPropertiesTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectPropertiesTemplate = await ctx.db.get(args.objectPropertiesTemplateId);
+		if (!objectPropertiesTemplate) throw new Error("Object properties template not existed");
+
+		await ctx.db.delete(args.objectPropertiesTemplateId);
+	}
+});
+
 export const addObjectPropertiesTemplate = action({
 	args: {
 		objectTemplateId: v.id("objectTemplates"),

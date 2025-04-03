@@ -33,6 +33,70 @@ export const getObjectTemplateById = query({
 	}
 });
 
+export const deleteObjectTemplate = mutation({
+	args: {
+		templateId: v.id("objectTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const template = await ctx.db.get(args.templateId);
+		if (!template) throw new Error("Template not found");
+		
+		if (template.userId !== identity.subject) {
+			throw new Error("Not authorized");
+		}
+
+		await ctx.db.delete(args.templateId);
+	}
+});
+
+export const removeObjectTemplate = action({
+	args: {
+		templateId: v.id("objectTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const template = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
+			templateId: args.templateId
+		});
+
+		if (!template) throw new Error("Template not found");
+
+		// first, get all propertytemplates that have this template
+		const propertyTemplates = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateByObjectTemplateId, {
+			objectTemplateId: args.templateId
+		});
+
+		// for each property template, get all properties
+		for (const propertyTemplate of propertyTemplates) {
+			// delete the property template
+			await ctx.runAction(api.objectPropertiesTemplate.removeObjectPropertiesTemplate, {
+				objectPropertiesTemplateId: propertyTemplate._id
+			});
+		}
+
+		// delete all object tags that have this template
+		const objectTags = await ctx.runQuery(api.objectTags.getObjectTagsByTemplateId, {
+			templateId: args.templateId
+		});
+
+		// for each object tag, delete the object tag
+		for (const objectTag of objectTags) {
+			await ctx.runAction(api.objectTags.removeObjectTag, {
+				objectTagId: objectTag._id
+			});
+		}
+
+		// delete the template
+		await ctx.runMutation(api.objectTemplates.deleteObjectTemplate, {
+			templateId: args.templateId
+		});
+	}
+});
 // Helper function to create a new object template
 export const createObjectTemplate = mutation({
 	args: {
