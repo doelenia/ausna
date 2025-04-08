@@ -1,7 +1,7 @@
 /* trunk-ignore-all(prettier) */
 import {v} from "convex/values";
 
-import {mutation, query, action} from "./_generated/server";
+import {mutation, query, action, QueryCtx} from "./_generated/server";
 import {Doc, Id} from "./_generated/dataModel";
 import {api} from "../convex/_generated/api";
 
@@ -27,11 +27,15 @@ export const getObjectTagsbyConceptId = query({
 
 export const syncObjectTag = action({
 	args: {
-		conceptId: v.id("concepts")
+		conceptId: v.id("concepts"),
+		userId: v.optional(v.string())
 	},
 	handler: async (ctx, args) => {
-		const identity = await ctx.auth.getUserIdentity();
-		if (!identity) throw new Error("Not authenticated");
+		if (!args.userId) {
+			const userId = await ctx.auth.getUserIdentity();
+			if (!userId) throw new Error("Not authenticated");
+			args.userId = userId.subject;
+		}
 
 		// Get concept details
 		const concept = await ctx.runQuery(api.concepts.getById, {
@@ -68,12 +72,22 @@ export const syncObjectTag = action({
 
 		if (newTags) {
 			// 2. Process each new tag
-			for (const [objectName, [parentName, parentDesc, _, objectDesc]] of Object.entries(newTags)) {
+			for (const [objectName, [parentName, parentDesc, templateName, templateDesc]] of Object.entries(newTags)) {
+
+				// if parrent name or template name is empty or too long, skip
+				if (!parentName || parentName.length > 50 || !templateName || templateName.length > 50) {
+					continue;
+				}
+
 				// 2.1 Search for related parent concepts
 				const relatedConcepts = await ctx.runAction(api.llm.fetchRelatedConcepts, {
 					name: parentName,
 					description: parentDesc
 				});
+
+				console.log(`Syncing object name: ${objectName} with parent: ${parentName} with description: ${parentDesc} and template: ${templateName} with description: ${templateDesc}`);
+
+				console.log(`Related concepts: ${relatedConcepts}`);
 	
 				let parentConceptId: Id<"concepts">;
 	
@@ -81,36 +95,53 @@ export const syncObjectTag = action({
 					// 2.2 No matching concepts found - create new object tag without parent concept
 					await ctx.runAction(api.objectTags.AddObjectTag, {
 						conceptId: args.conceptId,
-						objectName: objectName,
 						sourceKDs: knowledgeDatas.map(kd => kd._id),
 						parentName: parentName,
-						objectDescription: objectDesc,
+						parentDescription: parentDesc,
+						templateName: templateName,
+						templateDescription: templateDesc,
 					});
 				} else {
-					// 2.3 Find best matching concept
-					const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
-						name: parentName,
-						description: parentDesc,
-						conceptIds: relatedConcepts
-					});
+					// OLD CODE
+					// // 2.3 Find best matching concept
+					// const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
+					// 	name: parentName,
+					// 	description: parentDesc,
+					// 	conceptIds: relatedConcepts
+					// });
 	
+					// if (bestMatchId) {
+					// 	// 2.3.1 Use matched concept
+					// 	if (bestMatchId === args.conceptId) return false;
+
+					// 	await ctx.runAction(api.objectTags.AddObjectTag, {
+					// 		conceptId: args.conceptId,
+					// 		parentName: parentName,
+					// 		parentDescription: parentDesc,
+					// 		objectConceptId: bestMatchId,
+					// 		sourceKDs: knowledgeDatas.map(kd => kd._id),
+					// 	});
+					// } else {
+					// 	// 2.3.2 No good match - create without parent concept
+					// 	await ctx.runAction(api.objectTags.AddObjectTag, {
+					// 		conceptId: args.conceptId,
+					// 		sourceKDs: knowledgeDatas.map(kd => kd._id),
+					// 		parentName: parentName,
+					// 		parentDescription: parentDesc
+					// 	});
+					// }
+					// NEW CODE
+					const bestMatchId = relatedConcepts[0];
 					if (bestMatchId) {
 						// 2.3.1 Use matched concept
+						if (bestMatchId === args.conceptId) return false;
+
 						await ctx.runAction(api.objectTags.AddObjectTag, {
 							conceptId: args.conceptId,
-							objectName: objectName,
+							parentName: parentName,
+							parentDescription: parentDesc,
 							objectConceptId: bestMatchId,
 							sourceKDs: knowledgeDatas.map(kd => kd._id),
-							objectDescription: objectDesc
-						});
-					} else {
-						// 2.3.2 No good match - create without parent concept
-						await ctx.runAction(api.objectTags.AddObjectTag, {
-							conceptId: args.conceptId,
-							objectName: objectName,
-							sourceKDs: knowledgeDatas.map(kd => kd._id),
-							parentName: parentName,
-							parentDescription: parentDesc
 						});
 					}
 				}
@@ -121,6 +152,21 @@ export const syncObjectTag = action({
 		await ctx.runAction(api.objectTagProperties.syncObjectTagProperties, {
 			conceptId: args.conceptId
 		});
+
+		// mark concept as synced
+		await ctx.runAction(api.concepts.updateConcept, {
+			conceptId: args.conceptId,
+			IsSynced: true
+		});
+
+		for (const kd of knowledgeDatas) {
+			if (kd.isUpdated) {
+				await ctx.runAction(api.knowledgeDatas.updateKD, {
+					knowledgeId: kd._id,
+					isUpdated: false
+				});
+			}
+		}
 
 		return true;
 	}
@@ -249,6 +295,42 @@ export const createObjectTag = mutation({
 	}
 });
 
+export const removeObjectTag = action({
+	args: {
+		objectTagId: v.id("objectTags")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTag = await ctx.runQuery(api.objectTags.getById, {
+			objectTagId: args.objectTagId
+		});
+		if (!objectTag) throw new Error("Object tag not found");
+
+		// delete all objectTagProperties that have this objectTag
+		
+		// first, get all objectTagProperties that have this objectTag
+		const objectTagProperties = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByObjectTagId, {
+			objectTagId: args.objectTagId
+		});
+
+		// delete all objectTagProperties that have this objectTag
+		for (const property of objectTagProperties) {
+			await ctx.runMutation(api.objectTagProperties.deleteObjectTagProperty, {
+				propertyId: property._id
+			});
+		}
+
+		// delete the objectTag
+		await ctx.runMutation(api.objectTags.deleteObjectTag, {
+			objectTagId: args.objectTagId
+		});
+
+		return true;
+	}
+});
+
 export const deleteObjectTag = mutation({
 	args: {
 		objectTagId: v.id("objectTags")
@@ -296,13 +378,13 @@ export const checkObjectTagExists = query({
 export const AddObjectTag = action({
 	args: {
 		conceptId: v.id("concepts"),
-		objectName: v.string(),
 		objectConceptId: v.optional(v.id("concepts")),
 		objectTemplateId: v.optional(v.id("objectTemplates")),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
-		objectDescription: v.optional(v.string()),
+		templateName: v.optional(v.string()),
+		templateDescription: v.optional(v.string()),
 		parentDescription: v.optional(v.string()),
-		parentName: v.optional(v.string())
+		parentName: v.string()
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -323,8 +405,9 @@ export const AddObjectTag = action({
 		if (!parentConceptId) {
 			parentConceptId = await ctx.runAction(api.concepts.addConcept, {
 				alias: [args.parentName || ""],
-				description: args.parentDescription || `${args.objectName} is an object concept for ${concept.aliasList[0]}`,
-				isSynced: false
+				description: args.parentDescription || `${args.parentName} is an object concept for ${concept.aliasList[0]}`,
+				isSynced: false,
+				isSoft: true
 			});
 		}
 
@@ -335,73 +418,98 @@ export const AddObjectTag = action({
 		if (!objectConcept) throw new Error("Object concept not found");
 
 		// Get existing templates
-		const existingTemplates: Doc<"objectTemplates">[] = await ctx.runQuery(api.objectTemplates.getObjectTemplates, {
-			conceptId: parentConceptId
+		const similarTemplates: Id<"objectTemplates">[] = await ctx.runAction(api.vectorEmbed.searchSimilarObjectTemplates, {
+			name: args.templateName || args.parentName,
+			description: args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`,
+			conceptId: parentConceptId,
+			scoreThreshold: 0.7
 		});
 
 		let targetTemplateId = args.objectTemplateId;
 
 		// 2. Handle template creation/selection
-		if (existingTemplates.length === 0) {
+		if (similarTemplates.length === 0) {
 			// 2.1 Create new blank template if none exists
-			targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
+			targetTemplateId = await ctx.runAction(api.objectTemplates.addObjectTemplate, {
 				conceptId: parentConceptId,
-				templateName: args.objectName,
-				description: `Template for ${args.objectName} objects`
+				templateName: args.templateName || args.parentName,
+				description: args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`
 			});
-		} else if (!targetTemplateId && existingTemplates.length > 1) {
-			// 2.2 Ask LLM to choose template or suggest creating new one
-			const sourceConcept = await ctx.runQuery(api.concepts.getById, {
-				conceptId: args.conceptId
-			});
+		} 
+// 		else if (!targetTemplateId && existingTemplates.length > 1) {
 			
-			// TODO: Add source KDs to the question
+// 			// TODO: Add source KDs to the question
 
-			const templateChoice = await ctx.runAction(api.llm.askLLM, {
-				role: `-Goal-
-				Given a concept and a list of object templates, decide whether to use an existing template or create a new one.
+// 			const templateChoice = await ctx.runAction(api.llm.askLLM, {
+// 				role: `-Goal-
+// 				Given a entity name and description, a suggested database name and description to contain this entity, a list of existing databases, decide whether there is a suitable exisitng database for this entity.
 				
-				-Steps-
-				1. Analyze the concept description and template options
-				2. Return either:
-				   - Existing template ID if it's suitable
-				   - "new" if a new template should be created
+// 				-Steps-
+// 				1. Analyze the entity name and description, the suggested database name and description, and fully understand what database is intended to contain and be used for.
+// 				2. Carefully analyze each existing database, determine if there is a database suitable for this entity.
+// 				3. If there is a good match, return the database index.
+// 				4. If there is no good match, return "**new**"
 				
-				-Output Format-
-				Return only the template ID or "new"
+// 				-Output Format-
+// 				Return only the template ID or "**new**"
 				
-				######################
-				Example:
-				{Concept Description}: A financial report showing quarterly earnings
-				{Templates}: [
-				  {ID: abc123, Name: "Earnings Report", Description: "Template for company earnings reports"},
-				  {ID: def456, Name: "News Article", Description: "Template for news articles"}
-				]
-				######################
-				Output:
-				abc123`,
-				question: JSON.stringify({
-					conceptDescription: sourceConcept?.description || args.objectName,
-					templates: existingTemplates.map(t => ({
-						ID: t._id,
-						Name: t.templateName,
-						Description: t.description
-					}))
-				})
-			});
+// 				######################
+// 				-Examples-
+// 				######################
+// 				Example 1:
+// 				{Entity Name}: 2023 Environmental Impact Report – West Coast Operations  
+// {Entity Description}: A comprehensive annual report detailing carbon emissions, water usage, and sustainability initiatives across West Coast facilities.  
+// {Suggested Database Name}: Sustainability Reports  
+// {Suggested Database Description}: A database containing sustainability, environmental, and ESG reports from all regional operations.  
+// {Existing Databases}: [  
+//   {Index: 0, Name: ESG Performance Records, Description: Stores records of environmental, social, and governance-related performance metrics and documents},  
+//   {Index: 1, Name: Internal Operations Reports, Description: Includes weekly and monthly reports on operations from all business units},  
+//   {Index: 2, Name: Annual Financial Reports, Description: Contains official yearly financial statements and disclosures}  
+// ]
+// 				######################
+// 				Output:0
+				
+// 				Example 2:
+// {Entity Name}: Supplier Risk Evaluation - AlphaTech  
+// {Entity Description}: An evaluation report assessing AlphaTech’s financial stability, delivery reliability, and compliance status for Q2 2024.  
+// {Suggested Database Name}: Supplier Risk Assessments  
+// {Suggested Database Description}: A dedicated database for tracking periodic risk evaluations of third-party vendors and suppliers.  
+// {Existing Databases}: [  
+//   {Index: 0, Name: Vendor Contact Directory, Description: A directory of supplier and vendor contact details and onboarding status},  
+//   {Index: 1, Name: Procurement Requests, Description: Contains logs of procurement orders, approval workflows, and payment status},  
+//   {Index: 2, Name: Partner Agreements Archive, Description: Stores signed contracts and terms of engagement with partners and collaborators}  
+// ]
+// 				######################
+// 				Output:**new**
+// 				`,
+// 				question: JSON.stringify({
+// 					'{Entity Name}': args.parentName,
+// 					'{Entity Description}': args.parentDescription || `${args.parentName} is an object concept for ${concept.aliasList[0]}`,
+// 					'{Suggested Database Name}': args.templateName || args.parentName,
+// 					'{Suggested Database Description}': args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`,
+// 					'{Existing Databases}': existingTemplates.map((t, index) => ({
+// 						index: index,
+// 						name: t.templateName,
+// 						description: t.description
+// 					}))
+// 				})
+// 			});
 
-			if (templateChoice.includes("new")) {
-				targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
-					conceptId: parentConceptId,
-					templateName: args.objectName,
-					description: `Template for ${args.objectName} objects`
-				});
-			} else {
-				targetTemplateId = templateChoice as Id<"objectTemplates">;
-			}
-		} else if (!targetTemplateId) {
+// 			if (templateChoice.includes("new")) {
+// 				targetTemplateId = await ctx.runMutation(api.objectTemplates.createObjectTemplate, {
+// 					conceptId: parentConceptId,
+// 					templateName: args.templateName || args.parentName,
+// 					description: args.templateDescription || args.parentDescription || `Database for ${args.parentName} objects`
+// 				});
+// 			} else if (parseInt(templateChoice) >= 0 && parseInt(templateChoice) < existingTemplates.length) { // check if index are valid
+// 				targetTemplateId = existingTemplates[parseInt(templateChoice)]._id;
+// 			} else {
+// 				throw new Error("Invalid template choice");
+// 			}
+// 		} 
+		else if (!targetTemplateId) {
 			// Use the only existing template if only one exists
-			targetTemplateId = existingTemplates[0]._id;
+			targetTemplateId = similarTemplates[0];
 		}
 
 		// 3. Check if object tag already exists
@@ -424,8 +532,8 @@ export const AddObjectTag = action({
 			conceptId: args.conceptId,
 			objectConceptId: parentConceptId,
 			objectTemplateId: targetTemplateId,
-			objectName: args.objectName,
-			objectDescription: args.objectDescription,
+			objectName: args.parentName,
+			objectDescription: args.parentDescription,
 			sourceKDs: args.sourceKDs
 		});
 
@@ -441,6 +549,7 @@ export const AddObjectTag = action({
 				conceptId: args.conceptId,
 				propertyName: property.propertyName,
 				type: property.type,
+				objectPropertiesTemplateId: property._id,
 				sourceKDs: args.sourceKDs
 			});
 		}
@@ -462,3 +571,81 @@ export const getById = query({
 		return objectTag;
 	}
 });
+
+export const getObjectTagsByTemplateId = query({
+	args: {
+		templateId: v.id("objectTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTags = await ctx.db
+			.query("objectTags")
+			.withIndex("by_template_id", (q) => 
+				q.eq("userId", identity.subject)
+				 .eq("templateID", args.templateId)
+			)
+			.collect();
+
+		return objectTags;
+	}
+});
+
+export const getChildConcepts = query({
+	args: {
+		conceptId: v.id("concepts"),
+		collectedConceptIds: v.array(v.id("concepts"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		// Recursively collect child concepts
+		let finalCollection = await getChildConceptsHelper(ctx, args.conceptId, args.collectedConceptIds, identity.subject, 0);
+
+		return finalCollection;
+	}
+});
+
+async function getChildConceptsHelper(ctx: QueryCtx, conceptId: Id<"concepts">, collectedConceptIds: Id<"concepts">[], userId: string, counter: number) {
+
+	counter++;
+
+	console.log(`counter: ${counter}`);
+
+	// if counter is greater than 10, return collectedConceptIds
+	if (counter > 100) {
+		return collectedConceptIds;
+	}
+
+	// Base case 1: If concept is already collected, return current collection
+	if (collectedConceptIds.includes(conceptId)) {
+		return collectedConceptIds;
+	}
+
+	// Add current concept to collection
+	const updatedCollection = [...collectedConceptIds, conceptId];
+
+	// Find all object tags where this concept is the object concept
+	const childObjectTags = await ctx.db
+		.query("objectTags")
+		.withIndex("by_object_concept_id", (q) => 
+			q.eq("userId", userId)
+			 .eq("objectConceptId", conceptId)
+		)
+		.collect();
+
+	// Base case 2: If no child object tags found, return current collection
+	if (childObjectTags.length === 0) {
+		return updatedCollection;
+	}
+
+	// Recursively collect child concepts
+	let finalCollection = updatedCollection;
+	for (const tag of childObjectTags) {
+		finalCollection = await getChildConceptsHelper(ctx, tag.conceptId, finalCollection, userId, counter);
+	}
+
+	return finalCollection;
+}

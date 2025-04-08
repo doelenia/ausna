@@ -12,6 +12,7 @@ export const createObjectTagProperty = mutation({
 		propertyName: v.string(),
 		value: v.optional(v.any()),
 		type: v.string(),
+		objectPropertiesTemplateId: v.optional(v.id("objectPropertiesTemplates")),
 		sourceKDs: v.optional(v.array(v.id("knowledgeDatas")))
 	},
 	handler: async (ctx, args) => {
@@ -30,10 +31,27 @@ export const createObjectTagProperty = mutation({
 			propertyName: args.propertyName,
 			value: args.value,
 			type: args.type,
-			sourceKDs: args.sourceKDs
+			sourceKDs: args.sourceKDs,
+			objectPropertiesTemplateId: args.objectPropertiesTemplateId,
+			autosync: "default"
 		});
 
 		return propertyId;
+	}
+});
+
+export const getById = query({
+	args: {
+		propertyId: v.id("objectTagProperties")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const property = await ctx.db.get(args.propertyId);
+		if (!property) throw new Error("Property not found");
+		
+		return property;
 	}
 });
 
@@ -127,67 +145,13 @@ export const syncObjectTagProperties = action({
 			});
 			if (!objectTag) continue; // Skip if object tag not found
 
-			// For each updated KD
-			for (const updatedKD of updatedKDs) {
-				// 1. Get knowledge string from all source KDs + current KD
-				let knowledgeString = updatedKD.extractedKnowledge || "";
-				
-				if (property.sourceKDs && property.sourceKDs.length > 0) {
-					const sourceKDs = await Promise.all(
-						property.sourceKDs.map(kdId => 
-							ctx.runQuery(api.knowledgeDatas.getKDById, { knowledgeId: kdId })
-						)
-					);
-					
-					const sourceKnowledge = sourceKDs
-						.filter(kd => kd !== null)
-						.map(kd => kd!.extractedKnowledge)
-						.join(" ");
-					
-					knowledgeString = `${sourceKnowledge} ${knowledgeString}`;
-				}
-
-				// if property.objectPropertiesTemplateId is not null, then use the template name instead of the property name, and use the template type instead of the property type
-				let propertyName = property.propertyName || "";
-				let type = property.type || "";
-				if (property.objectPropertiesTemplateId) {
-					const template = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateById, {
-						objectPropertiesTemplateId: property.objectPropertiesTemplateId
-					});
-					if (!template) throw new Error("Template not found");
-					propertyName = template.propertyName;
-					type = template.type;
-				}
-
-				// 2. Call fetchObjectTagProperties
-				const newValue = await ctx.runAction(api.llm.fetchObjectTagProperties, {
-					conceptName: concept.aliasList[0],
-					conceptDescription: concept.description || "",
-					objectTagName: objectTag.objectName,
-					objectTagDescription: objectTag.objectDescription || "",
-					propertyName: propertyName,
-					type: type,
-					knowledgeString: knowledgeString,
-					previousValue: property.value?.toString()
-				});
-
-				// 3. Handle response
-				if (newValue.includes("**suggested same value**")) {
-					// Update sourceKDs only
-					await ctx.runMutation(api.objectTagProperties.updateObjectTagProperty, {
-						propertyId: property._id,
-						sourceKDs: [...(property.sourceKDs || []), updatedKD._id]
-					});
-				} else if (!newValue.includes("**no relevant knowledge found**")) {
-					// Update both value and sourceKDs
-					await ctx.runMutation(api.objectTagProperties.updateObjectTagProperty, {
-						propertyId: property._id,
-						value: newValue,
-						sourceKDs: [...(property.sourceKDs || []), updatedKD._id]
-					});
-				}
-				// Continue if no relevant knowledge found
-			}
+			// call fetchObjectTagPropertiesAdvanced
+			await ctx.runAction(api.llm.fetchObjectTagPropertiesAdvanced, {
+				propertyId: property._id,
+				knowledgeDataIds: updatedKDs.map(kd => kd._id)
+			});
+		
+			
 		}
 
 		return true;
@@ -199,7 +163,12 @@ export const updateObjectTagProperty = mutation({
 	args: {
 		propertyId: v.id("objectTagProperties"),
 		value: v.optional(v.any()),
-		sourceKDs: v.optional(v.array(v.id("knowledgeDatas")))
+		sourceKDs: v.optional(v.array(v.id("knowledgeDatas"))),
+		propertyName: v.optional(v.string()),
+		type: v.optional(v.string()),
+		autosync: v.optional(v.string()),
+		autoFilledValue: v.optional(v.any()),
+		prompt: v.optional(v.string()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -236,5 +205,110 @@ export const getObjectTagPropertiesByConceptId = query({
 		.collect();
 
 		return properties;
+	}
+});
+
+export const getObjectTagPropertiesByTemplateId = query({
+	args: {
+		templateId: v.id("objectTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		// First get all object tags for this template
+		const objectTags = await ctx.db
+			.query("objectTags")
+			.withIndex("by_template_id", (q) =>
+				q.eq("userId", identity.subject)
+				 .eq("templateID", args.templateId)
+			)
+			.collect();
+
+		// Then get all properties for these object tags
+		const properties = await Promise.all(
+			objectTags.map(async (tag) => {
+				return ctx.db
+					.query("objectTagProperties")
+					.withIndex("by_object_tag", (q) =>
+						q.eq("userId", identity.subject)
+						 .eq("objectTagId", tag._id)
+					)
+					.collect();
+			})
+		);
+
+		// Flatten the array of arrays
+		return properties.flat();
+	}
+});
+
+export const getObjectTagPropertiesByPropertyTemplateId = query({
+	args: {
+		propertyTemplateId: v.id("objectPropertiesTemplates")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const properties = await ctx.db.query("objectTagProperties")
+		.withIndex("by_object_properties_template", (q) =>
+			q.eq("userId", identity.subject)
+			.eq("objectPropertiesTemplateId", args.propertyTemplateId)
+		)
+		.collect();
+
+		return properties;
+	}
+});
+
+export const syncObjectTagProperty = action({
+	args: {
+		propertyId: v.id("objectTagProperties")
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const property = await ctx.runQuery(api.objectTagProperties.getById, {
+			propertyId: args.propertyId
+		});
+		if (!property) throw new Error("Property not found");
+
+		if (property.userId !== identity.subject) throw new Error("Unauthorized");
+		
+		// 1. call planObjectTagProperties
+		const plan = await ctx.runAction(api.llm.planObjectTagProperties, {
+			propertyId: args.propertyId
+		});
+
+		// 2. get context by calling vectorSearchRelevantSources
+		const context = await ctx.runAction(api.vectorEmbed.vectorSearchRelevantSources, {
+			query: plan.context,
+		});
+
+		// get concept details
+		const concept = await ctx.runQuery(api.concepts.getById, {
+			conceptId: property.conceptId
+		});
+		if (!concept) throw new Error("Concept not found");
+
+		// 3. call vectorSearchRelevantKnowledgeData
+		const relevantKnowledges = await ctx.runAction(api.vectorEmbed.vectorSearchRelevantKnowledgeData, {
+			query: plan.context,
+			conceptId: property.conceptId,
+			conceptName: concept.aliasList[0],
+			conceptDescription: concept.description || "",
+			contextQuery: plan.context,
+			contextSourceIds: context
+		});
+
+		// 4. call fetchObjectTagPropertiesAdvanced
+		const newValue = await ctx.runAction(api.llm.fetchObjectTagPropertiesAdvanced, {
+			propertyId: args.propertyId,
+			knowledgeDataIds: relevantKnowledges
+		});
+
+		return true;
 	}
 });

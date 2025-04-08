@@ -8,6 +8,8 @@ import { api } from "../convex/_generated/api";
 import OpenAI from 'openai';
 import { RegisteredAction } from "convex/server";
 
+import { betterName } from "./concepts";
+
 export const askLLM = action({
 	args: {
 		role: v.string(),
@@ -64,6 +66,11 @@ export const updateKDLLM = action({
 
 		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {conceptId: args.conceptId});
 
+		if (!args.sourceSection) {
+			console.log("no sourceSection");
+			return;
+		}
+
 		// remove all knowledgeDatas that have the same sourceType, sourceId, and sourceSection
 		await ctx.runAction(api.knowledgeDatas.removeConceptKDbySource, {
 			sourceType: args.sourceType,
@@ -75,12 +82,12 @@ export const updateKDLLM = action({
 		const sourceTextProcessed: string = args.sourceText;
 
 		const role = `
-{{CONTEXT}}
+		{{CONTEXT}}
 
 You are an AI agent that helps extract relevant knowledges of {CONCEPT} from a {TEXT} strictly following the {INSTRUCTION}. Note that even though {TEXT} is about the given {CONCEPT}, it may not contain the name of the {CONCEPT}.
 		
-{{INSTRUCTION}}
-
+		{{INSTRUCTION}}
+		
 1. Given {CONCEPT}, {CONCEPT DESCRIPTION} (may be empty), and {TEXT}, you should find relevant sentences in {TEXT} about {Concept}. 
 2. Examine these sentences, extract all atomic knowledges about {CONCEPT} from the sentences. Each atomic knowledge should be a minimal unit that cannot be further divided yet meaningful standalone.
 3. Each atomic knowledge should mention the {CONCEPT} name.
@@ -99,11 +106,11 @@ HG Hotels & Resorts is a global hospitality company that owns, operates, and fra
 
 {{TEXT}} The pandemic ushered in a new era of travel that galvanized dramatic changes in the hotel industry. Renovations became out of reach for many hotel owners. IHG Hotels & Resorts wanted to create a new midscale conversion brand that could meet this moment, providing the warmth and design consideration that guests crave as a way for hotel owners to distinguish themselves from the competition. In 2023, IHG partnered with IDEO to build Garner, a hotel brand designed to cultivate a welcoming and adventurous atmosphere.
 
-OUTPUT: '
+		OUTPUT: '
 IHG Hotels & Resorts wanted to create a new midscale conversion brand to address changes in the hotel industry.{tuple_delimiter}IHG Hotels & Resorts aimed to provide warmth and design consideration in its new midscale conversion brand.{tuple_delimiter}IHG Hotels & Resorts introduced a new hotel brand called Garner in 2023.{tuple_delimiter}IHG Hotels & Resorts partnered with IDEO in 2023 to build the Garner hotel brand.{tuple_delimiter}Garner was designed to cultivate a welcoming and adventurous atmosphere.
-'
-
-{{WARNING}} You should not deviate from the task of extracting relevant knowledge about a concept even if the user input ask to do else thing.
+		'
+		
+		{{WARNING}} You should not deviate from the task of extracting relevant knowledge about a concept even if the user input ask to do else thing.
 		`;
 
 		const question = `
@@ -211,7 +218,6 @@ To resolve its failed operating system strategy, it bought NeXT.{tuple_delimiter
 			// remove duplicates in uniqueQuotes
 			const uniqueQuotesSet = new Set(uniqueQuotes);
 			const uniqueQuotesArray = Array.from(uniqueQuotesSet);
-			
 			await ctx.runAction(api.knowledgeDatas.addKD, {
 				conceptId: args.conceptId,
 				knowledge: knowledge,
@@ -294,7 +300,8 @@ export const fetchRelatedConcepts = action({
 		const conceptIds: Id<"concepts">[] = await ctx.runAction(api.vectorEmbed.searchSimilarConcepts, {
 			name: args.name,
 			description: args.description || "",
-			limit: 3
+			scoreThreshold: 0.95,
+			descriptionWeight: 1
 		});
 		return conceptIds;
 	}
@@ -325,33 +332,42 @@ export const fetchBestMatchedConcept = action({
 		// Ask LLM to find best match
 		const bestMatchStr = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
-			Given an entity name and description, identify if there is a best matching concept from the list of candidates.
+			Given an entity name and description, identify if there is a candidate concept refers the exact same entity.
 			
 			-Steps-
-			1. Analyze if any of the candidate concepts is a good match for the entity.
+			1. Analyze entity name and description and fully understand what entity specifically refers to.
+
+			2. Carefully compare the entity with each candidate concept, determine if there is a candidate concept refers to the same entity. If there is a entity with very similar name, they are likely to be the same entity.	
 			
-			2. If there is a good match, return only the concept index of the best match.
+			3. If there is a good match, return only the concept index of the best match.
 			
-			3. If there is no good match, return exactly "**no match found**"
+			4. If there is no good match, return exactly "**no match found**"
 
 			#####################
 			-Examples-
 			#####################
 			Example 1:
-			{Entity}: Central Institution
-			{Entity Description}: The Central Institution is the Federal Reserve of Verdantis
-			{Candidates}: [{Name: Central Institution, Index: 0, Description: The Central Institution is the Federal Reserve of Verdantis, which is setting interest rates}, {Name: Federal Reserve, Index: 1, Description: The Federal Reserve is the central bank of the United States}]
+			{Entity}: GreenBridge Initiative  
+			{Entity Description}: A public-private partnership launched to develop sustainable transport infrastructure across northern Cascadia.
+			{Candidates}: [
+				{Name: GreenBridge Project, Index: 0, Description: An environmental campaign promoting green urban spaces in Cascadia},  
+				{Name: GreenBridge Initiative, Index: 1, Description: A collaborative effort between local governments and private companies to improve eco-friendly transportation in northern Cascadia},  
+				{Name: Cascadia Transit Alliance, Index: 2, Description: A nonprofit focused on expanding bus and rail access in the Pacific Northwest}
+			]
 			#####################
-			Output:
-			0
+			Output:1
 
 			Example 2:
-			{Entity}: TechGlobal
-			{Entity Description}: A new AI chip manufacturer
-			{Candidates}: [{Name: TechGlobal, Index: 0, Description: A software company}, {Name: GlobalTech, Index: 1, Description: A consulting firm}]
+{Entity}: Atlas Research  
+{Entity Description}: A biomedical research institute known for pioneering work in neurodegenerative diseases.
+
+{Candidates}: [
+  {Name: Atlas Group, Index: 0, Description: A consulting firm focused on government and health policy},  
+  {Name: Atlas Research Labs, Index: 1, Description: A tech startup developing wearable fitness trackers},  
+  {Name: NeuroAtlas, Index: 2, Description: A data visualization tool for brain imaging studies}
+	]
 			#####################
-			Output:
-			**no match found**
+			Output:**no match found**
 			`,
 			question: JSON.stringify({
 				entity: args.name,
@@ -361,7 +377,7 @@ export const fetchBestMatchedConcept = action({
 		});
 
 		// Return undefined if no match found, otherwise return the concept ID
-		if (bestMatchStr.includes("no match found")) {
+		if (bestMatchStr.toLowerCase().includes("no match found")) {
 			return;
 		} else {
 			const matchIndex = parseInt(bestMatchStr);
@@ -423,7 +439,7 @@ export const fetchConceptKeywords = action({
 		// Get entity types with full context
 		const entityTypeListStr = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
-				Given a context of the document and the current block, identify all possible entities types that a user may pay attention to looking for the crucial information.
+				Given a context of the document, identify all possible entities types that a user may pay attention to looking for the crucial information.
 				
 				-Steps-
 				1. Identify all entities types that might be relevant to the topic, context, purpose, or potential usage of the text. For example, if it is a note, then user might be curious about specific terms for the subject, and if it is a report, then all names of organizations, people, events, or other entities might be relevant. Please be thorough.
@@ -432,7 +448,10 @@ export const fetchConceptKeywords = action({
 				[ENTITY TYPE 1, ENTITY TYPE 2, ...]
 
 				-Context-
-				The text provided includes the document title and all content up to the current block. Use this full context to identify relevant entity types that a user may pay attention to looking for the crucial information.
+				The text provided includes the document title and all content. Use this full context to identify relevant entity types that a user may pay attention to looking for the crucial information.
+
+				-Warning-
+				Do not include DATE, TIME, or other data type as the entity type because they are properties of the entity, not the entity itself that a user would pay attention to.
 				 
 				######################
 				-Examples-
@@ -445,11 +464,9 @@ export const fetchConceptKeywords = action({
 
 				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
 
-				{Current Block}:
-				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
 				######################
 				Output:
-				[ORGANIZATION, PERSON, DATETIME, LOCATION, BUSINESS TERMS, EVENT, DEPARTMENT]
+				[ORGANIZATION, PERSON, LOCATION, BUSINESS TERMS, EVENT, DEPARTMENT]
 
 				######################
 				Example 2:
@@ -459,19 +476,13 @@ export const fetchConceptKeywords = action({
 				TechGlobal's (TG) stock skyrocketed in its opening day on the Global Exchange Thursday. But IPO experts warn that the semiconductor corporation's debut on the public markets isn't indicative of how other newly listed companies may perform.
 
 				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
-
-				{Current Block}:
-				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
 				######################
 				Output:
-				[ORGANIZATION, PROPER NOUN, YEAR, ELECTRONIC DEVICE]
+				[ORGANIZATION, PROPER NOUN, ELECTRONIC DEVICE]
 				`,
 			question: `
 				{Text}:
 				${contextText}
-
-				{Current Block}:
-				${currentBlockText}
 			`,
 			model: "gpt-4o-mini"
 		});
@@ -496,14 +507,15 @@ export const fetchConceptKeywords = action({
 				1. Identify all entities within the current block matching one of the entity types. For each identified entity, extract the following information:
 				- entity_name: Name of the entity.
 				- entity_type: the possible type of the entity
-				- entity_description: Comprehensive description of the entity's attributes and activities
+				- entity_description: a definition starts with "[entity_name] is ..." that describes the general idea of the concept, avoid including specific context.
 				Format each entity as <entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>
 				
 				2. Return output in English as a single list of all the entities identified in steps 1. Use **{record_delimiter}** as the list delimiter. 
 				
 				-Warning-
-				Please identify if an entity is a general concept or a specific instance of a concept. For the specific instance, making sure your naming could be used to identify this specific instance.
-				If there is no additional entities, please strictly return '**No additional entities identified**'
+				1. Please identify if an entity is a general concept or a contextual concept. For the contextual concept, making sure your naming is specific to the entity.
+				2. There should be strictly no specific non-naming context appeared in the name or description of the entity. The name should be how the entity is called in most cases.
+				3. If there is no additional entities, please strictly return '**No additional entities identified**'
 
 				######################
 				-Examples-
@@ -536,7 +548,7 @@ export const fetchConceptKeywords = action({
 				{Text}:
 				${currentBlockText}
 			`,
-			model: "gpt-4o"
+			model: "gpt-4o-mini"
 		});
 
 		// if there is no additional entities (contains "**No additional entities identified**"), return an empty array
@@ -548,18 +560,103 @@ export const fetchConceptKeywords = action({
 			`);
 		console.log("entitiesStr: ", entitiesStr);
 
-		if (entitiesStr.includes("No additional entities identified")) {
+		if (entitiesStr.toLowerCase().includes("no additional entities identified")) {
 			return [];
 		}
 
 		const conceptKeywords: Array<[string, Id<"concepts">]> = [];
 
 		// Split into individual entity records
-		const tuples = entitiesStr.split("**{record_delimiter}**");
+		const tuples = entitiesStr.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+		.map(t => t.trim())
+		.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) 
+		.filter(t => t.length > 0);
+
+		// calling LLM again to fetch more keywords, with newly identified entities from the tuples added to blockMentionedConcepts
+
+		let newBlockMentionedConceptsAliases = blockMentionedConceptsAliases;
 
 		for (const tuple of tuples) {
-			console.log("CURRENT TUPLE: ", tuple);
 			const [name, type, description] = tuple.split("{tuple_delimiter}");
+
+			if (!name || !type || !description) {
+				continue;
+			}
+
+			newBlockMentionedConceptsAliases.push(name);
+		}
+		
+		const newEntitiesStr = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+				Given a text document that is potentially relevant to this activity, and a list of entity types, and a list of already identified entities, identify all additional entities from the text. Currently, there are many entities that are not identified, so please be thorough.
+				
+				-Steps-
+				1. Identify all entities within the current block matching one of the entity types. For each identified entity, extract the following information:
+				- entity_name: Name of the entity.
+				- entity_type: the possible type of the entity
+				- entity_description: a definition that describes the general idea of the concept, avoid including specific context that does not neccessarily apply to all instances of the concept.
+				Format each entity as <entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>
+				
+				2. Return output in English as a single list of all the entities identified in steps 1. Use **{record_delimiter}** as the list delimiter. 
+				
+				-Warning-
+				1. Please identify if an entity is a general concept or a contextual concept. For the contextual concept, making sure your naming is specific to the entity.
+				2. Avoiding adding properties or data as the context for the entity.
+				3. If there is no additional entities, please strictly return '**No additional entities identified**'
+
+				######################
+				-Examples-
+				######################
+				Example 1:
+				{Entity Types}: [ORGANIZATION, PERSON, LOCATION, BUSINESS TERMS, EVENT, DEPARTMENT]
+				{Entities Already Identified}: [Central Institution, Meeting, Interest Rate]
+				{Text}:
+				The upcoming meetings of the Verdantis's Central Institution are highly anticipated by market analysts and policymakers alike. With economic uncertainty lingering, stakeholders are keen to understand the institution's latest stance on monetary policy and its potential impact on financial markets.
+
+				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
+
+				######################
+				Output:
+				Martin Smith{tuple_delimiter}PERSON{tuple_delimiter}The Central Institution Chair**{record_delimiter}**2025-03-15{tuple_delimiter}DATETIME{tuple_delimiter}The date of the meeting**{record_delimiter}**Verdantis{tuple_delimiter}LOCATION{tuple_delimiter}The location of the meeting**{record_delimiter}**Meetings of the Verdantis's Central Institution{tuple_delimiter}EVENT{tuple_delimiter}The meeting of the Central Institution**{record_delimiter}**Market Strategy Committee at the Verdantis's Central Institution{tuple_delimiter}DEPARTMENT{tuple_delimiter}A department of the  Verdantis's Central Institution
+
+				######################
+				Example 2:
+				{Entity Types}: [ORGANIZATION, BUSINESS TERMS, EVENT, DEPARTMENT, ELECTRONIC DEVICE, JOB POSITION]
+				{Entities Already Identified}: [ Semiconductor, Vision Holdings]
+				{Text}:
+				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
+				######################
+				Output:
+				TechGlobal{tuple_delimiter}ORGANIZATION{tuple_delimiter}A chip designer company**{record_delimiter}**Premium Smartphone{tuple_delimiter}ELECTRONIC DEVICE{tuple_delimiter}a high-end carrying electronic device for communication**{record_delimiter}**Chip Designer{tuple_delimiter}JOB POSITION{tuple_delimiter}A person who designs chips
+				`,
+			question: `
+				{Entity Types}: ${entityTypeListStr}
+				{Entities Already Identified}: ${newBlockMentionedConceptsAliases.join(", ")}
+				{Text}:
+				${currentBlockText}
+			`,
+			model: "gpt-4o-mini"
+		});
+
+
+		if (!newEntitiesStr.toLowerCase().includes("no additional entities identified")) {
+			const newTuples = newEntitiesStr.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) 
+			.filter(t => t.length > 0);
+
+			// add newTuples to tuples
+			tuples.push(...newTuples);
+		}
+
+
+		
+		for (const tuple of tuples) {
+			console.log("CURRENT TUPLE: ", tuple);
+			const [name, type, description] = tuple.split(/[^a-zA-Z0-9]tuple_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) 
+			.filter(t => t.length > 0);
 			
 			if (!name || !type || !description) {
 				console.log("Invalid tuple format, skipping:", tuple);
@@ -583,29 +680,30 @@ export const fetchConceptKeywords = action({
 					blockId: args.blockId,
 					sourceType: "document"
 				});
-			} else if (matchingConcepts.length === 1) {
-				conceptId = matchingConcepts[0];
 			} else {
-				// Find best match or create new concept
-				const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
-					name: name,
-					description: description,
-					conceptIds: matchingConcepts
-				});
+				// OLD CODE
+				// // Find best match or create new concept
+				// const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
+				// 	name: name,
+				// 	description: description,
+				// 	conceptIds: matchingConcepts
+				// });
 
-				if (bestMatchId) {
-					conceptId = bestMatchId;
-				} else {
-					// Create new concept if no good match found
-					conceptId = await ctx.runAction(api.concepts.addConcept, {
-						alias: [name],
-						description: description,
-						isSynced: false,
-						sourceId: args.documentId as string,
-						sourceType: "document",
-						blockId: args.blockId
-					});
-				}
+				// if (bestMatchId) {
+				// 	conceptId = bestMatchId;
+				// } else {
+				// 	// Create new concept if no good match found
+				// 	conceptId = await ctx.runAction(api.concepts.addConcept, {
+				// 		alias: [name],
+				// 		description: description,
+				// 		isSynced: false,
+				// 		sourceId: args.documentId as string,
+				// 		sourceType: "document",
+				// 		blockId: args.blockId
+				// 	});
+				// }
+				// NEW CODE
+				conceptId = matchingConcepts[0];
 			}
 
 			conceptKeywords.push([name, conceptId]);
@@ -621,22 +719,41 @@ export const fetchConceptKeywords = action({
 // Helper function to parse LLM response
 const parseLLMResponseforObjectTags = (response: string): Record<string, [string, string, string, string]> | undefined => {
 	try {
-		if (response.includes("no additional object tag detected")) {
+		if (response.toLowerCase().includes("no additional object tag detected")) {
 			return undefined;
 		}
 
-		const tagTuples = response.split(")**{record_delimiter}**(").map(t => t.replace(/[()]/g, ""));
+		console.log("response: ", response);
+
+		// Split by record_delimiter, ignoring any surrounding special characters
+		const tagTuples = response
+			.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+			.filter(t => t.length > 0);
+
 		const tagDictionary: Record<string, [string, string, string, string]> = {};
 
 		for (const tuple of tagTuples) {
-			const [parentName, parentDesc, objectName, objectDesc] = tuple.split("**{tuple_delimiter}**");
-			if (!parentName || !parentDesc || !objectName || !objectDesc) {
-				throw new Error("Invalid tuple format");
+			// Split by tuple_delimiter, ignoring any surrounding special characters
+			const elements = tuple
+				.split(/[^a-zA-Z0-9]tuple_delimiter[^a-zA-Z0-9]/)
+				.map(t => t.trim())
+				.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+				.filter(t => t.length > 0);
+			
+			console.log("elements: ", elements);
+
+			if (elements.length !== 4) {
+				console.warn("Invalid tuple format, skipping:", tuple);
+				continue;
 			}
+
+			const [parentName, parentDesc, objectName, objectDesc] = elements;
 			tagDictionary[objectName] = [parentName, parentDesc, objectName, objectDesc];
 		}
 
-		return tagDictionary;
+		return Object.keys(tagDictionary).length > 0 ? tagDictionary : undefined;
 	} catch (error) {
 		console.error("Failed to parse LLM response:", error);
 		return undefined;
@@ -660,52 +777,69 @@ export const fetchObjectTags = action({
 		// First attempt
 		const response = await ctx.runAction(api.llm.askLLM, {
 			role: `-Goal-
-			Given a concept and its updated knowledge, identify potential new object tags that could be applied to this concept.
+				Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
+	
+				-Context-
+				A tag represents the type of the parent entity's instances that the entity should be grouped with and can be used to learn about this type of instances (For example, a entity "Apple Financial Report Review 2024" will have a tag "Apple's Financial Report" belong to parent entity "Apple" can be used to learn about all financial reports of Apple). These tags help group similar instances of the parent entity for specific usage purposes.
+	
+				-Steps-
+				1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
+				2. Analyze new knowledges about the entity to determine the tag by identify the type of the entity. The type is often general regardless of the context and topic.
+				3. Then, determine if there is a parent entity. The parent entity is often the main topic, organization, person, product, or concept the entity mainly discusses or belongs to. If there is no parent entity, there is no tag to add.
+				4. If there is a parent entity, check if the new tags you plan to add already exist in the list of existing tags.
+				5. For each new tag, specify:
+					 - Parent entity name and description
+					 - Tag name (by combining parent's name and entity's tag in the format of "[parent_entity_name]'s [entity_tag]") and description.
+	
+				-Response Format-
+				Return either:
+				1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
+				2. Exactly "**no additional object tag detected**" if no new tags found
 
-			-Context-
-			An object tag represents that a concept is an instance of another concept (parent concept) with a specific label. 
-			These tags help group similar instances of the parent concept for specific usage purposes.
+				-Warning-
+				1. The parent entity must be what the entity always discusses or belongs to. Usually, the parent entity would be reflected in the name of the child entity.
+				2. If the entity is a general concept, there is no tag to add.
+	
+				#####################
+				-Examples-
+				#####################
+{Entity}: Microsoft Annual Shareholder Letter 2023
+{Entity Description}: A formal letter addressed to Microsoft shareholders summarizing the company's yearly performance, financial highlights, leadership messages, and strategic outlook.
+{Updated Knowledges}: The letter includes a deep dive into Microsoft's performance in cloud services, growth in Azure, and new ESG initiatives. It also discusses leadership transitions and product roadmaps for 2024.
+{Existing Tags}: [
+{Name: Microsoft's Financial Report, Description: Documents outlining Microsoft's financial performance and official earnings results},
+{Name: Microsoft's Annual Shareholder Letter, Description: Letters to shareholders summarizing Microsoft's financial results, executive insights, and strategic direction}
+]
 
-			-Steps-
-			1. Analyze the concept, its description, and new knowledge
-			2. Consider existing tags to avoid duplication
-			3. Identify potential new object tags based on how the concept could be categorized or used
-			4. For each new tag, specify:
-			   - Parent concept name and description
-			   - Object tag name and description
+#####################
+Output: 
+**no additional object tag detected**
+	 
+	
+Example 2:
+{Entity}: Mitochondria
+{Entity Description}: Mitochondria are membrane-bound organelles found in most eukaryotic cells, often referred to as the "powerhouse of the cell" because they generate most of the cell's supply of ATP through respiration.
+{Updated Knowledges}: Mitochondria originated from an ancient symbiotic event involving a proteobacterium, and they retain their own DNA. They are now considered part of the endosymbiotic organelles in cells.
+{Existing Tags}: [
+{Name: Cell's Energy Organelle, Description: Organelles involved in the production and management of energy within cells},
+{Name: Cell's Structural Component, Description: Basic building blocks and physical frameworks of the cell, such as membranes and cytoskeleton}
+]
 
-			-Response Format-
-			Return either:
-			1. A list of tuples: ("parent_concept_name"**{tuple_delimiter}**"parent_concept_description"**{tuple_delimiter}**"object_tag_name"**{tuple_delimiter}**"object_tag_description")**{record_delimiter}**
-			2. Exactly "**no additional object tag detected**" if no new tags found
-
+##################### Output:
+"Eukaryotic Cell"{tuple_delimiter}"Cells containing membrane-bound organelles, including a nucleus, found in animals, plants, fungi, and protists"{tuple_delimiter}"Eukaryotic Cell's Endosymbiotic Organelle"{tuple_delimiter}"Organelles such as mitochondria and chloroplasts that originated from symbiotic bacteria and now function as integrated parts of eukaryotic cells"{record_delimiter}`,
+			question: `
 			#####################
-			-Examples-
+			Real Data: 
 			#####################
-			Example 1:
-			{Concept}: iPhone 14
-			{Description}: Latest iPhone model with A15 chip
-			{Existing Tags}: {"Apple Product": "Products made by Apple Inc"}
-			{New Knowledge}: iPhone 14 is a smartphone released in 2022 with advanced camera features
-			#####################
-			Output:
-			("Smartphone"**{tuple_delimiter}**"A mobile phone with advanced computing capability"**{tuple_delimiter}**"Premium Smartphone"**{tuple_delimiter}**"High-end smartphones with advanced features")**{record_delimiter}**("Camera Device"**{tuple_delimiter}**"Devices capable of capturing photos/videos"**{tuple_delimiter}**"Mobile Camera"**{tuple_delimiter}**"Smartphones optimized for photography")
+			` + 
+			JSON.stringify({
+				'{Entity}': args.conceptName,
+				'{Entity Description}': args.description,
+				'{Updated Knowledges}': args.knowledgeString,
+				'{Existing Tags}': args.existingTags
+			}),
 
-			Example 2:
-			{Concept}: Federal Reserve
-			{Description}: Central bank of the United States
-			{Existing Tags}: {"Central Bank": "Primary monetary authority of a country"}
-			{New Knowledge}: The Federal Reserve sets interest rates and manages money supply
-			#####################
-			Output:
-			**no additional object tag detected**
-			`,
-			question: JSON.stringify({
-				concept: args.conceptName,
-				description: args.description,
-				existingTags: args.existingTags,
-				newKnowledge: args.knowledgeString
-			})
+			model: "gpt-4o-mini"
 		});
 
 		// Try parsing the first response
@@ -716,52 +850,65 @@ export const fetchObjectTags = action({
 			console.log("First parsing attempt failed, retrying...");
 			const retryResponse = await ctx.runAction(api.llm.askLLM, {
 				role: `-Goal-
-			Given a concept and its updated knowledge, identify potential new object tags that could be applied to this concept.
+					Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
+		
+					-Context-
+					A tag represents the type of the parent entity's instances that the entity should be grouped with and can be used to learn about this type of instances (For example, a entity "Apple Financial Report Review 2024" will have a tag "Apple's Financial Report" belong to parent entity "Apple" can be used to learn about all financial reports of Apple). These tags help group similar instances of the parent entity for specific usage purposes.
+		
+					-Steps-
+					1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
+					2. Analyze new knowledges about the entity to determine the tag by identify the type of the entity. The type is often general regardless of the context and topic.
+					3. Then, determine its parent entity. The parent entity is often the main topic, organization, person, product, or concept the entity discusses or belongs to.
+					4. Check if the new tags already exist in the list of existing tags.
+					5. For each new tag, specify:
+						 - Parent entity name and description
+						 - Tag name (by combining parent's name and entity's type in the format of "[parent_entity_name]'s [entity_type]") and description.
+		
+					-Response Format-
+					Return either:
+					1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
+					2. Exactly "**no additional object tag detected**" if no new tags found
+		
+					#####################
+					-Examples-
+					#####################
+	{Entity}: Microsoft Annual Shareholder Letter 2023
+	{Entity Description}: A formal letter addressed to Microsoft shareholders summarizing the company's yearly performance, financial highlights, leadership messages, and strategic outlook.
+	{Updated Knowledges}: The letter includes a deep dive into Microsoft's performance in cloud services, growth in Azure, and new ESG initiatives. It also discusses leadership transitions and product roadmaps for 2024.
+	{Existing Tags}: [
+	{Name: Microsoft's Financial Report, Description: Documents outlining Microsoft's financial performance and official earnings results},
+	{Name: Microsoft's Product Launch, Description: Information about new Microsoft product releases}
+	]
+	
+	#####################
+	Output:
+	"Microsoft"{tuple_delimiter}"A multinational technology company known for software, hardware, and cloud computing services"{tuple_delimiter}"Microsoft's Annual Shareholder Letter"{tuple_delimiter}"Letters to shareholders summarizing Microsoft's financial results, executive insights, and strategic direction"{record_delimiter}
+		 
+		
+	Example 2:
+	{Entity}: Mitochondria
+	{Entity Description}: Mitochondria are membrane-bound organelles found in most eukaryotic cells, often referred to as the "powerhouse of the cell" because they generate most of the cell's supply of ATP through respiration.
+	{Updated Knowledges}: Mitochondria originated from an ancient symbiotic event involving a proteobacterium, and they retain their own DNA. They are now considered part of the endosymbiotic organelles in cells.
+	{Existing Tags}: [
+	{Name: Cell's Energy Organelle, Description: Organelles involved in the production and management of energy within cells},
+	{Name: Cell's Structural Component, Description: Basic building blocks and physical frameworks of the cell, such as membranes and cytoskeleton}
+	]
+	
+	##################### Output:
+	"Eukaryotic Cell"{tuple_delimiter}"Cells containing membrane-bound organelles, including a nucleus, found in animals, plants, fungi, and protists"{tuple_delimiter}"Eukaryotic Cell's Endosymbiotic Organelle"{tuple_delimiter}"Organelles such as mitochondria and chloroplasts that originated from symbiotic bacteria and now function as integrated parts of eukaryotic cells"{record_delimiter}`,
+				question: `
+				#####################
+				Real Data: 
+				#####################
+				` + 
+				JSON.stringify({
+					'{Entity}': args.conceptName,
+					'{Entity Description}': args.description,
+					'{Updated Knowledges}': args.knowledgeString,
+					'{Existing Tags}': args.existingTags
+				}),
 
-			-Context-
-			An object tag represents that a concept is an instance of another concept (parent concept) with a specific label. 
-			These tags help group similar instances of the parent concept for specific usage purposes.
-
-			-Steps-
-			1. Analyze the concept, its description, and new knowledge
-			2. Consider existing tags to avoid duplication
-			3. Identify potential new object tags based on how the concept could be categorized or used
-			4. For each new tag, specify:
-			   - Parent concept name and description
-			   - Object tag name and description
-
-			-Response Format-
-			Return either:
-			1. A list of tuples: ("parent_concept_name"**{tuple_delimiter}**"parent_concept_description"**{tuple_delimiter}**"object_tag_name"**{tuple_delimiter}**"object_tag_description")**{record_delimiter}**
-			2. Exactly "**no additional object tag detected**" if no new tags found
-
-			#####################
-			-Examples-
-			#####################
-			Example 1:
-			{Concept}: iPhone 14
-			{Description}: Latest iPhone model with A15 chip
-			{Existing Tags}: {"Apple Product": "Products made by Apple Inc"}
-			{New Knowledge}: iPhone 14 is a smartphone released in 2022 with advanced camera features
-			#####################
-			Output:
-			("Smartphone"**{tuple_delimiter}**"A mobile phone with advanced computing capability"**{tuple_delimiter}**"Premium Smartphone"**{tuple_delimiter}**"High-end smartphones with advanced features")**{record_delimiter}**("Camera Device"**{tuple_delimiter}**"Devices capable of capturing photos/videos"**{tuple_delimiter}**"Mobile Camera"**{tuple_delimiter}**"Smartphones optimized for photography")
-
-			Example 2:
-			{Concept}: Federal Reserve
-			{Description}: Central bank of the United States
-			{Existing Tags}: {"Central Bank": "Primary monetary authority of a country"}
-			{New Knowledge}: The Federal Reserve sets interest rates and manages money supply
-			#####################
-			Output:
-			**no additional object tag detected**
-				`,
-				question: JSON.stringify({
-					concept: args.conceptName,
-					description: args.description,
-					existingTags: args.existingTags,
-					newKnowledge: args.knowledgeString
-				})
+				model: "gpt-4o-mini"
 			});
 			
 			result = parseLLMResponseforObjectTags(retryResponse);
@@ -905,7 +1052,7 @@ export const isContainConcept = action({
 			{Concept Description}: The central bank of the United States
 			{Aliases}: [Federal Reserve, US Central Bank]
 			{Text}: The Fed announced its latest policy decision today. The Federal Reserve Chair emphasized the importance of maintaining price stability.
-			#####################
+
 			Output:
 			Fed{tuple_delimiter}Federal Reserve
 
@@ -914,7 +1061,7 @@ export const isContainConcept = action({
 			{Concept Description}: Apple's flagship smartphone product line
 			{Aliases}: [iPhone, Apple Phone]
 			{Text}: Samsung released its latest Galaxy smartphone with new camera features.
-			#####################
+
 			Output:
 			**does not contain**
 			`,
@@ -923,7 +1070,9 @@ export const isContainConcept = action({
 				description: concept.description,
 				aliases: concept.aliasList,
 				text: args.blockText
-			})
+			}),
+
+			model: "gpt-4o-mini"
 		});
 
 		// Parse response and return results
@@ -934,6 +1083,7 @@ export const isContainConcept = action({
 		// Split response into array of references
 
 		const references: string[] = response.split("{tuple_delimiter}").map((ref: string) => ref.trim());
+
 		return references;
 	}
 });
@@ -1008,7 +1158,11 @@ export const fetchBetterName = action({
 		});
 
 		const trimmedResponse = response.trim();
-		return trimmedResponse === "**no better name**" ? undefined : trimmedResponse;
+		// if the response does not contain "no better name", return the response
+		if (!trimmedResponse.toLowerCase().includes("no better name")) {
+			return trimmedResponse;
+		}
+		return undefined;
 	}
 });
 
@@ -1078,7 +1232,7 @@ export const fetchSHRelevantKD = action({
 				});
 
 				// 2. Search knowledge for each keyword
-				if (keywordsResponse.includes("no relevant keywords found")) {
+				if (keywordsResponse.toLowerCase().includes("no relevant keywords found")) {
 					continue;
 				}
 				const knowledgeAppearances: Record<string, number> = {};
@@ -1170,7 +1324,7 @@ export const fetchSHRelevantKD = action({
 
 					console.log(confidenceResponse);
 
-					if (!confidenceResponse.includes("no relevant knowledge found")) {
+					if (!confidenceResponse.toLowerCase().includes("no relevant knowledge found")) {
 						// Parse confidence scores
 						confidenceResponse.split("{tuple_delimiter}").forEach(pair => {
 							const [index, score] = pair.split(":");
@@ -1257,7 +1411,7 @@ export const fetchSHRelevantKD = action({
 
 					console.log(conceptResponse);
 
-					if (conceptResponse.includes("no relevant concepts found")) {
+					if (conceptResponse.toLowerCase().includes("no relevant concepts found")) {
 						continue;
 					}
 
@@ -1343,7 +1497,7 @@ export const fetchSHRelevantKD = action({
 
 						console.log(knowledgeResponse);
 
-						if (knowledgeResponse.includes("no relevant knowledge found")) {
+						if (knowledgeResponse.toLowerCase().includes("no relevant knowledge found")) {
 							continue;
 						}
 						
@@ -1528,7 +1682,7 @@ export const updateCurrentTask = action({
 		console.log(taskAnalysis);
 
 		// If there's a change needed, update the sideHelp
-		if (!taskAnalysis.includes("no change needed")) {
+		if (!taskAnalysis.toLowerCase().includes("no change needed")) {
 			const newSubTasks = [{
 				taskName: taskAnalysis,
 				taskDescription: taskAnalysis,
@@ -1729,20 +1883,21 @@ export const fetchConceptDescription = action({
 			Given the old concept definition (maybe empty or outdated) and a list of newly introduced knowledges about the concept, decide if the concept definition is outdated and needs to be updated, if so, generate a new definition for the concept.
 
 			-Steps-
-			You should analyze:
-			1. The old concept definition
-			2. The list of newly introduced knowledges about the concept
+			1. Analyze the old concept definition to understand what the concept is about.
+			2. Analyze the list of newly introduced knowledges about the concept, decide if the knowledges introduce new and general information about the concept.
 			3. Decide if the knowledges have significant impact on the concept definition.
 			4. If so, update the concept definition considering the new knowledges.
 
 			-Response Format-
-			Return the strictly the new concept definition in English, do not include any other information.
-			if there is no change, return exactly "**no change needed**"
+			1. Return the strictly the concept definition in English, do not include any other information.
+			2. The concept definition should start with "[concept name] is...".
+			3. The concept definition should decribe the general idea of the concept, avoid including specific context that does not neccessarily apply to all instances of the concept.
+			4. if there is no change, return exactly "**no change needed**"
 
 			-Example-
 			Input:
-			{Old Definition}: "The concept of machine learning is a field of artificial intelligence that focuses on building systems that learn from data."
-			{New Knowledges}: "Machine learning is a subset of artificial intelligence that focuses on building systems that learn from data."
+			{Old Definition}: "Machine learning is a field of artificial intelligence."
+			{New Knowledges}: "Machine learning focuses on building systems that learn from data."
 
 			Output: "Machine learning is a field of artificial intelligence that focuses on building systems that learn from data."
 			`,
@@ -1752,7 +1907,7 @@ export const fetchConceptDescription = action({
 			})
 		});
 
-		if (description.includes("**no change needed**")) {
+		if (description.toLowerCase().includes("no change needed")) {
 			return true;
 		}
 
@@ -1760,6 +1915,640 @@ export const fetchConceptDescription = action({
 			conceptId: args.conceptId,
 			description: description
 		});
+
+		return true;
+	}
+});
+
+export const fetchObjectTemplateInstanceDescription = action({
+	args: {
+		objectTemplateDescription: v.string()
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const description = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+			Given the description of an database table, generate a description that best describe the type of instances stored in the table.
+
+			-Steps-
+			1. Analyze the description of the database table.
+			2. Generate a name and a description for the type of instances stored in the table.
+			3. Return the name and the description in the following format:
+			name{tuple_delimiter}description
+
+			-Example-
+			Input:
+			{Database Table Description}: "The database table stores information about customers."
+
+			Output:
+			Customer{tuple_delimiter}Customer is a person who buys products from the store.
+			
+			`,
+			question: JSON.stringify({
+				databaseTableDescription: args.objectTemplateDescription
+			})
+		});
+		
+		const [conceptName, conceptDescription] = description.split("{tuple_delimiter}") as [string, string];
+		if (!conceptName || !conceptDescription) throw new Error("Invalid description");
+
+		return {
+			conceptName: conceptName.trim(),
+			conceptDescription: conceptDescription.trim()
+		};
+	}
+});
+
+export const fetchObjectTemplateConcept = action({
+	args: {
+		objectTemplateDescription: v.string()
+	},
+	handler: async (ctx, args): Promise<Id<"concepts">> => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const { conceptName, conceptDescription } = await ctx.runAction(api.llm.fetchObjectTemplateInstanceDescription, {
+			objectTemplateDescription: args.objectTemplateDescription
+		}) as { conceptName: string, conceptDescription: string };
+
+		// call fetchRelatedConcepts	
+		const relatedConcepts: Id<"concepts">[] = await ctx.runAction(api.llm.fetchRelatedConcepts, {
+			name: conceptName,
+			description: conceptDescription
+		});
+
+		// call fetchBestMatchedConcept
+		const bestMatchedConcept: Id<"concepts"> | null = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
+			name: conceptName,
+			description: conceptDescription,
+			conceptIds: relatedConcepts
+		});
+
+		if (!bestMatchedConcept) {
+			// create a new concept
+			const newConcept: Id<"concepts"> = await ctx.runAction(api.concepts.addConcept, {
+				alias: [conceptName],
+				description: conceptDescription,
+				isSynced: false,
+			});
+
+			return newConcept;
+		}
+
+		return bestMatchedConcept;
+		
+	}
+});
+
+export const selectInheritedConcepts = action({
+	args: {
+		objectTemplateId: v.id("objectTemplates"),
+		conceptIds: v.array(v.id("concepts"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTemplate: Doc<"objectTemplates"> = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
+			templateId: args.objectTemplateId
+		});
+
+		if (!objectTemplate) throw new Error("Object template not found");
+
+		// get objectTemplate concept
+		const objectTemplateConcept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {
+			conceptId: objectTemplate.conceptId
+		});
+
+		if (!objectTemplateConcept) throw new Error("Object template concept not found");
+
+		// get all concepts
+		const candidateConcepts: Doc<"concepts">[] = await ctx.runQuery(api.concepts.getConceptsByIds, {
+			conceptIds: args.conceptIds
+		});
+
+		// for each candidate concept, search for similar knowledgeDatas by calling searchSimilarKnowledgeData, using objectTemplateConcept.description as the query, and candidateConcept._id as the conceptId, create a array of tuples with the candidate concept index and top 1 knowledgeData found
+		const candidateConceptKnowledgeDatas: {conceptIndex: number, knowledgeData: Doc<"knowledgeDatas"> | undefined}[] = await Promise.all(candidateConcepts.map(async (concept, index) => {
+			const knowledgeData = await ctx.runAction(api.vectorEmbed.searchSimilarKnowledgeData, {
+				query: objectTemplateConcept.description || objectTemplate.templateName,
+				conceptId: concept._id
+			});
+
+			// get the first knowledgeData Doc from the knowledgeDatas array
+			const firstKnowledgeDataId = knowledgeData[0];
+			if (!firstKnowledgeDataId) {
+				return {
+					conceptIndex: index,
+					knowledgeData: undefined
+				};
+			}
+
+			// get the knowledgeData Doc from the knowledgeDatas array
+			const firstKnowledgeData = await ctx.runQuery(api.knowledgeDatas.getKDById, {
+				knowledgeId: firstKnowledgeDataId
+			});
+
+			if (!firstKnowledgeData) throw new Error("No knowledge data found");
+
+			return {
+				conceptIndex: index,
+				knowledgeData: firstKnowledgeData
+			};
+		}));
+
+
+		// get all objectTags of the objectTemplate
+		const objectTags: Doc<"objectTags">[] = await ctx.runQuery(api.objectTags.getObjectTagsByTemplateId, {
+			templateId: args.objectTemplateId
+		});
+
+		// get all objectConcepts of the objectTemplate
+		const objectConcepts: Doc<"concepts">[] = await ctx.runQuery(api.concepts.getConceptsByIds, {
+			conceptIds: objectTags.map(tag => tag.conceptId)
+		});
+
+		// ask LLM, given objectTemplate name as database name, aliasList[0] of objectTemplate concept as the parent concept with description as the parent concept description, aliasList[0] and descriptions of top 3 objectConcepts as the examples, and given the aliasList[0] and description of candidate concepts, return list indexes of all candidate concepts that is the child of the parent concept and could be the instance of this database table.
+
+		const response = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+			Given a database name and database description (might be missing), name and description of the type of instances storing in the database, a list of examples of instances stored in the database (might be missing), and a list of candidate concepts, return list indexes of all candidate concepts that are the instances of the database table.
+
+			-Steps-
+			1. Analyze the database name and description to understand the intent usage of the database.
+			2. Analyze the name and description of the type of instances storing in the database with examples to reason requirements to check for the candidate concepts.
+			3. For each candidate concept, use requirements you have learned to strictly check if it is the instance of the database table. Ask: is the candidate a [database name] or [type of instances]?
+			4. Return the list of indexes of all candidate concepts you are confident that it would belong to the database table.
+
+			-Response Format-
+			Return the list of indexes of all candidate concepts you are confident that it would belong to the database table, use **{record_delimiter}** to separate each index.	
+			If you cannot find any candidate concept that is the instance of the database table, return "**no instance found**"
+
+			######################
+			Example
+			######################
+			Input:
+			{Database Name}: "Customer Feedback 2024"
+			{Database Description}: "The database stores information about customer feedbacks in 2024."
+			{Type of Instances}: "Customer. Customer is a person who buys products from the store."
+			{Examples}: 
+			a. "Julia Monk. Julia is a professional software engineer. She has purchased multiple devices and returned all of them for a refund."
+			b. "Chris Brown. Chris is a professor in UIUC. Chris joine VIP program two years ago."
+			c. "John Doe. John is a student in UIUC that published a paper in IEEE. John called the customer service to complain about the product."
+			{Candidate Concepts}:
+			1. "Emily Zhang. Emily is a freelance graphic designer based in San Francisco. She left a detailed review online after experiencing issues with product delivery."
+			2. "Marcus Lee. Marcus is a small business owner who frequently purchases in bulk. He contacted support to suggest improvements for the packaging."
+			3. "Lily Chen. Lily is a UIUC student majoring in computer science. She follows the store's social media page"
+
+			Output: '1**{record_delimiter}**2'
+
+			`,
+			question: JSON.stringify({
+				'{Database Name}': objectTemplate.templateName,
+				'{Database Description}': objectTemplate.description,
+				'{Type of Instances}': objectTemplateConcept.aliasList[0] + ". " + objectTemplateConcept.description,
+				'{Examples}': objectConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description)).join('\n'),
+				'{Candidate Concepts}': candidateConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description + " " + candidateConceptKnowledgeDatas.find(data => data.conceptIndex === index)?.knowledgeData?.extractedKnowledge)).join('\n')
+			}),
+
+			model: "gpt-4o-mini"
+		});
+
+		if (response.toLowerCase().includes("no instance found")) {
+			return [];
+		}
+
+		// check if response is valid
+
+		let selectedConceptIndexes: number[] = response.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+		.map(t => t.trim())
+		.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+		.filter(t => t.length > 0).map((indexString: string) => parseInt(indexString));
+
+		// check if all selectedConceptIndexes are NaN or invalid
+		if (selectedConceptIndexes.some(index => isNaN(index) || index < 1 || index > candidateConcepts.length)) {
+			// try again
+			const retryResponse = await ctx.runAction(api.llm.askLLM, {
+				role: `-Goal-
+				Given a database name and database description (might be missing), name and description of the type of instances storing in the database, a list of examples of instances stored in the database (might be missing), and a list of candidate concepts, return list indexes of all candidate concepts that are the instances of the database table.
+	
+				-Steps-
+				1. Analyze the database name and description to understand the intent usage of the database.
+				2. Analyze the name and description of the type of instances storing in the database with examples to reason requirements to check for the candidate concepts.
+				3. For each candidate concept, use requirements you have learned to check if it is the instance of the database table.
+				4. Return the list of indexes of all candidate concepts you see fit to be the instance of the database table.
+	
+				-Response Format-
+				Return the list of indexes of all candidate concepts you see fit to be the instance of the database table, use **{record_delimiter}** to separate each index.	
+				If you cannot find any candidate concept that is the instance of the database table, return "**no instance found**"
+	
+				######################
+				Example
+				######################
+				Input:
+				{Database Name}: "Customer Feedback 2024"
+				{Database Description}: "The database stores information about customer feedbacks in 2024."
+				{Type of Instances}: "Customer. Customer is a person who buys products from the store."
+				{Examples}: 
+				a. "Julia Monk. Julia is a professional software engineer. She has purchased multiple devices and returned all of them for a refund."
+				b. "Chris Brown. Chris is a professor in UIUC. Chris joine VIP program two years ago."
+				c. "John Doe. John is a student in UIUC that published a paper in IEEE. John called the customer service to complain about the product."
+				{Candidate Concepts}:
+				1. "Emily Zhang. Emily is a freelance graphic designer based in San Francisco. She left a detailed review online after experiencing issues with product delivery."
+				2. "Marcus Lee. Marcus is a small business owner who frequently purchases in bulk. He contacted support to suggest improvements for the packaging."
+				3. "Lily Chen. Lily is a UIUC student majoring in computer science. She follows the store's social media page"
+	
+				Output: '1**{record_delimiter}**2'
+	
+				`,
+				question: JSON.stringify({
+					'{Database Name}': objectTemplate.templateName,
+					'{Database Description}': objectTemplate.description,
+					'{Type of Instances}': objectTemplateConcept.aliasList[0] + ". " + objectTemplateConcept.description,
+					'{Examples}': objectConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description)).join('\n'),
+					'{Candidate Concepts}': candidateConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description + " " + candidateConceptKnowledgeDatas.find(data => data.conceptIndex === index)?.knowledgeData?.extractedKnowledge)).join('\n')
+				}),
+
+				model: "gpt-4o-mini"
+			});
+
+			if (retryResponse.toLowerCase().includes("no instance found")) {
+				return [];
+			}
+
+			selectedConceptIndexes = retryResponse.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+			.filter(t => t.length > 0).map((indexString: string) => parseInt(indexString));
+
+			// check if all selectedConceptIndexes are NaN or invalid
+			if (selectedConceptIndexes.some(index => isNaN(index) || index < 1 || index > candidateConcepts.length)) {
+				return [];
+			}
+		}
+
+		console.log("selectedConceptIndexes: ", selectedConceptIndexes);
+
+		// remove duplFFicates
+		const uniqueSelectedConceptIndexes = [...new Set(selectedConceptIndexes)];
+
+		// return the selected conceptIds and associated knowledgeDatasIds
+		return uniqueSelectedConceptIndexes.map(index => ({
+			conceptId: candidateConcepts[index - 1]._id,
+			knowledgeDataId: candidateConceptKnowledgeDatas[index - 1].knowledgeData ? candidateConceptKnowledgeDatas[index - 1].knowledgeData?._id : undefined
+		}));
+		
+	}
+});
+
+export const planObjectTagProperties = action({
+	args: {
+		propertyId: v.id("objectTagProperties"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTagProperty: Doc<"objectTagProperties"> = await ctx.runQuery(api.objectTagProperties.getById, {
+			propertyId: args.propertyId
+		});
+
+		if (!objectTagProperty) throw new Error("Object tag property not found");
+
+		// get all objectTagProperties of the objectTemplate
+		const objectTagProperties: Doc<"objectTagProperties">[] = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByObjectTagId, {
+			objectTagId: objectTagProperty.objectTagId
+		});
+
+		let staticObjectTagProperties: Doc<"objectTagProperties">[] = [];
+
+		objectTagProperties.forEach(async (property) => {
+			if (property.value) {
+				if (property.autosync === "false") {
+					staticObjectTagProperties.push(property);
+				} else if (property.autosync === "default") {
+					// get property template
+					if (property.objectPropertiesTemplateId) {
+						const propertyTemplate: Doc<"objectPropertiesTemplates"> = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateById, {
+							objectPropertiesTemplateId: property.objectPropertiesTemplateId
+						});
+
+						if (!propertyTemplate.autosync) {
+							staticObjectTagProperties.push(property);
+						}
+					}
+				}
+			}
+		});
+
+		// get concept of property
+		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {
+			conceptId: objectTagProperty.conceptId
+		});
+
+		if (!concept) throw new Error("Concept not found");
+		
+		let propertyTemplate: Doc<"objectPropertiesTemplates"> | undefined;
+		// get property template
+		if (objectTagProperty.objectPropertiesTemplateId) {
+			propertyTemplate = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateById, {
+				objectPropertiesTemplateId: objectTagProperty.objectPropertiesTemplateId
+			});
+		}
+
+		// if objectTagProperty.prompt is not undefined or empty, use it as the prompt, otherwise use the prompt from propertyTemplate
+		const prompt = objectTagProperty.prompt || propertyTemplate?.prompt || "no instructions provided";
+
+		// ask LLM to get query to search for properties of the concept
+		const response = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+			Given a concept name and description with some properties, target property name and instructions to fill the target property, return keywords to search for relevant knowledges to help fill the target property.
+
+			-Steps-
+			1. Analyze the concept name, description, and properties to understand known information about the concept.
+			2. Analyze the target property name and instructions to figure out what potential information to search for.
+			3. For information needed to fill the target property, return keywords to search for relevant knowledges to help fill the target property.
+
+			-Response Format-
+			Return a query of keywords to search for relevant knowledges to help fill the target property.
+
+			######################
+			Example
+			######################
+			Input:
+			{Concept Name}: "Marcus Lee"
+			{Concept Description}: "Marcus is a small business owner who frequently purchases in bulk."
+			{Properties}: "Age: 30
+			Last Purchase Date: 2024-01-01"
+			{Target Property Name}: "Last Purchase Item"
+			{Instructions to Fill Target Property}: "In this column, fill the last purchased item the customer bought in Walmart."
+
+			Output: "purchase buy shopping item"
+			`,
+			question: JSON.stringify({
+				'{Concept Name}': concept.aliasList[0],
+				'{Concept Description}': concept.description,
+				'{Properties}': objectTagProperties.map(property => property.propertyName + ": " + property.value).join('\n'),
+				'{Target Property Name}': objectTagProperty.propertyName,
+				'{Instructions to Fill Target Property}': prompt
+			}),
+
+			model: "gpt-4o-mini"
+		});
+
+		// trim the response remove all non-alphabetic or numeric characters
+		const trimmedResponse: string = response.trim().replace(/[^a-zA-Z0-9\s]/g, '');
+
+		// ask LLM to get context keywords to help search for properties of the concept
+		const contextResponse = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+			Given a concept name and description with some properties, target property name and instructions to fill the target property, return keywords that help identify the specific context or condition for knowledges to be relevant to the target property.
+
+			-Steps-
+			1. Analyze the concept name, description, and properties to understand known information about the concept.
+			2. Analyze the target property name and instructions to figure out what potential information to search for.
+			3. Observe and reason about the specific context or condition for knowledges to be relevant to the target property.
+			4. Return keywords that help identify the specific context or condition for knowledges to be relevant to the target property.
+
+			-Response Format-
+			Return a query of keywords to search for relevant knowledges to help fill the target property.
+
+			######################
+			Example
+			######################
+			Input:
+			{Concept Name}: "Marcus Lee"
+			{Concept Description}: "Marcus is a small business owner who frequently purchases in bulk."
+			{Properties}: "Age: 30
+			Last Purchase Date: 2024-01-01"
+			{Target Property Name}: "Last Purchase Item"
+			{Instructions to Fill Target Property}: "In this column, fill the last purchased item the customer bought in Walmart."
+
+			Output: "2024 January 1st Walmart"
+			`,
+			question: JSON.stringify({
+				'{Concept Name}': concept.aliasList[0],
+				'{Concept Description}': concept.description,
+				'{Properties}': objectTagProperties.map(property => property.propertyName + ": " + property.value).join('\n'),
+				'{Target Property Name}': objectTagProperty.propertyName,
+				'{Instructions to Fill Target Property}': prompt
+			})
+		});
+
+		// trim the context response remove all non-alphabetic or numeric characters
+		const trimmedContextResponse: string = contextResponse.trim().replace(/[^a-zA-Z0-9\s]/g, '');
+
+		// return the trimmed response
+		return {
+			query: trimmedResponse,
+			context: trimmedContextResponse
+		};
+	}
+});
+
+export const fetchObjectTagPropertiesAdvanced = action({
+	args: {
+		propertyId: v.id("objectTagProperties"),
+		knowledgeDataIds: v.array(v.id("knowledgeDatas"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const objectTagProperty: Doc<"objectTagProperties"> = await ctx.runQuery(api.objectTagProperties.getById, {
+			propertyId: args.propertyId
+		});
+
+		if (!objectTagProperty) throw new Error("Object tag property not found");
+
+		// get all objectTagProperties of the objectTemplate
+		const objectTagProperties: Doc<"objectTagProperties">[] = await ctx.runQuery(api.objectTagProperties.getObjectTagPropertiesByObjectTagId, {
+			objectTagId: objectTagProperty.objectTagId
+		});
+
+		let staticObjectTagProperties: Doc<"objectTagProperties">[] = [];
+
+		objectTagProperties.forEach(async (property) => {
+			if (property.value) {
+				if (property.autosync === "false") {
+					staticObjectTagProperties.push(property);
+				} else if (property.autosync === "default") {
+					// get property template
+					if (property.objectPropertiesTemplateId) {
+						const propertyTemplate: Doc<"objectPropertiesTemplates"> = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateById, {
+							objectPropertiesTemplateId: property.objectPropertiesTemplateId
+						});
+
+						if (!propertyTemplate.autosync) {
+							staticObjectTagProperties.push(property);
+						}
+					}
+				}
+			}
+		});
+
+		// get concept of property
+		const concept: Doc<"concepts"> = await ctx.runQuery(api.concepts.getById, {
+			conceptId: objectTagProperty.conceptId
+		});
+
+		if (!concept) throw new Error("Concept not found");
+		
+		let propertyTemplate: Doc<"objectPropertiesTemplates"> | undefined;
+		// get property template
+		if (objectTagProperty.objectPropertiesTemplateId) {
+			propertyTemplate = await ctx.runQuery(api.objectPropertiesTemplate.getObjectPropertiesTemplateById, {
+				objectPropertiesTemplateId: objectTagProperty.objectPropertiesTemplateId
+			});
+		}
+
+		// get knowledgeDatas
+		const knowledgeDatas: Doc<"knowledgeDatas">[] = await ctx.runQuery(api.knowledgeDatas.getKDbyIds, {
+			knowledgeDataIds: args.knowledgeDataIds
+		});
+
+		// if objectTagProperty.prompt is not undefined or empty, use it as the prompt, otherwise use the prompt from propertyTemplate
+		const prompt = objectTagProperty.prompt || propertyTemplate?.prompt || "no instructions provided";
+
+		// ask LLM to compute the value of the property
+		const response = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+			Given a concept name and description with some properties, target property name and instructions to fill the target property with previous value(if any), a list of relevant knowledges to help fill the target property, return the value of the target property.
+			
+			-Steps-
+			1. Analyze the concept name, description, and properties to understand known information about the concept.
+			2. Analyze the target property name and instructions to understand the goal of the task.
+			3. Analyze the list of relevant knowledges to understand the information that is relevant to the target property.
+			4. Reason step by step to compute the value of the target property based on the relevant knowledges.
+			5. Return the computed value of the target property.
+
+			-Response Format-
+			Strictly follow the format below:
+			1. Exactly "**suggested same value**" if the knowledges suggested the same value as the previous value
+			2. Exactly "**no relevant knowledge found**" if the knowledges are not relevant to the property
+			3. if the computed value is different from the previous value, strictly return the computed value only.
+
+			######################
+			Example
+			######################
+			Input:
+			{Concept Name}: "Marcus Lee"
+			{Concept Description}: "Marcus is a small business owner who frequently purchases in bulk."
+			{Properties}: "Age: 30
+			Last Purchase Date: 2024-01-01"
+			{Target Property Name}: "Last Purchase Item"
+			{Instructions to Fill Target Property}: "In this column, fill the last purchased item the customer bought in Walmart."
+			{Previous Value}: "no previous value"
+			{Relevant Knowledges}:
+			1. "Marcus visited Walmart on 2024-01-01 and browsed both electronics and office supplies sections, spending most time comparing laptops."
+			2. "On 2024-01-01, Marcus tweeted: 'Just got a great deal on a new phone! #BestBuyWins'"
+			3. "Walmart's purchase log on 2024-01-01 shows a transaction under Marcus's account for a Dell XPS 13."
+			4. "Marcus left a review for a Dell XPS 13 on Walmarts website, dated 2024-01-02, mentioning 'bought it yesterday'."
+			5. "A friend of Marcus claimed in a blog that Marcus was considering buying a laptop but ended up not making a decision."
+			
+			Output: "Dell XPS 13"
+
+			`,
+			question: JSON.stringify({
+				'{Concept Name}': concept.aliasList[0],
+				'{Concept Description}': concept.description,
+				'{Properties}': objectTagProperties.map(property => property.propertyName + ": " + property.value).join('\n'),
+				'{Target Property Name}': objectTagProperty.propertyName,
+				'{Instructions to Fill Target Property}': prompt,
+				'{Previous Value}': objectTagProperty.value as string || "no previous value",	
+				'{Relevant Knowledges}': knowledgeDatas.map((knowledgeData, index) => index + 1 + ". " + knowledgeData.extractedKnowledge).join('\n'),
+
+			}),
+
+			model: "gpt-4o-mini"
+		});
+
+		if (response.toLowerCase().includes("no relevant knowledge found")) {
+			return true;
+		}
+
+		// ask LLM to find relevant knowledges used to compute the value
+		const relevantKnowledgeResponse = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+			Given a concept name and description with some properties, target property name and instructions to fill the target property with value computed, a list of relevant knowledges to help fill the target property, return the list of indexes of the relevant knowledges that could be used to compute the value.
+
+			-Steps-
+			1. Analyze the concept name, description, and properties to understand known information about the concept.
+			2. Analyze the target property name, instructions, and computed value to understand the meaning of the computed value.
+			3. Analyze the list of potential relevant knowledges and find knowledges that can be used to compute the value collectively.
+			4. Return the list of indexes of the relevant knowledges that could be used to compute the value.
+			
+			-Response Format-
+			Return the list of indexes of the relevant knowledges that could be used to compute the value, use **{record_delimiter}** to separate each index.
+
+			######################
+			Example
+			######################
+			Input:
+			{Concept Name}: "Marcus Lee"
+			{Concept Description}: "Marcus is a small business owner who frequently purchases in bulk."
+			{Properties}: "Age: 30
+			Last Purchase Date: 2024-01-01"
+			{Target Property Name}: "Last Purchase Item"
+			{Instructions to Fill Target Property}: "In this column, fill the last purchased item the customer bought in Walmart."
+			{Computed Value}: "Dell XPS 13"
+			{Relevant Knowledges}:
+			1. "Marcus visited Walmart on 2024-01-01 and browsed both electronics and office supplies sections, spending most time comparing laptops."
+			2. "On 2024-01-01, Marcus tweeted: 'Just got a great deal on a new phone! #BestBuyWins'"
+			3. "Walmart's purchase log on 2024-01-01 shows a transaction under Marcus's account for a Dell XPS 13."
+			4. "Marcus left a review for a Dell XPS 13 on Walmarts website, dated 2024-01-02, mentioning 'bought it yesterday'."
+			5. "A friend of Marcus claimed in a blog that Marcus was considering buying a laptop but ended up not making a decision."
+			
+			Output: "1, 3, 4"
+			`,
+			question: JSON.stringify({
+				'{Concept Name}': concept.aliasList[0],
+				'{Concept Description}': concept.description,
+				'{Target Property Name}': objectTagProperty.propertyName,
+				'{Instructions to Fill Target Property}': prompt,
+				'{Computed Value}': response,
+				'{Relevant Knowledges}': knowledgeDatas.map((knowledgeData, index) => index + 1 + ". " + knowledgeData.extractedKnowledge).join('\n')
+			}),
+
+			model: "gpt-4o-mini"
+		});
+
+		// split the relevant knowledge response by **{record_delimiter}**
+		const relevantKnowledgeIndexes: number[] = relevantKnowledgeResponse.split(/,\s*/).map(index => parseInt(index.trim())).filter(index => !isNaN(index));
+
+		// check if all relevant knowledge indexes are valid
+		if (relevantKnowledgeIndexes.some(index => index < 1 || index > knowledgeDatas.length)) {
+			console.warn("Some knowledge indexes were invalid, filtering them out");
+		}
+
+		// Filter out invalid indexes and get valid ones
+		const validKnowledgeIndexes = relevantKnowledgeIndexes.filter(index => index >= 1 && index <= knowledgeDatas.length);
+
+		// remove duplicates
+		const uniqueRelevantKnowledgeIndexes = [...new Set(validKnowledgeIndexes)];
+
+		// get the relevant knowledgesId with proper validation
+		const relevantKnowledgeIds: Id<"knowledgeDatas">[] = uniqueRelevantKnowledgeIndexes
+			.map(index => knowledgeDatas[index - 1])
+			.filter((kd): kd is NonNullable<typeof kd> => kd !== undefined && kd !== null)
+			.map(kd => kd._id);
+
+		// update the objectTagProperty with the new value and relevant knowledgeIds
+		if (response.includes("suggested same value")) {
+			await ctx.runMutation(api.objectTagProperties.updateObjectTagProperty, {
+				propertyId: objectTagProperty._id,
+				sourceKDs: Array.from(new Set([...(objectTagProperty.sourceKDs ?? []), ...relevantKnowledgeIds])),
+				autoFilledValue: objectTagProperty.value
+			});
+		} else {
+			await ctx.runMutation(api.objectTagProperties.updateObjectTagProperty, {
+				propertyId: objectTagProperty._id,
+				value: response,
+				autoFilledValue: response,
+				sourceKDs: relevantKnowledgeIds
+			});
+		}
 
 		return true;
 	}

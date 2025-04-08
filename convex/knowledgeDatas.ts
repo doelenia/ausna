@@ -57,7 +57,6 @@ export const create = mutation({
 		}
 
 		const userId = identity.subject;
-
 		
 
 		const knowledge = await ctx.db.insert("knowledgeDatas", {
@@ -105,6 +104,12 @@ export const addAllKD = action({
 		let finalAliasList: Set<string> = new Set([...concept.aliasList]);
 
 		for (const [blockId, [block, documentId, aliasList]] of Object.entries(blocksDictionary)) {
+
+			// check if blockId is not null and valid
+			if (!blockId) {
+				console.log("no sourceId or blockId");
+				continue;
+			}
 
 			await ctx.runAction(api.knowledgeDatas.addKD, {conceptId: args.conceptId, sourceId: documentId, blockId: blockId, sourceType: "document"});
 			
@@ -355,5 +360,28 @@ export const removeConceptKDbySource = action({
 		for (const kd of KDs) {
 			await ctx.runAction(api.knowledgeDatas.removeKD, {knowledgeId: kd._id});
 		}
+	}
+});
+
+export const getKDbyIds = query({
+	args: {
+		knowledgeDataIds: v.array(v.id("knowledgeDatas"))
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		let knowledgeDatas: Doc<"knowledgeDatas">[] = [];
+
+		for (const knowledgeDataId of args.knowledgeDataIds) {
+			const knowledgeData = await ctx.db.get(knowledgeDataId);
+			if (!knowledgeData) throw new Error("Knowledge data not existed");
+
+			knowledgeDatas.push(knowledgeData);
+		}
+
+		return knowledgeDatas;
 	}
 });
