@@ -57,7 +57,6 @@ export const create = mutation({
 		}
 
 		const userId = identity.subject;
-
 		
 
 		const knowledge = await ctx.db.insert("knowledgeDatas", {

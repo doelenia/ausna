@@ -95,6 +95,11 @@ export const removeObjectTemplate = action({
 		await ctx.runMutation(api.objectTemplates.deleteObjectTemplate, {
 			templateId: args.templateId
 		});
+
+		// delete vector embeddings for the object template
+		await ctx.runAction(api.vectorEmbed.deleteVectorEmbeddingforObjectTemplate, {
+			objectTemplateId: args.templateId
+		});
 	}
 });
 // Helper function to create a new object template
@@ -143,6 +148,11 @@ export const addObjectTemplate = action({
 			description: args.description
 		});
 
+		// add vector embeddings for the object template
+		await ctx.runAction(api.vectorEmbed.addVectorEmbeddingforObjectTemplate, {
+			objectTemplateId: template
+		});
+
 		return template;
 	}
 });
@@ -185,7 +195,7 @@ export const getAllTemplatesWithCounts = query({
 export const updateObjectTemplate = mutation({
 	args: {
 		templateId: v.id("objectTemplates"),
-		templateName: v.string(),
+		templateName: v.optional(v.string()),
 		description: v.optional(v.string()),
 		conceptId: v.optional(v.id("concepts")),
 		isInitialized: v.optional(v.boolean()),
@@ -217,11 +227,15 @@ export const updateObjectTemplate = mutation({
 export const createConceptAndObjectTag = action({
 	args: {
 		templateId: v.id("objectTemplates"),
-		objectName: v.string()
+		objectName: v.optional(v.string()),
+		conceptDescription: v.optional(v.string()),
+		conceptId: v.optional(v.id("concepts"))
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
 		if (!identity) throw new Error("Not authenticated");
+
+		console.log("Creating concept and object tag: ", args);
 
 		// Get the template
 		const template = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
@@ -229,19 +243,38 @@ export const createConceptAndObjectTag = action({
 		});
 		if (!template) throw new Error("Template not found");
 
-		// Create a new concept with the object name as alias
-		const conceptId: Id<"concepts"> = await ctx.runAction(api.concepts.addConcept, {
-			alias: [args.objectName],
-			isSynced: false,
-		});
+		let newConceptId: Id<"concepts">;
+
+		if (!args.conceptId) {
+			if (!args.objectName) {
+				throw new Error("Object name is required");
+			}
+
+
+			newConceptId = await ctx.runAction(api.concepts.addConcept, {
+				alias: [args.objectName],
+				description: args.conceptDescription,
+				isSoft: true,
+				isSynced: false,
+			});
+		} else {
+			newConceptId = args.conceptId;
+		}
 
 		// Create object tag
+
+		const parentConcept = await ctx.runQuery(api.concepts.getById, {
+			conceptId: template.conceptId
+		});
+
+		if (!parentConcept) throw new Error("Parent concept not found");
+
 		await ctx.runAction(api.objectTags.AddObjectTag, {
-			conceptId: conceptId,
+			conceptId: newConceptId,
 			objectConceptId: template.conceptId,
 			objectTemplateId: args.templateId,
-			parentName: args.objectName
-		})
+			parentName: parentConcept.aliasList[0],
+		});
 
 		return true;
 	}
@@ -265,9 +298,17 @@ export const updateObjectTemplateConcept = mutation({
 			throw new Error("Not authorized");
 		}
 
-		await ctx.db.patch(args.templateId, {
+		await ctx.runMutation(api.objectTemplates.updateObjectTemplate, {
+			templateId: args.templateId,
 			conceptId: args.conceptId
 		});
+
+		await ctx.runMutation(api.vectorEmbed.updateConceptIdforObjectTemplate, {
+			objectTemplateId: args.templateId,
+			conceptId: args.conceptId
+		});
+
+		return true;
 	}
 });
 
@@ -326,7 +367,7 @@ export const getPotentialObjects = action({
 		const similarConcepts = await ctx.runAction(api.vectorEmbed.searchSimilarConcepts, {
 			description: templateConcept.description || "",
 			name: templateConcept.aliasList[0],
-			limit: 3
+			scoreThreshold: 0.7
 		});
 
 		// get all similar KnowledgeDatas with template description
@@ -379,6 +420,7 @@ export const initializeTemplate = action({
 			userId: identity.subject
 		});
 
+		await ctx.runAction(api.concepts.syncAllObjectTags, {});
 		// Get the template and check initialization status
 		const template = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
 			templateId: args.templateId

@@ -292,6 +292,7 @@ export const searchSimilarConcepts = action({
 		description: v.string(),
 		limit: v.optional(v.number()),
 		scoreThreshold: v.optional(v.number()),
+		descriptionWeight: v.optional(v.number()),
 	},
 	handler: async (ctx, args) => {
 		const identity = await ctx.auth.getUserIdentity();
@@ -317,29 +318,69 @@ export const searchSimilarConcepts = action({
 			_score: number;
 	}[] = Array.from(new Set([...concepts_with_similar_name, ...concepts_with_similar_description]));
 
-		//rank by score
-		similar_concepts.sort((a, b) => b._score - a._score);
-
-		// filter by score threshold if provided
-		if (args.scoreThreshold) {
-			similar_concepts = similar_concepts.filter((concept) => concept._score >= args.scoreThreshold!);
-		}
-
-		// return the top limit concepts ids
-		const top_vector_embeddings = similar_concepts.slice(0, args.limit).map((concept) => concept._id);
 
 		// for each vector embedding id, get the vector embedding doc and get the conceptId from its sourceId
-		const conceptIds: Id<"concepts">[] = await Promise.all(top_vector_embeddings.map(async (id) => {
+		const conceptIdsWithScore: {
+			_id: Id<"concepts">;
+			_score: number;
+		}[] = await Promise.all(similar_concepts.map(async (embedding) => {
 			const vectorEmbedding: Doc<"vectorEmbeddings"> | undefined = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingById, {
-				vectorEmbeddingId: id,
+				vectorEmbeddingId: embedding._id,
 			});
-			return vectorEmbedding!.sourceId as Id<"concepts">;
+			// check if the vector embedding is a concept alias or description, if it is from a description, let score be 0.75 of the original score
+			
+			//get the concept and print aliasList, description, embedding type, and score
+			const concept = await ctx.runQuery(api.concepts.getById, {
+				conceptId: vectorEmbedding!.sourceId as Id<"concepts">,
+			});
+			console.log("------------------------------")
+
+			console.log("concept: ", concept);
+			console.log("aliasList: ", concept?.aliasList);
+			console.log("description: ", concept?.description);
+			console.log("embedding type: ", vectorEmbedding!.type);
+			console.log("score: ", embedding._score);
+			if (vectorEmbedding!.type === "concept_description") {
+				return {
+					_id: vectorEmbedding!.sourceId as Id<"concepts">,
+					_score: embedding._score * (args.descriptionWeight || 0.75),
+				};
+			}
+			return {
+				_id: vectorEmbedding!.sourceId as Id<"concepts">,
+				_score: embedding._score,
+			};
 		}));
 
-		// remove duplicates
-		let uniqueConceptIds = Array.from(new Set(conceptIds));
 
-		return uniqueConceptIds;
+		// group by _id, select the highest _score
+		const groupedConceptIdsWithScore = conceptIdsWithScore.reduce((acc, curr) => {
+			acc[curr._id] = Math.max(acc[curr._id] || 0, curr._score);
+			return acc;
+		}, {} as Record<Id<"concepts">, number>);
+
+		console.log("groupedConceptIdsWithScore: ", groupedConceptIdsWithScore);
+
+		let filteredGroupedConceptIdsWithScore: Record<Id<"concepts">, number> = {};
+
+		// apply threshold if provided
+		if (args.scoreThreshold) {
+			filteredGroupedConceptIdsWithScore = Object.fromEntries(
+				Object.entries(groupedConceptIdsWithScore).filter(([_, score]) => score >= args.scoreThreshold!)
+			);
+		} else {
+			filteredGroupedConceptIdsWithScore = groupedConceptIdsWithScore;
+		}
+
+		// sort by score descending
+		const sortedConceptIdsWithScore = Object.entries(filteredGroupedConceptIdsWithScore).sort((a, b) => b[1] - a[1]).map(([id]) => id);
+
+		// remove duplicates
+		let uniqueConceptIds = Array.from(new Set(sortedConceptIdsWithScore));
+
+		console.log("uniqueConceptIds: ", uniqueConceptIds);
+
+		return uniqueConceptIds as Id<"concepts">[];
 	}
 });
 
@@ -502,6 +543,232 @@ export const searchSimilarKnowledgeDatawithScore = action({
 	}
 });
 
+// OBJECT TAGS FUNCTIONS
+
+export const addVectorEmbeddingforObjectTemplate = action({
+	args: {
+		objectTemplateId: v.id("objectTemplates"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const objectTemplate = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
+			templateId: args.objectTemplateId,
+		});
+
+		if (!objectTemplate) throw new Error("Object template not found");
+
+		// add vector embedding for object template name
+		const Ids: Id<"vectorEmbeddings">[] = await ctx.runAction(api.vectorEmbed.addVectorEmbedding, {
+			text: objectTemplate.templateName,
+			sourceId: objectTemplate._id,
+			contextId: objectTemplate.conceptId,
+			type: "object_template_name",
+		});
+
+		// add vector embedding for object template description
+
+		if (objectTemplate.description) {
+			await ctx.runAction(api.vectorEmbed.addVectorEmbedding, {
+				text: objectTemplate.description,
+				sourceId: objectTemplate._id,
+				contextId: objectTemplate.conceptId,
+				type: "object_template_description",
+			});
+		}
+
+		return Ids;
+	}
+});
+
+export const deleteVectorEmbeddingforObjectTemplate = action({
+	args: {
+		objectTemplateId: v.id("objectTemplates"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const objectTemplate = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
+			templateId: args.objectTemplateId,
+		});
+
+		if (!objectTemplate) throw new Error("Object template not found");
+
+		// delete vector embeddings for object template name
+		await ctx.runMutation(api.vectorEmbed.deleteVectorEmbedding, {
+			sourceId: objectTemplate._id,
+			type: "object_template_name",
+		});
+
+		// delete vector embeddings for object template description
+		await ctx.runMutation(api.vectorEmbed.deleteVectorEmbedding, {
+			sourceId: objectTemplate._id,
+			type: "object_template_description",
+		});
+
+		return true;
+	}
+});
+
+export const updateVectorEmbeddingforObjectTemplate = action({
+	args: {
+		objectTemplateId: v.id("objectTemplates"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		// delete existing vector embeddings for object template
+		await ctx.runAction(api.vectorEmbed.deleteVectorEmbeddingforObjectTemplate, {
+			objectTemplateId: args.objectTemplateId,
+		});
+
+		// add new vector embeddings for object template
+		await ctx.runAction(api.vectorEmbed.addVectorEmbeddingforObjectTemplate, {
+			objectTemplateId: args.objectTemplateId,
+		});
+
+		return true;
+	}
+});
+
+export const searchSimilarObjectTemplates = action({
+	args: {
+		name: v.string(),
+		description: v.string(),
+		limit: v.optional(v.number()),
+		scoreThreshold: v.optional(v.number()),
+		descriptionWeight: v.optional(v.number()),
+		conceptId: v.optional(v.id("concepts")),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		const templates_with_similar_name = await ctx.runAction(api.vectorEmbed.vectorEmbedSearch, {
+			text: args.name,
+			type: "object_template_name",
+			limit: args.limit,
+			contextId: args.conceptId,
+		});
+
+		const templates_with_similar_description = await ctx.runAction(api.vectorEmbed.vectorEmbedSearch, {
+			text: args.description,
+			type: "object_template_description",
+			limit: args.limit,
+			contextId: args.conceptId,
+		});
+
+		// combine the two arrays
+		const combinedTemplates = Array.from(new Set([...templates_with_similar_name, ...templates_with_similar_description]));
+
+		const templateIdsWithScore: {
+			_id: Id<"objectTemplates">;
+			_score: number;
+		}[] = await Promise.all(combinedTemplates.map(async (embedding) => {
+			const vectorEmbedding: Doc<"vectorEmbeddings"> | undefined = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingById, {
+				vectorEmbeddingId: embedding._id,
+			});
+			
+			//get the concept and print aliasList, description, embedding type, and score
+			const objectTemplate = await ctx.runQuery(api.objectTemplates.getObjectTemplateById, {
+				templateId: vectorEmbedding!.sourceId as Id<"objectTemplates">,
+			});
+			
+			if (vectorEmbedding!.type === "object_template_description") {
+				return {
+					_id: vectorEmbedding!.sourceId as Id<"objectTemplates">,
+					_score: embedding._score * (args.descriptionWeight || 0.75),
+				};
+			}
+			return {
+				_id: vectorEmbedding!.sourceId as Id<"objectTemplates">,
+				_score: embedding._score,
+			};
+		}));
+
+		const groupedTemplateIdsWithScore = templateIdsWithScore.reduce((acc, curr) => {
+			acc[curr._id] = Math.max(acc[curr._id] || 0, curr._score);
+			return acc;
+		}, {} as Record<Id<"objectTemplates">, number>);
+
+
+		let filteredGroupedTemplateIdsWithScore: Record<Id<"objectTemplates">, number> = {};
+
+		// apply threshold if provided
+		if (args.scoreThreshold) {
+			filteredGroupedTemplateIdsWithScore = Object.fromEntries(
+				Object.entries(groupedTemplateIdsWithScore).filter(([_, score]) => score >= args.scoreThreshold!)
+			);
+		} else {
+			filteredGroupedTemplateIdsWithScore = groupedTemplateIdsWithScore;
+		}
+
+		// sort by score descending
+		const sortedTemplateIdsWithScore = Object.entries(filteredGroupedTemplateIdsWithScore).sort((a, b) => b[1] - a[1]).map(([id]) => id);
+
+		// remove duplicates
+		let uniqueTemplateIds = Array.from(new Set(sortedTemplateIdsWithScore));
+
+		console.log("uniqueTemplateIds: ", uniqueTemplateIds);
+
+		return uniqueTemplateIds as Id<"objectTemplates">[];
+	}
+});
+
+export const updateConceptIdforObjectTemplate = mutation({
+	args: {
+		objectTemplateId: v.id("objectTemplates"),
+		conceptId: v.id("concepts"),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		// get all vector embeddings for the object template
+		const vectorEmbeddingsForName = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingBySourceId, {
+			type: "object_template_name",
+			sourceId: args.objectTemplateId,
+		});
+
+		const vectorEmbeddingsForDescription = await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingBySourceId, {
+			type: "object_template_description",
+			sourceId: args.objectTemplateId,
+		});
+
+		// update the conceptId for each vector embedding
+		for (const vectorEmbedding of vectorEmbeddingsForName) {
+			await ctx.runMutation(api.vectorEmbed.updateVectorEmbedding, {
+				vectorEmbeddingId: vectorEmbedding._id,
+				contextId: args.conceptId,
+			});
+		}
+
+		for (const vectorEmbedding of vectorEmbeddingsForDescription) {
+			await ctx.runMutation(api.vectorEmbed.updateVectorEmbedding, {
+				vectorEmbeddingId: vectorEmbedding._id,
+				contextId: args.conceptId,
+			});
+		}
+
+		return true;
+	}
+});
+
+	// BASIC VECTOR EMBEDDING FUNCTIONS
+
 export async function embedTexts(texts: string[]) {
 	if (texts.length === 0) return [];
 	const openai = new OpenAI({
@@ -536,7 +803,7 @@ export const vectorEmbedSearch = action({
 		}
 
 		// trim the text for newlines and spaces and non-alphabetic or numeric characters
-		const trimmedText = args.text.trim().replace(/[^a-zA-Z0-9\s]/g, '');
+		const trimmedText = args.text.trim().replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '');
 
 		const [textEmbedding] = await embedTexts([trimmedText]);
 
@@ -545,9 +812,27 @@ export const vectorEmbedSearch = action({
 		if (args.contextId) {
 			vectorEmbeddings = await ctx.vectorSearch("vectorEmbeddings", "vector_embeddings", {
 				vector: textEmbedding,
-				limit: args.limit || 10,
-				filter: (q) => q.or(q.eq("contextId", args.contextId))
+				limit: (args.limit || 10) * 2,
+				filter: (q) => q.eq("type", args.type)
 			});
+			// for each vector embedding id, get the vector embedding doc
+			const vectorEmbeddingsDocs = await Promise.all(vectorEmbeddings.map(async (vectorEmbedding) => {
+				return await ctx.runQuery(api.vectorEmbed.getVectorEmbeddingById, {
+					vectorEmbeddingId: vectorEmbedding._id,
+				});
+			}));
+
+			// filter out the vector embeddings that have the same contextId as the contextId in the args
+			const filteredVectorEmbeddingsDocs = vectorEmbeddingsDocs.filter((vectorEmbedding) => vectorEmbedding.contextId === args.contextId);
+
+			// filter vectorEmbeddings with filteredVectorEmbeddingsDocs
+			vectorEmbeddings = vectorEmbeddings.filter((vectorEmbedding) => filteredVectorEmbeddingsDocs.some((filteredVectorEmbedding) => filteredVectorEmbedding._id === vectorEmbedding._id));
+
+			// sort vectorEmbeddings by score descending
+			vectorEmbeddings.sort((a, b) => b._score - a._score);
+
+			// return the top 10 vector embeddings
+			vectorEmbeddings.slice(0, args.limit || 10);
 		} else if (args.fileId) {
 			vectorEmbeddings = await ctx.vectorSearch("vectorEmbeddings", "vector_embeddings", {
 				vector: textEmbedding,
@@ -711,3 +996,27 @@ export const vectorSearchRelevantSources = action({
 		}));
 	}
 });
+
+export const updateVectorEmbedding = mutation({
+	args: {
+		vectorEmbeddingId: v.id("vectorEmbeddings"),
+		type: v.optional(v.string()),
+		contextId: v.optional(v.string()),
+		fileId: v.optional(v.string()),
+		sourceId: v.optional(v.string()),
+	},
+	handler: async (ctx, args) => {
+		const identity = await ctx.auth.getUserIdentity();
+		if (!identity) throw new Error("Not authenticated");
+
+		const userId = identity.subject;
+
+		// patch the vector embedding
+		await ctx.db.patch(args.vectorEmbeddingId, {
+			type: args.type,
+			contextId: args.contextId,
+			fileId: args.fileId,
+			sourceId: args.sourceId,
+		});
+	}
+})

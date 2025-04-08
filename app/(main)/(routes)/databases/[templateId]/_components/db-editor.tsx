@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { Header } from "./header";
 import { Cell } from "./cell";
 import { format } from "date-fns";
+import { ConceptSelector } from "@/components/concept-selector";
+import { Textarea } from "@/components/ui/textarea";
 
 interface DBEditorProps {
   templateId: Id<"objectTemplates">;
@@ -57,9 +59,12 @@ const DBEditor = ({
   const [isOpen, setIsOpen] = useState(false);
   const [isNewRowOpen, setIsNewRowOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+  const [isCreatingRow, setIsCreatingRow] = useState(false);
   const [fetchMessage, setFetchMessage] = useState<string | null>(null);
   const [newColumnName, setNewColumnName] = useState("");
   const [newRowName, setNewRowName] = useState("");
+  const [newRowDescription, setNewRowDescription] = useState("");
+  const [selectedConceptId, setSelectedConceptId] = useState<string>();
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const [cellHeights, setCellHeights] = useState<Record<string, number>>({});
   const [loadingStates, setLoadingStates] = useState<LoadingState[]>([]);
@@ -141,7 +146,8 @@ const DBEditor = ({
       const cellKey = `name-${tag._id}`;
       newHeights[cellKey] = calculateContentHeight(displayName);
     });
-    newWidths['name'] = Math.min(maxNameWidth, MAX_COLUMN_WIDTH);
+    // Add extra space for name column to accommodate buttons
+    newWidths['name'] = Math.min(maxNameWidth + 40, MAX_COLUMN_WIDTH);
 
     // Calculate width and height for each property column
     propertyTemplates.forEach(prop => {
@@ -190,17 +196,24 @@ const DBEditor = ({
   };
 
   const handleNewRow = async () => {
-    if (!newRowName.trim()) return;
+    if (!(newRowName.trim() || selectedConceptId) || isCreatingRow) return;
     
     try {
+      setIsCreatingRow(true);
       await createConceptAndTag({
         templateId,
-        objectName: newRowName.trim()
+        objectName: newRowName.trim(),
+        conceptDescription: newRowDescription.trim(),
+        conceptId: selectedConceptId as Id<"concepts"> | undefined
       });
       setNewRowName("");
+      setNewRowDescription("");
+      setSelectedConceptId(undefined);
       setIsNewRowOpen(false);
     } catch (error) {
       console.error("Failed to create new row:", error);
+    } finally {
+      setIsCreatingRow(false);
     }
   };
 
@@ -396,6 +409,7 @@ const DBEditor = ({
                           height={cellHeights[`name-${tag._id}`] || DEFAULT_CELL_HEIGHT}
                           isName
                           conceptId={tag.conceptId}
+                          objectTagId={tag._id}
                         />
                         {propertyTemplates.map((prop) => {
                           const tagProperty = propertiesByTagId[tag._id]?.find(
@@ -475,22 +489,70 @@ const DBEditor = ({
           <DialogHeader>
             <DialogTitle>Add New Row</DialogTitle>
             <DialogDescription>
-              Enter a name for the new object. This will create a new concept and object tag.
+              Select an existing concept or create a new one by entering a name and description.
             </DialogDescription>
           </DialogHeader>
-          <div>
-            <Input
-              placeholder="Enter object name..."
-              value={newRowName}
-              onChange={(e) => setNewRowName(e.target.value)}
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Concept</label>
+              <ConceptSelector
+                value={selectedConceptId}
+                onChange={setSelectedConceptId}
+                buttonLabel="Select existing concept..."
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Name</label>
+              <Input
+                placeholder="Enter object name..."
+                value={newRowName}
+                onChange={(e) => setNewRowName(e.target.value)}
+                disabled={!!selectedConceptId || isCreatingRow}
+                className={cn(
+                  (selectedConceptId || isCreatingRow) && "bg-muted text-muted-foreground"
+                )}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Description</label>
+              <Textarea
+                placeholder="Enter description..."
+                value={newRowDescription}
+                onChange={(e) => setNewRowDescription(e.target.value)}
+                disabled={!!selectedConceptId || isCreatingRow}
+                className={cn(
+                  (selectedConceptId || isCreatingRow) && "bg-muted text-muted-foreground",
+                  "resize-none"
+                )}
+                rows={3}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
-              disabled={!newRowName.trim()}
+              variant="secondary"
+              onClick={() => {
+                setIsNewRowOpen(false);
+                setNewRowName("");
+                setNewRowDescription("");
+                setSelectedConceptId(undefined);
+              }}
+              disabled={isCreatingRow}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={(!selectedConceptId && !newRowName.trim()) || isCreatingRow}
               onClick={handleNewRow}
             >
-              Create
+              {isCreatingRow ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                "Create"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -8,6 +8,8 @@ import { api } from "../convex/_generated/api";
 import OpenAI from 'openai';
 import { RegisteredAction } from "convex/server";
 
+import { betterName } from "./concepts";
+
 export const askLLM = action({
 	args: {
 		role: v.string(),
@@ -298,7 +300,8 @@ export const fetchRelatedConcepts = action({
 		const conceptIds: Id<"concepts">[] = await ctx.runAction(api.vectorEmbed.searchSimilarConcepts, {
 			name: args.name,
 			description: args.description || "",
-			limit: 3
+			scoreThreshold: 0.95,
+			descriptionWeight: 1
 		});
 		return conceptIds;
 	}
@@ -448,7 +451,7 @@ export const fetchConceptKeywords = action({
 				The text provided includes the document title and all content. Use this full context to identify relevant entity types that a user may pay attention to looking for the crucial information.
 
 				-Warning-
-				Do not include Datetime or other data type as the entity type as they are properties of the entity.
+				Do not include DATE, TIME, or other data type as the entity type because they are properties of the entity, not the entity itself that a user would pay attention to.
 				 
 				######################
 				-Examples-
@@ -504,14 +507,14 @@ export const fetchConceptKeywords = action({
 				1. Identify all entities within the current block matching one of the entity types. For each identified entity, extract the following information:
 				- entity_name: Name of the entity.
 				- entity_type: the possible type of the entity
-				- entity_description: Comprehensive description of the entity's attributes and activities
+				- entity_description: a definition starts with "[entity_name] is ..." that describes the general idea of the concept, avoid including specific context.
 				Format each entity as <entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>
 				
 				2. Return output in English as a single list of all the entities identified in steps 1. Use **{record_delimiter}** as the list delimiter. 
 				
 				-Warning-
 				1. Please identify if an entity is a general concept or a contextual concept. For the contextual concept, making sure your naming is specific to the entity.
-				2. Avoiding adding properties or data as the context for the entity.
+				2. There should be strictly no specific non-naming context appeared in the name or description of the entity. The name should be how the entity is called in most cases.
 				3. If there is no additional entities, please strictly return '**No additional entities identified**'
 
 				######################
@@ -564,11 +567,96 @@ export const fetchConceptKeywords = action({
 		const conceptKeywords: Array<[string, Id<"concepts">]> = [];
 
 		// Split into individual entity records
-		const tuples = entitiesStr.split("**{record_delimiter}**");
+		const tuples = entitiesStr.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+		.map(t => t.trim())
+		.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) 
+		.filter(t => t.length > 0);
+
+		// calling LLM again to fetch more keywords, with newly identified entities from the tuples added to blockMentionedConcepts
+
+		let newBlockMentionedConceptsAliases = blockMentionedConceptsAliases;
 
 		for (const tuple of tuples) {
-			console.log("CURRENT TUPLE: ", tuple);
 			const [name, type, description] = tuple.split("{tuple_delimiter}");
+
+			if (!name || !type || !description) {
+				continue;
+			}
+
+			newBlockMentionedConceptsAliases.push(name);
+		}
+		
+		const newEntitiesStr = await ctx.runAction(api.llm.askLLM, {
+			role: `-Goal-
+				Given a text document that is potentially relevant to this activity, and a list of entity types, and a list of already identified entities, identify all additional entities from the text. Currently, there are many entities that are not identified, so please be thorough.
+				
+				-Steps-
+				1. Identify all entities within the current block matching one of the entity types. For each identified entity, extract the following information:
+				- entity_name: Name of the entity.
+				- entity_type: the possible type of the entity
+				- entity_description: a definition that describes the general idea of the concept, avoid including specific context that does not neccessarily apply to all instances of the concept.
+				Format each entity as <entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>
+				
+				2. Return output in English as a single list of all the entities identified in steps 1. Use **{record_delimiter}** as the list delimiter. 
+				
+				-Warning-
+				1. Please identify if an entity is a general concept or a contextual concept. For the contextual concept, making sure your naming is specific to the entity.
+				2. Avoiding adding properties or data as the context for the entity.
+				3. If there is no additional entities, please strictly return '**No additional entities identified**'
+
+				######################
+				-Examples-
+				######################
+				Example 1:
+				{Entity Types}: [ORGANIZATION, PERSON, LOCATION, BUSINESS TERMS, EVENT, DEPARTMENT]
+				{Entities Already Identified}: [Central Institution, Meeting, Interest Rate]
+				{Text}:
+				The upcoming meetings of the Verdantis's Central Institution are highly anticipated by market analysts and policymakers alike. With economic uncertainty lingering, stakeholders are keen to understand the institution's latest stance on monetary policy and its potential impact on financial markets.
+
+				The Verdantis's Central Institution is scheduled to meet on Monday and Thursday, with the institution planning to release its latest policy decision on Thursday at 1:30 p.m. PDT, followed by a press conference where Central Institution Chair Martin Smith will take questions. Investors expect the Market Strategy Committee to hold its benchmark interest rate steady in a range of 3.5%-3.75%.
+
+				######################
+				Output:
+				Martin Smith{tuple_delimiter}PERSON{tuple_delimiter}The Central Institution Chair**{record_delimiter}**2025-03-15{tuple_delimiter}DATETIME{tuple_delimiter}The date of the meeting**{record_delimiter}**Verdantis{tuple_delimiter}LOCATION{tuple_delimiter}The location of the meeting**{record_delimiter}**Meetings of the Verdantis's Central Institution{tuple_delimiter}EVENT{tuple_delimiter}The meeting of the Central Institution**{record_delimiter}**Market Strategy Committee at the Verdantis's Central Institution{tuple_delimiter}DEPARTMENT{tuple_delimiter}A department of the  Verdantis's Central Institution
+
+				######################
+				Example 2:
+				{Entity Types}: [ORGANIZATION, BUSINESS TERMS, EVENT, DEPARTMENT, ELECTRONIC DEVICE, JOB POSITION]
+				{Entities Already Identified}: [ Semiconductor, Vision Holdings]
+				{Text}:
+				TechGlobal, a formerly public company, was taken private by Vision Holdings in 2014. The well-established chip designer says it powers 85% of premium smartphones.
+				######################
+				Output:
+				TechGlobal{tuple_delimiter}ORGANIZATION{tuple_delimiter}A chip designer company**{record_delimiter}**Premium Smartphone{tuple_delimiter}ELECTRONIC DEVICE{tuple_delimiter}a high-end carrying electronic device for communication**{record_delimiter}**Chip Designer{tuple_delimiter}JOB POSITION{tuple_delimiter}A person who designs chips
+				`,
+			question: `
+				{Entity Types}: ${entityTypeListStr}
+				{Entities Already Identified}: ${newBlockMentionedConceptsAliases.join(", ")}
+				{Text}:
+				${currentBlockText}
+			`,
+			model: "gpt-4o-mini"
+		});
+
+
+		if (!newEntitiesStr.toLowerCase().includes("no additional entities identified")) {
+			const newTuples = newEntitiesStr.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) 
+			.filter(t => t.length > 0);
+
+			// add newTuples to tuples
+			tuples.push(...newTuples);
+		}
+
+
+		
+		for (const tuple of tuples) {
+			console.log("CURRENT TUPLE: ", tuple);
+			const [name, type, description] = tuple.split(/[^a-zA-Z0-9]tuple_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '')) 
+			.filter(t => t.length > 0);
 			
 			if (!name || !type || !description) {
 				console.log("Invalid tuple format, skipping:", tuple);
@@ -593,26 +681,29 @@ export const fetchConceptKeywords = action({
 					sourceType: "document"
 				});
 			} else {
-				// Find best match or create new concept
-				const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
-					name: name,
-					description: description,
-					conceptIds: matchingConcepts
-				});
+				// OLD CODE
+				// // Find best match or create new concept
+				// const bestMatchId = await ctx.runAction(api.llm.fetchBestMatchedConcept, {
+				// 	name: name,
+				// 	description: description,
+				// 	conceptIds: matchingConcepts
+				// });
 
-				if (bestMatchId) {
-					conceptId = bestMatchId;
-				} else {
-					// Create new concept if no good match found
-					conceptId = await ctx.runAction(api.concepts.addConcept, {
-						alias: [name],
-						description: description,
-						isSynced: false,
-						sourceId: args.documentId as string,
-						sourceType: "document",
-						blockId: args.blockId
-					});
-				}
+				// if (bestMatchId) {
+				// 	conceptId = bestMatchId;
+				// } else {
+				// 	// Create new concept if no good match found
+				// 	conceptId = await ctx.runAction(api.concepts.addConcept, {
+				// 		alias: [name],
+				// 		description: description,
+				// 		isSynced: false,
+				// 		sourceId: args.documentId as string,
+				// 		sourceType: "document",
+				// 		blockId: args.blockId
+				// 	});
+				// }
+				// NEW CODE
+				conceptId = matchingConcepts[0];
 			}
 
 			conceptKeywords.push([name, conceptId]);
@@ -689,63 +780,66 @@ export const fetchObjectTags = action({
 				Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
 	
 				-Context-
-				A tag represents that an entity is an instance of the parent entity that the tag refers to and can be used to learn about the parent entity's instances (For example, a tag "Financial Report Review Status" belong to parent entity "Financial Report" can be used to track the review status of all financial reports). These tags help group similar instances of the parent entity for specific usage purposes.
+				A tag represents the type of the parent entity's instances that the entity should be grouped with and can be used to learn about this type of instances (For example, a entity "Apple Financial Report Review 2024" will have a tag "Apple's Financial Report" belong to parent entity "Apple" can be used to learn about all financial reports of Apple). These tags help group similar instances of the parent entity for specific usage purposes.
 	
 				-Steps-
 				1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
-				2. Analyze new knowledges about the entity to determine if the entity is an instance of some parent entities.
-				3. For each parent entity, reason to check if new knowledges indicate a use case for the database of parent entity.
-				4. Check if the new tags are already in the list of existing tags.
-				5. Drafting all new tags' name and description that indicate how the entity could be used as a instance of the parent entity.
-				6. For each new tag, specify:
+				2. Analyze new knowledges about the entity to determine the tag by identify the type of the entity. The type is often general regardless of the context and topic.
+				3. Then, determine if there is a parent entity. The parent entity is often the main topic, organization, person, product, or concept the entity mainly discusses or belongs to. If there is no parent entity, there is no tag to add.
+				4. If there is a parent entity, check if the new tags you plan to add already exist in the list of existing tags.
+				5. For each new tag, specify:
 					 - Parent entity name and description
-					 - Tag name (should mention the parent entity's name) and description.
+					 - Tag name (by combining parent's name and entity's tag in the format of "[parent_entity_name]'s [entity_tag]") and description.
 	
 				-Response Format-
 				Return either:
 				1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
 				2. Exactly "**no additional object tag detected**" if no new tags found
-	
+
 				-Warning-
-				Tags should be general to all instances of the parent entity and only indicate the usage of the entity.
+				1. The parent entity must be what the entity always discusses or belongs to. Usually, the parent entity would be reflected in the name of the child entity.
+				2. If the entity is a general concept, there is no tag to add.
 	
 				#####################
 				-Examples-
 				#####################
-				Example 1:
-	{Entity}: Q1 2024 Audit Summary  
-	{Entity Description}: A document compiling key findings from internal audits in the first quarter of 2024.  
-	{Updated Knowledges}: Includes a checklist of identified compliance gaps, remediation timelines, and audit owner contact information.  
-	{Existing Tags}: [  
-		{Name: Audit Summary Status, Description: Tracks the review and approval status of audit summaries},  
-		{Name: Q1 2024 Financial Report Reference, Description: Links to financial reports from Q1 2024}  
-	]
-	
-				#####################
-				Output:
-				("Audit"**{tuple_delimiter}**"Records generated from formal internal audit activities for compliance, risk, or performance evaluation"**{tuple_delimiter}**"Internal Audit Record Remediation Tracker"**{tuple_delimiter}**"Tracks remediation actions and ownership for each internal audit record")**{record_delimiter}**("Audit Summary Status"**{tuple_delimiter}**"Tracks the review and approval status of audit summaries"**{tuple_delimiter}**" Financial Report Reference"**{tuple_delimiter}**"Links to financial reports")
+{Entity}: Microsoft Annual Shareholder Letter 2023
+{Entity Description}: A formal letter addressed to Microsoft shareholders summarizing the company's yearly performance, financial highlights, leadership messages, and strategic outlook.
+{Updated Knowledges}: The letter includes a deep dive into Microsoft's performance in cloud services, growth in Azure, and new ESG initiatives. It also discusses leadership transitions and product roadmaps for 2024.
+{Existing Tags}: [
+{Name: Microsoft's Financial Report, Description: Documents outlining Microsoft's financial performance and official earnings results},
+{Name: Microsoft's Annual Shareholder Letter, Description: Letters to shareholders summarizing Microsoft's financial results, executive insights, and strategic direction}
+]
+
+#####################
+Output: 
+**no additional object tag detected**
 	 
 	
-	
-				Example 2:
-	{Entity}: Marketing Campaign Alpha  
-	{Entity Description}: A digital marketing campaign launched in late 2023 targeting Gen Z consumers.  
-	{Updated Knowledges}: Recently updated with new banner designs and additional social media analytics.  
-	{Existing Tags}: [  
-		{Name: Campaign Performance Overview, Description: Summarizes campaign performance metrics},  
-		{Name: Campaign Launch Timeline, Description: Tracks the timeline and phases of marketing campaign deployment}  
-	]
-	 
-				#####################
-				Output:
-				**no additional object tag detected**
-				`,
-			question: JSON.stringify({
+Example 2:
+{Entity}: Mitochondria
+{Entity Description}: Mitochondria are membrane-bound organelles found in most eukaryotic cells, often referred to as the "powerhouse of the cell" because they generate most of the cell's supply of ATP through respiration.
+{Updated Knowledges}: Mitochondria originated from an ancient symbiotic event involving a proteobacterium, and they retain their own DNA. They are now considered part of the endosymbiotic organelles in cells.
+{Existing Tags}: [
+{Name: Cell's Energy Organelle, Description: Organelles involved in the production and management of energy within cells},
+{Name: Cell's Structural Component, Description: Basic building blocks and physical frameworks of the cell, such as membranes and cytoskeleton}
+]
+
+##################### Output:
+"Eukaryotic Cell"{tuple_delimiter}"Cells containing membrane-bound organelles, including a nucleus, found in animals, plants, fungi, and protists"{tuple_delimiter}"Eukaryotic Cell's Endosymbiotic Organelle"{tuple_delimiter}"Organelles such as mitochondria and chloroplasts that originated from symbiotic bacteria and now function as integrated parts of eukaryotic cells"{record_delimiter}`,
+			question: `
+			#####################
+			Real Data: 
+			#####################
+			` + 
+			JSON.stringify({
 				'{Entity}': args.conceptName,
 				'{Entity Description}': args.description,
 				'{Updated Knowledges}': args.knowledgeString,
 				'{Existing Tags}': args.existingTags
-			})
+			}),
+
+			model: "gpt-4o-mini"
 		});
 
 		// Try parsing the first response
@@ -756,66 +850,65 @@ export const fetchObjectTags = action({
 			console.log("First parsing attempt failed, retrying...");
 			const retryResponse = await ctx.runAction(api.llm.askLLM, {
 				role: `-Goal-
-				Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
-	
-				-Context-
-				A tag represents that an entity is an instance of the parent entity that the tag refers to and can be used to learn about the parent entity's instances (For example, a tag "Financial Report Review Status" belong to parent entity "Financial Report" can be used to track the review status of all financial reports). These tags help group similar instances of the parent entity for specific usage purposes.
-	
-				-Steps-
-				1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
-				2. Analyze new knowledges about the entity to determine if the entity is an instance of some parent entities.
-				3. For each parent entity, reason to check if new knowledges indicate a use case for the database of parent entity.
-				4. Check if the new tags are already in the list of existing tags.
-				5. Drafting all new tags' name and description that indicate how the entity could be used as a instance of the parent entity.
-				6. For each new tag, specify:
-					 - Parent entity name and description
-					 - Tag name (should mention the parent entity's name) and description.
-	
-				-Response Format-
-				Return either:
-				1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
-				2. Exactly "**no additional object tag detected**" if no new tags found
-	
-				-Warning-
-				Tags should be general to all instances of the parent entity and only indicate the usage of the entity.
-	
-				#####################
-				-Examples-
-				#####################
-				Example 1:
-	{Entity}: Q1 2024 Audit Summary  
-	{Entity Description}: A document compiling key findings from internal audits in the first quarter of 2024.  
-	{Updated Knowledges}: Includes a checklist of identified compliance gaps, remediation timelines, and audit owner contact information.  
-	{Existing Tags}: [  
-		{Name: Audit Summary Status, Description: Tracks the review and approval status of audit summaries},  
-		{Name: Q1 2024 Financial Report Reference, Description: Links to financial reports from Q1 2024}  
+					Given an entity and its updated knowledges, a list of existing tags (tag name and description), identify potential new tags that could be applied to this concept.
+		
+					-Context-
+					A tag represents the type of the parent entity's instances that the entity should be grouped with and can be used to learn about this type of instances (For example, a entity "Apple Financial Report Review 2024" will have a tag "Apple's Financial Report" belong to parent entity "Apple" can be used to learn about all financial reports of Apple). These tags help group similar instances of the parent entity for specific usage purposes.
+		
+					-Steps-
+					1. Analyze the entity, its description, and new knowledges, fully understand what entity specifically refers to.
+					2. Analyze new knowledges about the entity to determine the tag by identify the type of the entity. The type is often general regardless of the context and topic.
+					3. Then, determine its parent entity. The parent entity is often the main topic, organization, person, product, or concept the entity discusses or belongs to.
+					4. Check if the new tags already exist in the list of existing tags.
+					5. For each new tag, specify:
+						 - Parent entity name and description
+						 - Tag name (by combining parent's name and entity's type in the format of "[parent_entity_name]'s [entity_type]") and description.
+		
+					-Response Format-
+					Return either:
+					1. A list of tuples: ("parent_entity_name"**{tuple_delimiter}**"parent_entity_description"**{tuple_delimiter}**"tag_name"**{tuple_delimiter}**"tag_description")**{record_delimiter}**
+					2. Exactly "**no additional object tag detected**" if no new tags found
+		
+					#####################
+					-Examples-
+					#####################
+	{Entity}: Microsoft Annual Shareholder Letter 2023
+	{Entity Description}: A formal letter addressed to Microsoft shareholders summarizing the company's yearly performance, financial highlights, leadership messages, and strategic outlook.
+	{Updated Knowledges}: The letter includes a deep dive into Microsoft's performance in cloud services, growth in Azure, and new ESG initiatives. It also discusses leadership transitions and product roadmaps for 2024.
+	{Existing Tags}: [
+	{Name: Microsoft's Financial Report, Description: Documents outlining Microsoft's financial performance and official earnings results},
+	{Name: Microsoft's Product Launch, Description: Information about new Microsoft product releases}
 	]
 	
-				#####################
-				Output:
-				("Audit"**{tuple_delimiter}**"Records generated from formal internal audit activities for compliance, risk, or performance evaluation"**{tuple_delimiter}**"Internal Audit Record Remediation Tracker"**{tuple_delimiter}**"Tracks remediation actions and ownership for each internal audit record")**{record_delimiter}**("Audit Summary Status"**{tuple_delimiter}**"Tracks the review and approval status of audit summaries"**{tuple_delimiter}**" Financial Report Reference"**{tuple_delimiter}**"Links to financial reports")
-	 
-	
-	
-				Example 2:
-	{Entity}: Marketing Campaign Alpha  
-	{Entity Description}: A digital marketing campaign launched in late 2023 targeting Gen Z consumers.  
-	{Updated Knowledges}: Recently updated with new banner designs and additional social media analytics.  
-	{Existing Tags}: [  
-		{Name: Campaign Performance Overview, Description: Summarizes campaign performance metrics},  
-		{Name: Campaign Launch Timeline, Description: Tracks the timeline and phases of marketing campaign deployment}  
+	#####################
+	Output:
+	"Microsoft"{tuple_delimiter}"A multinational technology company known for software, hardware, and cloud computing services"{tuple_delimiter}"Microsoft's Annual Shareholder Letter"{tuple_delimiter}"Letters to shareholders summarizing Microsoft's financial results, executive insights, and strategic direction"{record_delimiter}
+		 
+		
+	Example 2:
+	{Entity}: Mitochondria
+	{Entity Description}: Mitochondria are membrane-bound organelles found in most eukaryotic cells, often referred to as the "powerhouse of the cell" because they generate most of the cell's supply of ATP through respiration.
+	{Updated Knowledges}: Mitochondria originated from an ancient symbiotic event involving a proteobacterium, and they retain their own DNA. They are now considered part of the endosymbiotic organelles in cells.
+	{Existing Tags}: [
+	{Name: Cell's Energy Organelle, Description: Organelles involved in the production and management of energy within cells},
+	{Name: Cell's Structural Component, Description: Basic building blocks and physical frameworks of the cell, such as membranes and cytoskeleton}
 	]
-	 
+	
+	##################### Output:
+	"Eukaryotic Cell"{tuple_delimiter}"Cells containing membrane-bound organelles, including a nucleus, found in animals, plants, fungi, and protists"{tuple_delimiter}"Eukaryotic Cell's Endosymbiotic Organelle"{tuple_delimiter}"Organelles such as mitochondria and chloroplasts that originated from symbiotic bacteria and now function as integrated parts of eukaryotic cells"{record_delimiter}`,
+				question: `
 				#####################
-				Output:
-				**no additional object tag detected**
-				`,
-				question: JSON.stringify({
+				Real Data: 
+				#####################
+				` + 
+				JSON.stringify({
 					'{Entity}': args.conceptName,
 					'{Entity Description}': args.description,
 					'{Updated Knowledges}': args.knowledgeString,
 					'{Existing Tags}': args.existingTags
-				})
+				}),
+
+				model: "gpt-4o-mini"
 			});
 			
 			result = parseLLMResponseforObjectTags(retryResponse);
@@ -1790,20 +1883,21 @@ export const fetchConceptDescription = action({
 			Given the old concept definition (maybe empty or outdated) and a list of newly introduced knowledges about the concept, decide if the concept definition is outdated and needs to be updated, if so, generate a new definition for the concept.
 
 			-Steps-
-			You should analyze:
-			1. The old concept definition
-			2. The list of newly introduced knowledges about the concept
+			1. Analyze the old concept definition to understand what the concept is about.
+			2. Analyze the list of newly introduced knowledges about the concept, decide if the knowledges introduce new and general information about the concept.
 			3. Decide if the knowledges have significant impact on the concept definition.
 			4. If so, update the concept definition considering the new knowledges.
 
 			-Response Format-
-			Return the strictly the new concept definition in English, do not include any other information.
-			if there is no change, return exactly "**no change needed**"
+			1. Return the strictly the concept definition in English, do not include any other information.
+			2. The concept definition should start with "[concept name] is...".
+			3. The concept definition should decribe the general idea of the concept, avoid including specific context that does not neccessarily apply to all instances of the concept.
+			4. if there is no change, return exactly "**no change needed**"
 
 			-Example-
 			Input:
-			{Old Definition}: "The concept of machine learning is a field of artificial intelligence that focuses on building systems that learn from data."
-			{New Knowledges}: "Machine learning is a subset of artificial intelligence that focuses on building systems that learn from data."
+			{Old Definition}: "Machine learning is a field of artificial intelligence."
+			{New Knowledges}: "Machine learning focuses on building systems that learn from data."
 
 			Output: "Machine learning is a field of artificial intelligence that focuses on building systems that learn from data."
 			`,
@@ -1813,7 +1907,7 @@ export const fetchConceptDescription = action({
 			})
 		});
 
-		if (description.includes("**no change needed**")) {
+		if (description.toLowerCase().includes("no change needed")) {
 			return true;
 		}
 
@@ -1984,11 +2078,11 @@ export const selectInheritedConcepts = action({
 			-Steps-
 			1. Analyze the database name and description to understand the intent usage of the database.
 			2. Analyze the name and description of the type of instances storing in the database with examples to reason requirements to check for the candidate concepts.
-			3. For each candidate concept, use requirements you have learned to check if it is the instance of the database table.
-			4. Return the list of indexes of all candidate concepts you see fit to be the instance of the database table.
+			3. For each candidate concept, use requirements you have learned to strictly check if it is the instance of the database table. Ask: is the candidate a [database name] or [type of instances]?
+			4. Return the list of indexes of all candidate concepts you are confident that it would belong to the database table.
 
 			-Response Format-
-			Return the list of indexes of all candidate concepts you see fit to be the instance of the database table, use **{record_delimiter}** to separate each index.	
+			Return the list of indexes of all candidate concepts you are confident that it would belong to the database table, use **{record_delimiter}** to separate each index.	
 			If you cannot find any candidate concept that is the instance of the database table, return "**no instance found**"
 
 			######################
@@ -2016,7 +2110,9 @@ export const selectInheritedConcepts = action({
 				'{Type of Instances}': objectTemplateConcept.aliasList[0] + ". " + objectTemplateConcept.description,
 				'{Examples}': objectConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description)).join('\n'),
 				'{Candidate Concepts}': candidateConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description + " " + candidateConceptKnowledgeDatas.find(data => data.conceptIndex === index)?.knowledgeData?.extractedKnowledge)).join('\n')
-			})
+			}),
+
+			model: "gpt-4o-mini"
 		});
 
 		if (response.toLowerCase().includes("no instance found")) {
@@ -2025,12 +2121,74 @@ export const selectInheritedConcepts = action({
 
 		// check if response is valid
 
-		const selectedConceptIndexes: number[] = response.split("**{record_delimiter}**").map((indexString: string) => parseInt(indexString));
+		let selectedConceptIndexes: number[] = response.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+		.map(t => t.trim())
+		.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+		.filter(t => t.length > 0).map((indexString: string) => parseInt(indexString));
 
-		// check if all selectedConceptIndexes are valid
-		if (selectedConceptIndexes.some(index => index < 1 || index > candidateConcepts.length)) {
-			throw new Error("Invalid response");
+		// check if all selectedConceptIndexes are NaN or invalid
+		if (selectedConceptIndexes.some(index => isNaN(index) || index < 1 || index > candidateConcepts.length)) {
+			// try again
+			const retryResponse = await ctx.runAction(api.llm.askLLM, {
+				role: `-Goal-
+				Given a database name and database description (might be missing), name and description of the type of instances storing in the database, a list of examples of instances stored in the database (might be missing), and a list of candidate concepts, return list indexes of all candidate concepts that are the instances of the database table.
+	
+				-Steps-
+				1. Analyze the database name and description to understand the intent usage of the database.
+				2. Analyze the name and description of the type of instances storing in the database with examples to reason requirements to check for the candidate concepts.
+				3. For each candidate concept, use requirements you have learned to check if it is the instance of the database table.
+				4. Return the list of indexes of all candidate concepts you see fit to be the instance of the database table.
+	
+				-Response Format-
+				Return the list of indexes of all candidate concepts you see fit to be the instance of the database table, use **{record_delimiter}** to separate each index.	
+				If you cannot find any candidate concept that is the instance of the database table, return "**no instance found**"
+	
+				######################
+				Example
+				######################
+				Input:
+				{Database Name}: "Customer Feedback 2024"
+				{Database Description}: "The database stores information about customer feedbacks in 2024."
+				{Type of Instances}: "Customer. Customer is a person who buys products from the store."
+				{Examples}: 
+				a. "Julia Monk. Julia is a professional software engineer. She has purchased multiple devices and returned all of them for a refund."
+				b. "Chris Brown. Chris is a professor in UIUC. Chris joine VIP program two years ago."
+				c. "John Doe. John is a student in UIUC that published a paper in IEEE. John called the customer service to complain about the product."
+				{Candidate Concepts}:
+				1. "Emily Zhang. Emily is a freelance graphic designer based in San Francisco. She left a detailed review online after experiencing issues with product delivery."
+				2. "Marcus Lee. Marcus is a small business owner who frequently purchases in bulk. He contacted support to suggest improvements for the packaging."
+				3. "Lily Chen. Lily is a UIUC student majoring in computer science. She follows the store's social media page"
+	
+				Output: '1**{record_delimiter}**2'
+	
+				`,
+				question: JSON.stringify({
+					'{Database Name}': objectTemplate.templateName,
+					'{Database Description}': objectTemplate.description,
+					'{Type of Instances}': objectTemplateConcept.aliasList[0] + ". " + objectTemplateConcept.description,
+					'{Examples}': objectConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description)).join('\n'),
+					'{Candidate Concepts}': candidateConcepts.map((concept, index) => (index + 1 + ". " + concept.aliasList[0] + ". " + concept.description + " " + candidateConceptKnowledgeDatas.find(data => data.conceptIndex === index)?.knowledgeData?.extractedKnowledge)).join('\n')
+				}),
+
+				model: "gpt-4o-mini"
+			});
+
+			if (retryResponse.toLowerCase().includes("no instance found")) {
+				return [];
+			}
+
+			selectedConceptIndexes = retryResponse.split(/[^a-zA-Z0-9]record_delimiter[^a-zA-Z0-9]/)
+			.map(t => t.trim())
+			.map(t => t.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, ''))  // Remove any non-alphanumeric chars from start and end
+			.filter(t => t.length > 0).map((indexString: string) => parseInt(indexString));
+
+			// check if all selectedConceptIndexes are NaN or invalid
+			if (selectedConceptIndexes.some(index => isNaN(index) || index < 1 || index > candidateConcepts.length)) {
+				return [];
+			}
 		}
+
+		console.log("selectedConceptIndexes: ", selectedConceptIndexes);
 
 		// remove duplFFicates
 		const uniqueSelectedConceptIndexes = [...new Set(selectedConceptIndexes)];
@@ -2134,7 +2292,9 @@ export const planObjectTagProperties = action({
 				'{Properties}': objectTagProperties.map(property => property.propertyName + ": " + property.value).join('\n'),
 				'{Target Property Name}': objectTagProperty.propertyName,
 				'{Instructions to Fill Target Property}': prompt
-			})
+			}),
+
+			model: "gpt-4o-mini"
 		});
 
 		// trim the response remove all non-alphabetic or numeric characters

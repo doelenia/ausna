@@ -6,6 +6,45 @@ import {Doc, Id} from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { api } from "../convex/_generated/api";
 
+// List of words that should not be capitalized in titles
+const LOWERCASE_WORDS = new Set([
+	"a", "an", "the",
+	"and", "but", "or", "nor",
+	"in", "on", "at", "to", "for", "of", "with",
+	"by", "as"
+]);
+
+// Helper function to format names with proper capitalization and cleaning
+export const betterName = (input: string): string => {
+	// Trim whitespace
+	let cleaned = input.trim();
+	
+	// Remove non-alphanumeric chars from start and end
+	cleaned = cleaned.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '');
+	
+	// Split into words
+	const words = cleaned.split(/\s+/);
+	
+	// Always capitalize first and last word, and apply title case rules to others
+	return words.map((word, index) => {
+		// Convert to lowercase first
+		word = word.toLowerCase();
+		
+		// Always capitalize first and last word
+		if (index === 0 || index === words.length - 1) {
+			return word.charAt(0).toUpperCase() + word.slice(1);
+		}
+		
+		// Check if word should remain lowercase
+		if (LOWERCASE_WORDS.has(word)) {
+			return word;
+		}
+		
+		// Capitalize first letter of other words
+		return word.charAt(0).toUpperCase() + word.slice(1);
+	}).join(' ');
+};
+
 export const getById = query({
 	args: { conceptId: v.id("concepts") },
 	handler: async (ctx, args) => {
@@ -49,13 +88,16 @@ export const addConcept = action({
 		}
 		
 		// get better name
-		const betterName = await ctx.runAction(api.llm.fetchBetterName, {
-			aliasList: args.alias
-		});
+		// const betterName = await ctx.runAction(api.llm.fetchBetterName, {
+		// 	aliasList: args.alias
+		// });
 
-		if (betterName) {
-			args.alias = [betterName, ...args.alias.map((alias) => alias.trim())];
-		}
+		// if (betterName) {
+		// 	args.alias = [betterName, ...args.alias.map((alias) => alias.trim())];
+		// }
+
+		// for each alias, get better name
+		args.alias = args.alias.map((alias) => betterName(alias));
 
 		if (args.isSoft) {
 			const concepts_with_similar_name = await ctx.runAction(api.vectorEmbed.vectorEmbedSearch, {
@@ -691,10 +733,16 @@ export const getConceptsByIds = query({
 
 		const userId = identity.subject;
 
-		const concepts = await ctx.db.query("concepts")
-		.withIndex("by_user", (q) => q.eq("userId", userId))
-		.collect();
+		// for each conceptId, get the concept make sure in the original order, don't add if it is null
+		const concepts = await Promise.all(
+			args.conceptIds.map(conceptId => 
+				ctx.db.get(conceptId)
+			)
+		);
 
-		return concepts.filter(concept => args.conceptIds.includes(concept._id));
+		// filter out null concepts
+		const filteredConcepts = concepts.filter(concept => concept !== null);
+
+		return filteredConcepts;
 	}
 });	

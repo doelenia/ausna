@@ -77,14 +77,14 @@ export const Menu = ({ documentId }: MenuProps) => {
 			});
 			await syncPromise;
 
-			// Fourth action: Sync object tags
-			const syncObjectTagsPromise = syncAllObjectTags({});
-			toast.promise(syncObjectTagsPromise, {
-				loading: "3/4 Syncing concept relationships...",
-				success: "4/4 Concept relationships synced successfully.",
-				error: "Failed to sync concept relationships.",
-			});
-			await syncObjectTagsPromise;
+			// // Fourth action: Sync object tags
+			// const syncObjectTagsPromise = syncAllObjectTags({});
+			// toast.promise(syncObjectTagsPromise, {
+			// 	loading: "3/4 Syncing concept relationships...",
+			// 	success: "4/4 Concept relationships synced successfully.",
+			// 	error: "Failed to sync concept relationships.",
+			// });
+			// await syncObjectTagsPromise;
 
 		} catch (error) {
 			console.error("Sync failed:", error);
