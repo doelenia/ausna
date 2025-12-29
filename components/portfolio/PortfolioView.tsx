@@ -5,6 +5,7 @@ import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
 import { HostsDisplay } from './HostsDisplay'
+import { PinnedSection } from './PinnedSection'
 import { useState, useEffect } from 'react'
 import { deletePortfolio } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
@@ -194,6 +195,12 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         Account
                       </Link>
                     )}
+                    <Link
+                      href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/pinned`}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                    >
+                      Edit Pinned
+                    </Link>
                     <button
                       onClick={() => setIsEditing(true)}
                       className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
@@ -274,6 +281,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           {(isProjectPortfolio(portfolio) || isDiscussionPortfolio(portfolio)) && hosts.length > 0 && (
             <HostsDisplay hostIds={hosts} />
           )}
+
+          {/* Pinned Section */}
+          <PinnedSection portfolioId={portfolio.id} />
 
           {/* Metadata */}
           <div className="text-sm text-gray-500 mt-6 pt-6 border-t border-gray-200">

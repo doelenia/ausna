@@ -99,7 +99,7 @@ export async function createPortfolio(
         description: '',
         avatar: '',
       },
-      pinned: {},
+      pinned: [],
       settings: {},
       members: [user.id], // Owner is automatically a member
     }

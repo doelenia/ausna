@@ -15,11 +15,19 @@ export interface PortfolioBasicMetadata {
 }
 
 /**
+ * Pinned item structure
+ */
+export interface PinnedItem {
+  type: 'portfolio' | 'note'
+  id: string
+}
+
+/**
  * Base metadata structure for all portfolios
  */
 export interface PortfolioMetadata {
   basic: PortfolioBasicMetadata
-  pinned: Record<string, any> // Empty for now, reserved for future use
+  pinned: PinnedItem[] // Array of pinned items (max 9)
   settings: Record<string, any> // Empty for now, reserved for future use
 }
 

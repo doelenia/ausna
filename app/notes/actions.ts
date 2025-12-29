@@ -214,6 +214,60 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       console.log('No references to save')
     }
 
+    // Auto-add note to eligible portfolios' pinned lists
+    // Only add to portfolios where user is owner and pinned list is not full
+    try {
+      const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
+      const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
+      const { Portfolio } = await import('@/types/portfolio')
+
+      // Get all assigned portfolios
+      for (const portfolioId of portfolioIds) {
+        try {
+          // Check if user is owner
+          const isOwner = await isPortfolioOwner(portfolioId, user.id)
+          if (!isOwner) {
+            continue
+          }
+
+          // Get portfolio to check pinned count
+          const { data: portfolio } = await supabase
+            .from('portfolios')
+            .select('*')
+            .eq('id', portfolioId)
+            .single()
+
+          if (!portfolio) {
+            continue
+          }
+
+          const portfolioData = portfolio as Portfolio
+          const pinnedCount = getPinnedItemsCount(portfolioData)
+
+          // Only add if pinned list is not full (max 9 items)
+          if (pinnedCount < 9) {
+            // Check if note is already pinned
+            const metadata = portfolioData.metadata as any
+            const pinned = metadata?.pinned || []
+            const isAlreadyPinned = Array.isArray(pinned) && pinned.some(
+              (item: any) => item.type === 'note' && item.id === note.id
+            )
+
+            if (!isAlreadyPinned) {
+              // Add to pinned list
+              await addToPinned(portfolioId, 'note', note.id)
+            }
+          }
+        } catch (err) {
+          // Continue with other portfolios even if one fails
+          console.error(`Failed to auto-pin note to portfolio ${portfolioId}:`, err)
+        }
+      }
+    } catch (err) {
+      // Don't fail note creation if auto-pinning fails
+      console.error('Failed to auto-pin note:', err)
+    }
+
     return {
       success: true,
       noteId: note.id,

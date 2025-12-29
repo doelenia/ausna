@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, PortfolioType } from '@/types/portfolio'
+import { Portfolio, PortfolioType, PinnedItem } from '@/types/portfolio'
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // Re-export pure utility functions (can be used in client components)
@@ -55,6 +55,117 @@ export async function getHumanPortfolioByUserId(
   }
 
   return data as Portfolio
+}
+
+/**
+ * Check if a portfolio has a parent portfolio in its hosts array
+ */
+export async function isPortfolioHost(
+  parentPortfolioId: string,
+  childPortfolioId: string
+): Promise<boolean> {
+  const supabase = await createClient()
+  
+  const { data: childPortfolio, error } = await supabase
+    .from('portfolios')
+    .select('metadata')
+    .eq('id', childPortfolioId)
+    .single()
+
+  if (error || !childPortfolio) {
+    return false
+  }
+
+  const metadata = childPortfolio.metadata as any
+  const hosts = metadata?.hosts || []
+  return Array.isArray(hosts) && hosts.includes(parentPortfolioId)
+}
+
+/**
+ * Check if a note is assigned to a portfolio
+ */
+export async function isNoteAssignedToPortfolio(
+  noteId: string,
+  portfolioId: string
+): Promise<boolean> {
+  const supabase = await createClient()
+  
+  const { data: note, error } = await supabase
+    .from('notes')
+    .select('assigned_portfolios')
+    .eq('id', noteId)
+    .is('deleted_at', null)
+    .single()
+
+  if (error || !note) {
+    return false
+  }
+
+  const assignedPortfolios = note.assigned_portfolios || []
+  return Array.isArray(assignedPortfolios) && assignedPortfolios.includes(portfolioId)
+}
+
+/**
+ * Get the count of pinned items in a portfolio
+ */
+export function getPinnedItemsCount(portfolio: Portfolio): number {
+  const metadata = portfolio.metadata as any
+  const pinned = metadata?.pinned || []
+  return Array.isArray(pinned) ? pinned.length : 0
+}
+
+/**
+ * Check if an item can be added to pinned list
+ */
+export async function canAddToPinned(
+  portfolio: Portfolio,
+  itemType: 'portfolio' | 'note',
+  itemId: string
+): Promise<{ canAdd: boolean; error?: string }> {
+  // Check if pinned list is full
+  const pinnedCount = getPinnedItemsCount(portfolio)
+  if (pinnedCount >= 9) {
+    return {
+      canAdd: false,
+      error: 'Pinned list is full (maximum 9 items)',
+    }
+  }
+
+  // Check if item is already pinned
+  const metadata = portfolio.metadata as any
+  const pinned = metadata?.pinned || []
+  if (Array.isArray(pinned)) {
+    const isAlreadyPinned = pinned.some(
+      (item: PinnedItem) => item.type === itemType && item.id === itemId
+    )
+    if (isAlreadyPinned) {
+      return {
+        canAdd: false,
+        error: 'Item is already pinned',
+      }
+    }
+  }
+
+  // Validate based on item type
+  if (itemType === 'portfolio') {
+    const isHost = await isPortfolioHost(portfolio.id, itemId)
+    if (!isHost) {
+      return {
+        canAdd: false,
+        error: 'Portfolio must have this portfolio in its hosts array',
+      }
+    }
+  } else if (itemType === 'note') {
+    const isAssigned = await isNoteAssignedToPortfolio(itemId, portfolio.id)
+    if (!isAssigned) {
+      return {
+        canAdd: false,
+        error: 'Note must be assigned to this portfolio',
+      }
+    }
+  }
+
+  return { canAdd: true }
 }
 
 /**
