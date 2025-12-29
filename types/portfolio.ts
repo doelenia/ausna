@@ -1,0 +1,161 @@
+import { Json } from './supabase'
+
+/**
+ * Base portfolio types that all portfolio types extend
+ */
+export type PortfolioType = 'human' | 'projects' | 'discussion'
+
+/**
+ * Basic metadata fields shared by all portfolios
+ */
+export interface PortfolioBasicMetadata {
+  name: string
+  description?: string
+  avatar?: string // URL to storage bucket
+}
+
+/**
+ * Base metadata structure for all portfolios
+ */
+export interface PortfolioMetadata {
+  basic: PortfolioBasicMetadata
+  pinned: Record<string, any> // Empty for now, reserved for future use
+  settings: Record<string, any> // Empty for now, reserved for future use
+}
+
+/**
+ * Human portfolio metadata
+ */
+export interface HumanPortfolioMetadata extends PortfolioMetadata {
+  username?: string // Keep for backward compatibility
+  skills?: string[]
+  experience?: Array<{
+    title: string
+    company?: string
+    duration?: string
+    description?: string
+  }>
+  education?: Array<{
+    degree: string
+    institution: string
+    year?: string
+  }>
+  location?: string
+  availability?: string
+  [key: string]: Json | undefined
+}
+
+/**
+ * Project portfolio metadata
+ */
+export interface ProjectPortfolioMetadata extends PortfolioMetadata {
+  members: string[] // Array of user IDs (includes owner)
+  hosts?: string[] // Optional array of portfolio IDs
+  technologies?: string[]
+  github_url?: string
+  live_url?: string
+  status?: 'idea' | 'in-progress' | 'completed' | 'archived'
+  collaborators?: string[]
+  start_date?: string
+  end_date?: string
+  [key: string]: Json | undefined
+}
+
+/**
+ * Discussion portfolio metadata
+ */
+export interface DiscussionPortfolioMetadata extends PortfolioMetadata {
+  members: string[] // Array of user IDs (includes owner)
+  hosts?: string[] // Optional array of portfolio IDs
+  topic_tags?: string[]
+  category?: string
+  related_projects?: string[] // portfolio IDs
+  related_humans?: string[] // user IDs
+  discussion_type?: 'question' | 'idea' | 'collaboration' | 'feedback'
+  [key: string]: Json | undefined
+}
+
+/**
+ * Base portfolio interface - common fields for all portfolio types
+ */
+export interface BasePortfolio {
+  id: string
+  type: PortfolioType
+  slug: string
+  user_id: string
+  created_at: string
+  updated_at: string
+  metadata: Json
+}
+
+/**
+ * Type-specific portfolio interfaces
+ */
+export interface HumanPortfolio extends BasePortfolio {
+  type: 'human'
+  metadata: HumanPortfolioMetadata
+}
+
+export interface ProjectPortfolio extends BasePortfolio {
+  type: 'projects'
+  metadata: ProjectPortfolioMetadata
+}
+
+export interface DiscussionPortfolio extends BasePortfolio {
+  type: 'discussion'
+  metadata: DiscussionPortfolioMetadata
+}
+
+/**
+ * Union type for all portfolio types
+ */
+export type Portfolio = HumanPortfolio | ProjectPortfolio | DiscussionPortfolio
+
+/**
+ * Type guard functions
+ */
+export function isHumanPortfolio(portfolio: Portfolio): portfolio is HumanPortfolio {
+  return portfolio.type === 'human'
+}
+
+export function isProjectPortfolio(portfolio: Portfolio): portfolio is ProjectPortfolio {
+  return portfolio.type === 'projects'
+}
+
+export function isDiscussionPortfolio(portfolio: Portfolio): portfolio is DiscussionPortfolio {
+  return portfolio.type === 'discussion'
+}
+
+/**
+ * Portfolio creation input type
+ */
+export interface CreatePortfolioInput {
+  type: 'projects' | 'discussion' // Only projects and discussions can be created
+  name: string
+  avatar?: string // Optional avatar URL
+  fromPortfolioId?: string // Portfolio ID where this was created from (for hosts)
+}
+
+/**
+ * Portfolio update input type
+ */
+export interface UpdatePortfolioInput {
+  name?: string
+  description?: string
+  avatar?: string
+  metadata?: Partial<Json>
+}
+
+/**
+ * Portfolio search/filter options
+ */
+export interface PortfolioSearchOptions {
+  type?: PortfolioType | PortfolioType[]
+  query?: string
+  user_id?: string
+  limit?: number
+  offset?: number
+  order_by?: 'created_at' | 'updated_at' | 'name'
+  order?: 'asc' | 'desc'
+}
+
