@@ -36,7 +36,6 @@ export function NotesList({
             note={note}
             portfolioId={portfolioId}
             currentUserId={currentUserId}
-            canAnnotate={canAnnotate}
             onDeleted={onNoteDeleted}
             onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
           />

@@ -50,7 +50,7 @@ export interface HumanPortfolioMetadata extends PortfolioMetadata {
   }>
   location?: string
   availability?: string
-  [key: string]: Json | undefined
+  [key: string]: any
 }
 
 /**
@@ -66,7 +66,7 @@ export interface ProjectPortfolioMetadata extends PortfolioMetadata {
   collaborators?: string[]
   start_date?: string
   end_date?: string
-  [key: string]: Json | undefined
+  [key: string]: any
 }
 
 /**
@@ -80,7 +80,7 @@ export interface DiscussionPortfolioMetadata extends PortfolioMetadata {
   related_projects?: string[] // portfolio IDs
   related_humans?: string[] // user IDs
   discussion_type?: 'question' | 'idea' | 'collaboration' | 'feedback'
-  [key: string]: Json | undefined
+  [key: string]: any
 }
 
 /**

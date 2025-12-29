@@ -68,7 +68,7 @@ export function createHumanPortfolioHelpers(supabase: Client) {
             full_name: fullName,
             avatar_url: user.user_metadata?.avatar_url, // Keep for backward compatibility
           } as HumanPortfolioMetadata,
-        })
+        } as any)
         .select()
         .single()
 
@@ -96,9 +96,10 @@ export function createHumanPortfolioHelpers(supabase: Client) {
         },
       }
 
-      const { data, error } = await supabase
-        .from('portfolios')
-        .update({ metadata: updatedMetadata })
+      const updateData: any = { metadata: updatedMetadata }
+      const { data, error } = await (supabase
+        .from('portfolios') as any)
+        .update(updateData)
         .eq('user_id', userId)
         .eq('type', 'human')
         .select()

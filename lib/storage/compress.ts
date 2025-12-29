@@ -120,7 +120,7 @@ export async function compressImageToBlob(
     webp: 'image/webp',
   }
   
-  const blob = new Blob([buffer], { type: mimeTypes[format] }) as Blob & { format?: 'jpeg' | 'png' | 'webp' }
+  const blob = new Blob([Uint8Array.from(buffer)], { type: mimeTypes[format] }) as Blob & { format?: 'jpeg' | 'png' | 'webp' }
   blob.format = format
   return blob
 }

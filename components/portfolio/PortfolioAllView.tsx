@@ -6,7 +6,7 @@ import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { SubPortfoliosTab } from './SubPortfoliosTab'
 import { NotesTab } from '@/components/notes/NotesTab'
-import { canCreateNoteInPortfolio } from '@/app/notes/actions'
+import { canCreateNoteInPortfolio } from '@/lib/notes/helpers'
 
 interface PortfolioAllViewProps {
   portfolio: Portfolio

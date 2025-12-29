@@ -97,6 +97,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       references: [],
       assigned_portfolios: portfolioIds,
       mentioned_note_id: mentionedNoteId || null,
+      deleted_at: null,
     }
 
     const { data: note, error: noteError } = await supabase
@@ -219,7 +220,6 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     try {
       const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
       const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
-      const { Portfolio } = await import('@/types/portfolio')
 
       // Get all assigned portfolios
       for (const portfolioId of portfolioIds) {
@@ -266,6 +266,27 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     } catch (err) {
       // Don't fail note creation if auto-pinning fails
       console.error('Failed to auto-pin note:', err)
+    }
+
+    // Trigger background indexing (fire-and-forget)
+    try {
+      // Use absolute URL - in server actions, we need the full URL
+      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+      
+      // Use fetch without await - fire and forget
+      fetch(`${baseUrl}/api/index-note`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ noteId: note.id }),
+      }).catch((error) => {
+        // Log error but don't fail note creation
+        console.error('Failed to trigger background indexing:', error)
+      })
+    } catch (error) {
+      // Don't fail note creation if indexing trigger fails
+      console.error('Error triggering background indexing:', error)
     }
 
     return {
@@ -365,6 +386,13 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
       }
     }
 
+    // Get note's topics and intentions before deletion
+    const { data: noteData } = await supabase
+      .from('notes')
+      .select('topics, intentions')
+      .eq('id', noteId)
+      .single()
+
     // Soft delete: Set deleted_at timestamp
     const { error: deleteError } = await supabase
       .from('notes')
@@ -376,6 +404,84 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
         success: false,
         error: deleteError.message || 'Failed to delete note',
       }
+    }
+
+    // Cleanup indexing data
+    try {
+      // 1. Delete atomic knowledge entries
+      await supabase.from('atomic_knowledge').delete().eq('note_id', noteId)
+
+      // 2. Delete note vectors
+      await supabase.from('note_vectors').delete().eq('note_id', noteId)
+
+      // 3. Update topics: decrement mention_count and remove note from mentions
+      if (noteData?.topics && Array.isArray(noteData.topics) && noteData.topics.length > 0) {
+        for (const topicId of noteData.topics) {
+          const { data: topic } = await supabase
+            .from('topics')
+            .select('mention_count, mentions')
+            .eq('id', topicId)
+            .single()
+
+          if (topic) {
+            const updatedMentions = (topic.mentions || []).filter((id: string) => id !== noteId)
+            const newCount = Math.max(0, (topic.mention_count || 0) - 1)
+
+            if (newCount === 0) {
+              // Delete topic if no mentions left
+              await supabase.from('topics').delete().eq('id', topicId)
+            } else {
+              // Update topic
+              await supabase
+                .from('topics')
+                .update({
+                  mention_count: newCount,
+                  mentions: updatedMentions,
+                })
+                .eq('id', topicId)
+            }
+          }
+        }
+      }
+
+      // 4. Update intentions: decrement mention_count and remove note from mentions
+      if (
+        noteData?.intentions &&
+        Array.isArray(noteData.intentions) &&
+        noteData.intentions.length > 0
+      ) {
+        for (const intentionId of noteData.intentions) {
+          const { data: intention } = await supabase
+            .from('intentions')
+            .select('mention_count, mentions')
+            .eq('id', intentionId)
+            .single()
+
+          if (intention) {
+            const updatedMentions = (intention.mentions || []).filter(
+              (id: string) => id !== noteId
+            )
+            const newCount = Math.max(0, (intention.mention_count || 0) - 1)
+
+            if (newCount === 0) {
+              // Delete intention if no mentions left
+              await supabase.from('intentions').delete().eq('id', intentionId)
+            } else {
+              // Update intention
+              await supabase
+                .from('intentions')
+                .update({
+                  mention_count: newCount,
+                  mentions: updatedMentions,
+                })
+                .eq('id', intentionId)
+            }
+          }
+        }
+      }
+    } catch (cleanupError) {
+      // Log but don't fail deletion if cleanup fails
+      console.error('Failed to cleanup indexing data:', cleanupError)
     }
 
     return {
@@ -527,7 +633,7 @@ export async function removeNoteFromPortfolio(
 
     // Remove portfolio from assigned list
     const assignedPortfolios = note.assigned_portfolios || []
-    const updatedPortfolios = assignedPortfolios.filter((id) => id !== portfolioId)
+    const updatedPortfolios = assignedPortfolios.filter((id: string) => id !== portfolioId)
 
     const { error: updateError } = await supabase
       .from('notes')

@@ -4,7 +4,5 @@
 // - Server components/actions: import from '@/lib/storage/avatars-server'
 // - Client components: import from '@/lib/storage/avatars-client'
 
-// Re-export for backward compatibility (but prefer importing from specific files)
-export * from './avatars-server'
-export * from './avatars-client'
+// Note: Re-exports removed to avoid conflicts. Please import directly from the specific files.
 

@@ -185,7 +185,19 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     {portfolio.type}
                   </span>
                 </div>
-                {authChecked && isOwner && isAuthenticated && (
+                <div className="flex items-center gap-2">
+                  {authChecked &&
+                    isAuthenticated &&
+                    !isOwner &&
+                    isHumanPortfolio(portfolio) && (
+                      <Link
+                        href={`/messages?userId=${portfolio.user_id}`}
+                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                      >
+                        Message
+                      </Link>
+                    )}
+                  {authChecked && isOwner && isAuthenticated && (
                   <div className="flex gap-2">
                     {isHumanPortfolio(portfolio) && (
                       <Link
@@ -218,7 +230,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       </button>
                     )}
                   </div>
-                )}
+                  )}
+                </div>
               </div>
               {basic.description && (
                 <p className="text-gray-600 mt-4">{basic.description}</p>

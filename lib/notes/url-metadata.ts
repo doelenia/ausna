@@ -239,7 +239,7 @@ async function fetchUrlMetadataWithAI(url: string): Promise<Partial<UrlReference
     const hostname = getHostname(normalizedUrl)
     
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5-mini',
       messages: [
         {
           role: 'system',

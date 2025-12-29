@@ -26,6 +26,8 @@ export interface UrlReference {
  */
 export type NoteReference = ImageReference | UrlReference
 
+import { IndexingStatus } from './indexing'
+
 /**
  * Note interface matching database structure
  */
@@ -39,6 +41,12 @@ export interface Note {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  // Indexing fields
+  summary?: string | null
+  compound_text?: string | null
+  topics?: string[] // Array of topic IDs
+  intentions?: string[] // Array of intention IDs
+  indexing_status?: IndexingStatus
 }
 
 /**

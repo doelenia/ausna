@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { UserAvatar } from '@/components/main/UserAvatar'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
+import { HumanPortfolio } from '@/types/portfolio'
 
 export function AuthNav() {
   const [user, setUser] = useState<any>(null)
@@ -68,7 +69,7 @@ export function AuthNav() {
 }
 
 function UserAvatarClient({ userId }: { userId: string }) {
-  const [humanPortfolio, setHumanPortfolio] = useState<{ metadata?: any } | null>(null)
+  const [humanPortfolio, setHumanPortfolio] = useState<HumanPortfolio | null>(null)
   const supabase = createClient()
   const portfolioHelpers = createHumanPortfolioHelpers(supabase)
 

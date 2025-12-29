@@ -21,6 +21,9 @@ NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 # OR use legacy anon key (still supported but not recommended)
 # NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+# Service role key (required for background indexing operations)
+# Get this from Supabase Dashboard > Settings > API > service_role key (keep secret!)
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
 # OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
