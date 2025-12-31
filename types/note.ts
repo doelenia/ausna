@@ -76,3 +76,19 @@ export interface NoteWithMention extends Note {
   mentioned_note?: Note | null
 }
 
+/**
+ * Note source information for feed display
+ */
+export type NoteSource = 
+  | { type: 'friend' }
+  | { type: 'community'; communityName: string; communityId: string }
+  | { type: 'subscribed' }
+  | null
+
+/**
+ * Note with source information (for feed display)
+ */
+export interface NoteWithSource extends Note {
+  feedSource?: NoteSource
+}
+

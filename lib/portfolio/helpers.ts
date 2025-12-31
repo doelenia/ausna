@@ -36,6 +36,86 @@ export async function isPortfolioOwner(
 }
 
 /**
+ * Check if user is the creator of a portfolio (server-side)
+ * Creator is the portfolio owner (user_id)
+ */
+export async function isPortfolioCreator(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  return await isPortfolioOwner(portfolioId, userId)
+}
+
+/**
+ * Check if user is a manager of a portfolio (server-side)
+ * For project/community portfolios: checks if user is in managers array
+ */
+export async function isPortfolioManager(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  const supabase = await createClient()
+  
+  const { data: portfolio, error } = await supabase
+    .from('portfolios')
+    .select('type, metadata')
+    .eq('id', portfolioId)
+    .single()
+
+  if (error || !portfolio) {
+    return false
+  }
+
+  // Only project/community portfolios have managers
+  if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    return false
+  }
+
+  const metadata = portfolio.metadata as any
+  const managers = metadata?.managers || []
+  
+  return Array.isArray(managers) && managers.includes(userId)
+}
+
+/**
+ * Check if user can edit a portfolio (server-side)
+ * Returns true if user is creator or manager
+ */
+export async function canEditPortfolio(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  const isCreator = await isPortfolioCreator(portfolioId, userId)
+  if (isCreator) {
+    return true
+  }
+  
+  return await isPortfolioManager(portfolioId, userId)
+}
+
+/**
+ * Check if user can delete a portfolio (server-side)
+ * Returns true only if user is creator
+ */
+export async function canDeletePortfolio(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  return await isPortfolioCreator(portfolioId, userId)
+}
+
+/**
+ * Check if user can manage pinned items (server-side)
+ * Returns true if user is creator or manager
+ */
+export async function canManagePinned(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  return await canEditPortfolio(portfolioId, userId)
+}
+
+/**
  * Get human portfolio by user_id (server-side)
  */
 export async function getHumanPortfolioByUserId(
@@ -57,29 +137,6 @@ export async function getHumanPortfolioByUserId(
   return data as Portfolio
 }
 
-/**
- * Check if a portfolio has a parent portfolio in its hosts array
- */
-export async function isPortfolioHost(
-  parentPortfolioId: string,
-  childPortfolioId: string
-): Promise<boolean> {
-  const supabase = await createClient()
-  
-  const { data: childPortfolio, error } = await supabase
-    .from('portfolios')
-    .select('metadata')
-    .eq('id', childPortfolioId)
-    .single()
-
-  if (error || !childPortfolio) {
-    return false
-  }
-
-  const metadata = childPortfolio.metadata as any
-  const hosts = metadata?.hosts || []
-  return Array.isArray(hosts) && hosts.includes(parentPortfolioId)
-}
 
 /**
  * Check if a note is assigned to a portfolio
@@ -148,13 +205,10 @@ export async function canAddToPinned(
 
   // Validate based on item type
   if (itemType === 'portfolio') {
-    const isHost = await isPortfolioHost(portfolio.id, itemId)
-    if (!isHost) {
-      return {
-        canAdd: false,
-        error: 'Portfolio must have this portfolio in its hosts array',
-      }
-    }
+    // For human portfolios: can pin portfolios where user is manager or member
+    // For project/community portfolios: can pin portfolios where user is manager or member
+    // This validation will be done in the calling code based on portfolio type
+    // For now, allow it (validation happens at fetch time)
   } else if (itemType === 'note') {
     const isAssigned = await isNoteAssignedToPortfolio(itemId, portfolio.id)
     if (!isAssigned) {

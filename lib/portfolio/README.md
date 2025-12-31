@@ -19,7 +19,7 @@ The portfolio system uses a **unified route structure** that supports multiple p
 /portfolio?q=designer               # Search portfolios
 /portfolio/human/123e4567-e89b...  # View human portfolio by ID
 /portfolio/projects/my-project-slug # View project portfolio by slug
-/portfolio/discussion/abc123        # View discussion portfolio
+/portfolio/community/abc123        # View community portfolio
 ```
 
 ## Adding New Portfolio Types
@@ -29,7 +29,7 @@ The portfolio system uses a **unified route structure** that supports multiple p
 Add the new type to `types/portfolio.ts`:
 
 ```typescript
-export type PortfolioType = 'human' | 'projects' | 'discussion' | 'newtype'
+export type PortfolioType = 'human' | 'projects' | 'community' | 'newtype'
 
 export interface NewTypePortfolioMetadata {
   // Define type-specific fields

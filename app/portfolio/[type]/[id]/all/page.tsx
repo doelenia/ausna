@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute } from '@/lib/portfolio/routes'
-import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
+import { Portfolio, isHumanPortfolio, isProjectPortfolio } from '@/types/portfolio'
 import { notFound } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { PortfolioAllView } from '@/components/portfolio/PortfolioAllView'
@@ -77,8 +77,8 @@ export default async function PortfolioAllPage({ params }: PortfolioAllPageProps
   // Check if user is owner
   const isOwner = user ? portfolio.user_id === user.id : false
 
-  // Check if user can create notes
-  const userCanCreateNote = user
+  // Check if user can create notes - only for projects, and user must be a member
+  const userCanCreateNote = user && isProjectPortfolio(portfolio)
     ? await canCreateNoteInPortfolio(portfolio.id, user.id)
     : false
 

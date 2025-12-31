@@ -67,14 +67,43 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // Validate that user can create notes in all assigned portfolios
-    for (const portfolioId of portfolioIds) {
-      const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
-      if (!canCreate) {
-        return {
-          success: false,
-          error: `You do not have permission to create notes in portfolio ${portfolioId}`,
-        }
+    // Validate: must have exactly one portfolio assigned
+    if (portfolioIds.length !== 1) {
+      return {
+        success: false,
+        error: 'Note must be assigned to exactly one project',
+      }
+    }
+
+    const portfolioId = portfolioIds[0]
+
+    // Validate that the assigned portfolio is a project (not human or community)
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('type')
+      .eq('id', portfolioId)
+      .single()
+
+    if (portfolioError || !portfolio) {
+      return {
+        success: false,
+        error: 'Assigned portfolio not found',
+      }
+    }
+
+    if (portfolio.type !== 'projects') {
+      return {
+        success: false,
+        error: 'Note must be assigned to a project (not human or community portfolio)',
+      }
+    }
+
+    // Validate that user can create notes in the assigned project (must be a member)
+    const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
+    if (!canCreate) {
+      return {
+        success: false,
+        error: 'You must be a member of the project to create notes',
       }
     }
 
@@ -551,8 +580,37 @@ export async function addNoteToPortfolio(
       }
     }
 
-    // Add portfolio to assigned list
-    const updatedPortfolios = [...assignedPortfolios, portfolioId]
+    // Validate: notes must be assigned to exactly one project
+    if (assignedPortfolios.length > 0) {
+      return {
+        success: false,
+        error: 'Note is already assigned to a project. Notes can only be assigned to one project.',
+      }
+    }
+
+    // Validate the portfolio is a project
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('type')
+      .eq('id', portfolioId)
+      .single()
+
+    if (portfolioError || !portfolio) {
+      return {
+        success: false,
+        error: 'Portfolio not found',
+      }
+    }
+
+    if (portfolio.type !== 'projects') {
+      return {
+        success: false,
+        error: 'Note must be assigned to a project (not human or community portfolio)',
+      }
+    }
+
+    // Add portfolio to assigned list (only one project allowed)
+    const updatedPortfolios = [portfolioId]
 
     const { error: updateError } = await supabase
       .from('notes')
@@ -865,26 +923,59 @@ export async function createAnnotation(
 
     // Get portfolio from query param or use target note's portfolios
     const portfolioId = formData.get('portfolio_id') as string | null
-    const assignedPortfolios = targetNote.assigned_portfolios || []
+    const targetNotePortfolios = targetNote.assigned_portfolios || []
 
-    // If portfolio is provided, check permission and add to assigned portfolios
-    if (portfolioId) {
-      const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
-      if (!canCreate) {
-        return {
-          success: false,
-          error: 'You do not have permission to annotate notes in this portfolio',
-        }
-      }
-      // Add portfolio if not already assigned
-      if (!assignedPortfolios.includes(portfolioId)) {
-        assignedPortfolios.push(portfolioId)
+    // Validate target note has exactly one project assigned
+    if (targetNotePortfolios.length !== 1) {
+      return {
+        success: false,
+        error: 'Cannot annotate: target note must be assigned to exactly one project',
       }
     }
 
-    // Set mentioned_note_id and assigned_portfolios
+    const targetProjectId = targetNotePortfolios[0]
+
+    // Validate the target project exists and is a project type
+    const { data: targetProject, error: projectError } = await supabase
+      .from('portfolios')
+      .select('type')
+      .eq('id', targetProjectId)
+      .single()
+
+    if (projectError || !targetProject) {
+      return {
+        success: false,
+        error: 'Target project not found',
+      }
+    }
+
+    if (targetProject.type !== 'projects') {
+      return {
+        success: false,
+        error: 'Target note must be assigned to a project',
+      }
+    }
+
+    // If portfolio is provided, validate it matches the target note's project
+    if (portfolioId && portfolioId !== targetProjectId) {
+      return {
+        success: false,
+        error: 'Annotation must be assigned to the same project as the target note',
+      }
+    }
+
+    // Validate user can create notes in the target project
+    const canCreate = await canCreateNoteInPortfolio(targetProjectId, user.id)
+    if (!canCreate) {
+      return {
+        success: false,
+        error: 'You must be a member of the project to create annotations',
+      }
+    }
+
+    // Set mentioned_note_id and assigned_portfolios (exactly one project)
     formData.append('mentioned_note_id', noteId)
-    formData.append('assigned_portfolios', JSON.stringify(assignedPortfolios))
+    formData.append('assigned_portfolios', JSON.stringify([targetProjectId]))
 
     // Use createNote with the modified formData
     return await createNote(formData)

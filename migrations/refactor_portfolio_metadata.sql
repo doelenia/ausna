@@ -66,7 +66,7 @@ SET metadata = jsonb_set(
 )
 WHERE metadata->'basic'->>'avatar' IS NULL;
 
--- Step 5: For projects and discussions, add members array with owner
+-- Step 5: For projects and communities, add members array with owner
 UPDATE portfolios
 SET metadata = jsonb_set(
   jsonb_set(
@@ -77,17 +77,17 @@ SET metadata = jsonb_set(
   '{hosts}',
   to_jsonb(COALESCE(ARRAY[]::text[]))
 )
-WHERE type IN ('projects', 'discussion')
+WHERE type IN ('projects', 'community')
   AND (metadata->>'members' IS NULL OR jsonb_array_length(COALESCE(metadata->'members', '[]'::jsonb)) = 0);
 
--- Step 6: Ensure projects and discussions have hosts array (empty if not present)
+-- Step 6: Ensure projects and communities have hosts array (empty if not present)
 UPDATE portfolios
 SET metadata = jsonb_set(
   metadata,
   '{hosts}',
   to_jsonb(COALESCE(metadata->'hosts', '[]'::jsonb))
 )
-WHERE type IN ('projects', 'discussion')
+WHERE type IN ('projects', 'community')
   AND metadata->>'hosts' IS NULL;
 
 -- Step 7: Drop the old full-text search index

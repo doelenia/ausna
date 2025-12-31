@@ -2,8 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
-import { Portfolio, isProjectPortfolio, isDiscussionPortfolio, isHumanPortfolio, PinnedItem } from '@/types/portfolio'
-import { getPortfolioBasic, isPortfolioOwner, canAddToPinned, getPinnedItemsCount, isPortfolioHost, isNoteAssignedToPortfolio } from '@/lib/portfolio/helpers'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PinnedItem } from '@/types/portfolio'
+import { getPortfolioBasic, canEditPortfolio, canDeletePortfolio, canManagePinned, canAddToPinned, getPinnedItemsCount, isNoteAssignedToPortfolio } from '@/lib/portfolio/helpers'
 import { Note } from '@/types/note'
 
 interface UpdatePortfolioResult {
@@ -18,16 +18,17 @@ interface DeletePortfolioResult {
 
 interface SubPortfolio {
   id: string
-  type: 'projects' | 'discussion'
+  type: 'projects' | 'community'
   name: string
   avatar?: string
   slug: string
+  role?: 'manager' | 'member' // Role of the current user in this portfolio
 }
 
 interface GetSubPortfoliosResult {
   success: boolean
   projects?: SubPortfolio[]
-  discussions?: SubPortfolio[]
+  communities?: SubPortfolio[]
   error?: string
 }
 
@@ -40,6 +41,7 @@ interface PinnedItemWithData {
     name: string
     avatar?: string
     slug: string
+    role?: 'manager' | 'member' // Role of the human portfolio owner in this pinned portfolio
   }
   note?: {
     id: string
@@ -77,6 +79,7 @@ interface EligibleItem {
   text?: string
   avatar?: string
   slug?: string
+  role?: 'manager' | 'member' // Role of the current user in this portfolio (for human portfolios)
   isPinned: boolean
 }
 
@@ -89,8 +92,8 @@ interface GetEligibleItemsResult {
 
 /**
  * Get sub-portfolios for a given portfolio
- * For human portfolios: returns projects and discussions where user is a member
- * For project/discussion portfolios: returns portfolios where hosts contains this portfolio ID
+ * For human portfolios: returns projects and communities where user is a manager or member
+ * For project/community portfolios: returns empty (no sub-portfolios)
  */
 export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortfoliosResult> {
   try {
@@ -113,10 +116,10 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
     const portfolioData = portfolio as Portfolio
 
     if (isHumanPortfolio(portfolioData)) {
-      // For human portfolios: fetch projects and discussions where user is a member
+      // For human portfolios: fetch projects and communities where user is a manager OR member
       const userId = portfolioData.user_id
 
-      // Fetch all projects and discussions, then filter by membership
+      // Fetch all projects and communities, then filter by manager/member status
       // Note: PostgREST doesn't have great support for JSONB array contains, so we fetch and filter
       const { data: allProjects, error: projectsError } = await supabase
         .from('portfolios')
@@ -125,28 +128,34 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         .order('created_at', { ascending: false })
         .limit(100)
 
-      const { data: allDiscussions, error: discussionsError } = await supabase
+      const { data: allCommunities, error: communitiesError } = await supabase
         .from('portfolios')
         .select('id, type, slug, metadata')
-        .eq('type', 'discussion')
+        .eq('type', 'community')
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(100)
 
-      if (projectsError || discussionsError) {
+      if (projectsError || communitiesError) {
         return {
           success: false,
           error: 'Failed to fetch sub-portfolios',
         }
       }
 
-      // Filter projects where user is a member
+      // Filter projects where user is a manager or member, and determine role
       const projects = (allProjects || [])
         .filter((p: any) => {
           const metadata = p.metadata as any
+          const managers = metadata?.managers || []
           const members = metadata?.members || []
-          return Array.isArray(members) && members.includes(userId)
+          return (Array.isArray(managers) && managers.includes(userId)) ||
+                 (Array.isArray(members) && members.includes(userId))
         })
         .map((p: any) => {
+          const metadata = p.metadata as any
+          const managers = metadata?.managers || []
+          const members = metadata?.members || []
+          const isManager = Array.isArray(managers) && managers.includes(userId)
           const basic = getPortfolioBasic(p as Portfolio)
           return {
             id: p.id,
@@ -154,80 +163,45 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
             name: basic.name,
             avatar: basic.avatar,
             slug: p.slug,
+            role: isManager ? ('manager' as const) : ('member' as const),
           }
         })
 
-      // Filter discussions where user is a member
-      const discussions = (allDiscussions || [])
+      // Filter communities where user is a manager or member, and determine role
+      const communities = (allCommunities || [])
         .filter((p: any) => {
           const metadata = p.metadata as any
+          const managers = metadata?.managers || []
           const members = metadata?.members || []
-          return Array.isArray(members) && members.includes(userId)
+          return (Array.isArray(managers) && managers.includes(userId)) ||
+                 (Array.isArray(members) && members.includes(userId))
         })
         .map((p: any) => {
+          const metadata = p.metadata as any
+          const managers = metadata?.managers || []
+          const isManager = Array.isArray(managers) && managers.includes(userId)
           const basic = getPortfolioBasic(p as Portfolio)
           return {
             id: p.id,
-            type: 'discussion' as const,
+            type: 'community' as const,
             name: basic.name,
             avatar: basic.avatar,
             slug: p.slug,
+            role: isManager ? ('manager' as const) : ('member' as const),
           }
         })
 
       return {
         success: true,
         projects,
-        discussions,
+        communities,
       }
-    } else if (isProjectPortfolio(portfolioData) || isDiscussionPortfolio(portfolioData)) {
-      // For project/discussion portfolios: fetch portfolios where hosts contains this portfolio ID
-      // Fetch all projects and discussions, then filter by hosts
-      const { data: allSubPortfolios, error: subError } = await supabase
-        .from('portfolios')
-        .select('id, type, slug, metadata')
-        .in('type', ['projects', 'discussion'])
-        .order('created_at', { ascending: false })
-
-      if (subError) {
-        return {
-          success: false,
-          error: 'Failed to fetch sub-portfolios',
-        }
-      }
-
-      // Filter portfolios where hosts array contains this portfolio ID
-      const filtered = (allSubPortfolios || []).filter((p: any) => {
-        const metadata = p.metadata as any
-        const hosts = metadata?.hosts || []
-        return Array.isArray(hosts) && hosts.includes(portfolioId)
-      })
-
-      // Separate into projects and discussions
-      const projects: SubPortfolio[] = []
-      const discussions: SubPortfolio[] = []
-
-      filtered.forEach((p: any) => {
-        const basic = getPortfolioBasic(p as Portfolio)
-        const subPortfolio: SubPortfolio = {
-          id: p.id,
-          type: p.type as 'projects' | 'discussion',
-          name: basic.name,
-          avatar: basic.avatar,
-          slug: p.slug,
-        }
-
-        if (p.type === 'projects') {
-          projects.push(subPortfolio)
-        } else if (p.type === 'discussion') {
-          discussions.push(subPortfolio)
-        }
-      })
-
+    } else if (isProjectPortfolio(portfolioData) || isCommunityPortfolio(portfolioData)) {
+      // For project/community portfolios: no sub-portfolios (hosts concept removed)
       return {
         success: true,
-        projects,
-        discussions,
+        projects: [],
+        communities: [],
       }
     }
 
@@ -262,23 +236,38 @@ export async function updatePortfolio(
       }
     }
 
-    // Check ownership
-    const { data: portfolio } = await supabase
-      .from('portfolios')
-      .select('user_id, metadata')
-      .eq('id', portfolioId)
-      .single()
-
-    if (!portfolio || portfolio.user_id !== user.id) {
+    // Check if user can edit (creator or manager)
+    const canEdit = await canEditPortfolio(portfolioId, user.id)
+    if (!canEdit) {
       return {
         success: false,
         error: 'You do not have permission to update this portfolio',
       }
     }
 
+    // Get portfolio for metadata access
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('metadata, type, user_id')
+      .eq('id', portfolioId)
+      .single()
+
+    if (!portfolio) {
+      return {
+        success: false,
+        error: 'Portfolio not found',
+      }
+    }
+
     // Get current metadata
     const currentMetadata = (portfolio.metadata as any) || {}
     const basicMetadata = currentMetadata.basic || {}
+    const oldDescription = (basicMetadata.description || '').trim()
+
+    // Normalize description from formData (could be string or null)
+    const normalizedDescription = description !== null && description !== undefined 
+      ? description.trim() 
+      : (basicMetadata.description || '').trim()
 
     // Update basic metadata
     const updatedMetadata = {
@@ -286,9 +275,23 @@ export async function updatePortfolio(
       basic: {
         ...basicMetadata,
         name: name || basicMetadata.name,
-        description: description !== null ? description : basicMetadata.description,
+        description: normalizedDescription,
         avatar: basicMetadata.avatar, // Will be updated separately if avatar file is provided
       },
+    }
+
+    // Check if description changed (compare trimmed versions)
+    const descriptionChanged = oldDescription !== normalizedDescription
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Portfolio description update check:', {
+        portfolioId,
+        oldDescription,
+        newDescription: normalizedDescription,
+        descriptionChanged,
+        portfolioType: portfolio.type,
+        isPersonal: portfolio.type === 'human' && portfolio.user_id === user.id,
+      })
     }
 
     // Update portfolio
@@ -303,6 +306,36 @@ export async function updatePortfolio(
       return {
         success: false,
         error: updateError.message || 'Failed to update portfolio',
+      }
+    }
+
+    // Trigger background interest processing if description changed (fire-and-forget)
+    if (descriptionChanged) {
+      try {
+        // Use absolute URL - in server actions, we need the full URL
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+        const isPersonalPortfolio =
+          portfolio.type === 'human' && portfolio.user_id === user.id
+
+        // Use fetch without await - fire and forget
+        fetch(`${baseUrl}/api/process-portfolio-interests`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            portfolioId,
+            userId: user.id,
+            isPersonalPortfolio,
+            description: normalizedDescription,
+          }),
+        }).catch((error) => {
+          // Log error but don't fail portfolio update
+          console.error('Failed to trigger background interest processing:', error)
+        })
+      } catch (error) {
+        // Don't fail portfolio update if interest processing trigger fails
+        console.error('Error triggering background interest processing:', error)
       }
     }
 
@@ -354,17 +387,26 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
     const { user } = await requireAuth()
     const supabase = await createClient()
 
-    // Check ownership and portfolio type
+    // Check if user can delete (only creator)
+    const canDelete = await canDeletePortfolio(portfolioId, user.id)
+    if (!canDelete) {
+      return {
+        success: false,
+        error: 'You do not have permission to delete this portfolio. Only the creator can delete it.',
+      }
+    }
+
+    // Check portfolio type
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('user_id, type')
+      .select('type')
       .eq('id', portfolioId)
       .single()
 
-    if (!portfolio || portfolio.user_id !== user.id) {
+    if (!portfolio) {
       return {
         success: false,
-        error: 'You do not have permission to delete this portfolio',
+        error: 'Portfolio not found',
       }
     }
 
@@ -416,6 +458,7 @@ interface PinnedItemWithData {
     name: string
     avatar?: string
     slug: string
+    role?: 'manager' | 'member' // Role of the human portfolio owner in this pinned portfolio
   }
   note?: {
     id: string
@@ -453,6 +496,7 @@ interface EligibleItem {
   text?: string
   avatar?: string
   slug?: string
+  role?: 'manager' | 'member' // Role of the current user in this portfolio (for human portfolios)
   isPinned: boolean
 }
 
@@ -494,6 +538,9 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
       }
     }
 
+    // For human portfolios, we'll determine the role of the portfolio owner in pinned portfolios
+    const userId = isHumanPortfolio(portfolioData) ? portfolioData.user_id : null
+
     // Fetch full data for pinned items
     const items: PinnedItemWithData[] = []
     
@@ -507,6 +554,21 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
 
         if (pinnedPortfolio) {
           const basic = getPortfolioBasic(pinnedPortfolio as Portfolio)
+          
+          // Determine role if this is a human portfolio viewing pinned projects/communities
+          let role: 'manager' | 'member' | undefined = undefined
+          if (userId && (pinnedPortfolio.type === 'projects' || pinnedPortfolio.type === 'community')) {
+            const pinnedMetadata = pinnedPortfolio.metadata as any
+            const managers = pinnedMetadata?.managers || []
+            const members = pinnedMetadata?.members || []
+            
+            if (Array.isArray(managers) && managers.includes(userId)) {
+              role = 'manager'
+            } else if (Array.isArray(members) && members.includes(userId)) {
+              role = 'member'
+            }
+          }
+          
           items.push({
             type: 'portfolio',
             id: item.id,
@@ -516,6 +578,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
               name: basic.name,
               avatar: basic.avatar,
               slug: pinnedPortfolio.slug,
+              role,
             },
           })
         }
@@ -566,12 +629,12 @@ export async function addToPinned(
     const { user } = await requireAuth()
     const supabase = await createClient()
 
-    // Check ownership
-    const isOwner = await isPortfolioOwner(portfolioId, user.id)
-    if (!isOwner) {
+    // Check if user can manage pinned (creator or manager)
+    const canManage = await canManagePinned(portfolioId, user.id)
+    if (!canManage) {
       return {
         success: false,
-        error: 'Only the portfolio owner can edit pinned items',
+        error: 'Only the creator or managers can edit pinned items',
       }
     }
 
@@ -655,12 +718,12 @@ export async function removeFromPinned(
     const { user } = await requireAuth()
     const supabase = await createClient()
 
-    // Check ownership
-    const isOwner = await isPortfolioOwner(portfolioId, user.id)
-    if (!isOwner) {
+    // Check if user can manage pinned (creator or manager)
+    const canManage = await canManagePinned(portfolioId, user.id)
+    if (!canManage) {
       return {
         success: false,
-        error: 'Only the portfolio owner can edit pinned items',
+        error: 'Only the creator or managers can edit pinned items',
       }
     }
 
@@ -734,12 +797,12 @@ export async function updatePinnedList(
     const { user } = await requireAuth()
     const supabase = await createClient()
 
-    // Check ownership
-    const isOwner = await isPortfolioOwner(portfolioId, user.id)
-    if (!isOwner) {
+    // Check if user can manage pinned (creator or manager)
+    const canManage = await canManagePinned(portfolioId, user.id)
+    if (!canManage) {
       return {
         success: false,
-        error: 'Only the portfolio owner can edit pinned items',
+        error: 'Only the creator or managers can edit pinned items',
       }
     }
 
@@ -834,6 +897,8 @@ export async function getEligibleItemsForPinning(portfolioId: string): Promise<G
     })
 
     // Get eligible notes (assigned to this portfolio)
+    // For projects/communities: managers can select notes assigned to portfolio
+    // For human portfolios: can select notes assigned to portfolio
     const { data: notes, error: notesError } = await supabase
       .from('notes')
       .select('id, text, owner_account_id, created_at')
@@ -854,28 +919,36 @@ export async function getEligibleItemsForPinning(portfolioId: string): Promise<G
       }
     }
 
-    // Get eligible sub-portfolios (same logic as getSubPortfolios)
-    const subPortfoliosResult = await getSubPortfolios(portfolioId)
+    // Get eligible sub-portfolios
+    // For human portfolios: fetch portfolios where user is manager OR member
+    // For projects/communities: no portfolios can be pinned (hosts concept removed)
     const eligiblePortfolios: EligibleItem[] = []
     
-    if (subPortfoliosResult.success) {
-      const allSubPortfolios = [
-        ...(subPortfoliosResult.projects || []),
-        ...(subPortfoliosResult.discussions || []),
-      ]
+    if (isHumanPortfolio(portfolioData)) {
+      // For human portfolios: use getSubPortfolios which returns portfolios where user is manager/member
+      const subPortfoliosResult = await getSubPortfolios(portfolioId)
       
-      for (const subPortfolio of allSubPortfolios) {
-        const isPinned = pinnedIds.has(`portfolio:${subPortfolio.id}`)
-        eligiblePortfolios.push({
-          type: 'portfolio',
-          id: subPortfolio.id,
-          name: subPortfolio.name,
-          avatar: subPortfolio.avatar,
-          slug: subPortfolio.slug,
-          isPinned,
-        })
+      if (subPortfoliosResult.success) {
+        const allSubPortfolios = [
+          ...(subPortfoliosResult.projects || []),
+          ...(subPortfoliosResult.communities || []),
+        ]
+        
+        for (const subPortfolio of allSubPortfolios) {
+          const isPinned = pinnedIds.has(`portfolio:${subPortfolio.id}`)
+          eligiblePortfolios.push({
+            type: 'portfolio',
+            id: subPortfolio.id,
+            name: subPortfolio.name,
+            avatar: subPortfolio.avatar,
+            slug: subPortfolio.slug,
+            role: subPortfolio.role,
+            isPinned,
+          })
+        }
       }
     }
+    // For projects/communities: no portfolios can be pinned, so eligiblePortfolios stays empty
 
     return {
       success: true,

@@ -3,8 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import { uploadAvatar } from '@/lib/storage/avatars-server'
-import { generateSlug, isPortfolioOwner } from '@/lib/portfolio/helpers'
-import { getHumanPortfolio } from '@/lib/portfolio/human'
+import { generateSlug } from '@/lib/portfolio/helpers'
 
 interface CreatePortfolioResult {
   success: boolean
@@ -22,14 +21,13 @@ export async function createPortfolio(
     // Extract form data
     const type = formData.get('type') as string
     const name = formData.get('name') as string
-    const fromPortfolioId = formData.get('fromPortfolioId') as string | null
     const avatarFile = formData.get('avatar') as File | null
 
     // Validate type
-    if (type !== 'projects' && type !== 'discussion') {
+    if (type !== 'projects' && type !== 'community') {
       return {
         success: false,
-        error: 'Invalid portfolio type. Only projects and discussions can be created.',
+        error: 'Invalid portfolio type. Only projects and communities can be created.',
       }
     }
 
@@ -38,31 +36,6 @@ export async function createPortfolio(
       return {
         success: false,
         error: 'Portfolio name is required',
-      }
-    }
-
-    // Validate fromPortfolioId ownership if provided
-    if (fromPortfolioId) {
-      // First, verify that fromPortfolioId is actually a portfolio ID (exists in portfolios table)
-      const { data: fromPortfolio, error: portfolioError } = await supabase
-        .from('portfolios')
-        .select('id, user_id')
-        .eq('id', fromPortfolioId)
-        .maybeSingle()
-
-      if (portfolioError || !fromPortfolio) {
-        return {
-          success: false,
-          error: 'Invalid portfolio ID. The portfolio you are creating from does not exist.',
-        }
-      }
-
-      // Verify ownership
-      if (fromPortfolio.user_id !== user.id) {
-        return {
-          success: false,
-          error: 'You do not own the portfolio you are creating from',
-        }
       }
     }
 
@@ -88,10 +61,6 @@ export async function createPortfolio(
       slugCounter++
     }
 
-    // Get user's human portfolio to add as host
-    const humanPortfolio = await getHumanPortfolio(user.id)
-    const humanPortfolioId = humanPortfolio?.id
-
     // Create portfolio metadata structure
     const metadata: any = {
       basic: {
@@ -101,32 +70,15 @@ export async function createPortfolio(
       },
       pinned: [],
       settings: {},
-      members: [user.id], // Owner is automatically a member
-    }
-
-    // Build hosts array: always include user's human portfolio, plus fromPortfolioId if provided
-    const hosts: string[] = []
-    
-    // Add user's human portfolio if it exists
-    if (humanPortfolioId) {
-      hosts.push(humanPortfolioId)
-    }
-    
-    // Add fromPortfolioId if provided (and it's different from human portfolio)
-    if (fromPortfolioId && fromPortfolioId !== humanPortfolioId) {
-      hosts.push(fromPortfolioId)
-    }
-    
-    // Set hosts if we have any
-    if (hosts.length > 0) {
-      metadata.hosts = hosts
+      members: [user.id], // Creator is automatically a member
+      managers: [user.id], // Creator is automatically a manager
     }
 
     // Create portfolio
     const { data: portfolio, error: createError } = await supabase
       .from('portfolios')
       .insert({
-        type: type as 'projects' | 'discussion',
+        type: type as 'projects' | 'community',
         slug,
         user_id: user.id,
         metadata,
@@ -183,6 +135,36 @@ export async function createPortfolio(
         // Avatar upload failed, but portfolio was created
         // Log error but don't fail the creation
         console.error('Failed to upload avatar:', avatarError)
+      }
+    }
+
+    // Trigger background interest processing if description exists (fire-and-forget)
+    // Note: Currently description starts empty, but this handles future cases
+    const description = metadata.basic.description || ''
+    if (description.trim().length > 0) {
+      try {
+        // Use absolute URL - in server actions, we need the full URL
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+
+        // Use fetch without await - fire and forget
+        fetch(`${baseUrl}/api/process-portfolio-interests`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            portfolioId: portfolio.id,
+            userId: user.id,
+            isPersonalPortfolio: false, // New portfolios are not personal
+            description,
+          }),
+        }).catch((error) => {
+          // Log error but don't fail portfolio creation
+          console.error('Failed to trigger background interest processing:', error)
+        })
+      } catch (error) {
+        // Don't fail portfolio creation if interest processing trigger fails
+        console.error('Error triggering background interest processing:', error)
       }
     }
 

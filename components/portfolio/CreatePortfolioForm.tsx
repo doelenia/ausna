@@ -9,11 +9,10 @@ import { PortfolioType } from '@/types/portfolio'
 import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
 
 interface CreatePortfolioFormProps {
-  type: 'projects' | 'discussion'
-  fromPortfolioId?: string
+  type: 'projects' | 'community'
 }
 
-export function CreatePortfolioForm({ type, fromPortfolioId }: CreatePortfolioFormProps) {
+export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const [name, setName] = useState('')
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
@@ -68,9 +67,6 @@ export function CreatePortfolioForm({ type, fromPortfolioId }: CreatePortfolioFo
       const formData = new FormData()
       formData.append('type', type)
       formData.append('name', name.trim())
-      if (fromPortfolioId) {
-        formData.append('fromPortfolioId', fromPortfolioId)
-      }
       if (avatarFile) {
         formData.append('avatar', avatarFile)
       }
@@ -182,7 +178,7 @@ export function CreatePortfolioForm({ type, fromPortfolioId }: CreatePortfolioFo
           required
           maxLength={100}
           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder={`Enter ${type === 'projects' ? 'project' : 'discussion'} name`}
+          placeholder={`Enter ${type === 'projects' ? 'project' : 'community'} name`}
           disabled={loading}
         />
       </div>

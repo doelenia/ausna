@@ -8,6 +8,8 @@ import { signOut } from './actions'
 import { UsernameEditor } from '@/components/account/UsernameEditor'
 import { HumanPortfolio } from '@/types/portfolio'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
+import { InterestTags } from '@/components/portfolio/InterestTags'
+import { Topic } from '@/types/indexing'
 
 interface ClientAccountPageProps {
   userId: string
@@ -17,6 +19,7 @@ interface ClientAccountPageProps {
 export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccountPageProps) {
   const [user, setUser] = useState<any>(null)
   const [humanPortfolio, setHumanPortfolio] = useState<HumanPortfolio | null>(initialHumanPortfolio)
+  const [topInterests, setTopInterests] = useState<Array<{ topic: Topic; memory_score: number; aggregate_score: number }>>([])
   const [loading, setLoading] = useState(true)
   const router = useRouter()
   const supabase = createClient()
@@ -48,6 +51,15 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
         } catch (error) {
           console.error('Error loading human portfolio:', error)
         }
+      }
+
+      // Fetch top 5 interested topics
+      try {
+        const { getTopInterestedTopics } = await import('@/lib/indexing/interest-tracking')
+        const interests = await getTopInterestedTopics(user.id, 5, supabase)
+        setTopInterests(interests)
+      } catch (error) {
+        console.error('Error loading top interests:', error)
       }
 
       setLoading(false)
@@ -148,10 +160,21 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                     </dd>
                   </div>
                   {(humanPortfolio.metadata as any)?.basic?.description && (
-                    <div>
+                    <div className="sm:col-span-2">
                       <dt className="text-sm font-medium text-gray-500">Description</dt>
                       <dd className="mt-1 text-sm text-gray-900">
                         {(humanPortfolio.metadata as any)?.basic?.description}
+                        {topInterests.length > 0 && (
+                          <InterestTags topics={topInterests} />
+                        )}
+                      </dd>
+                    </div>
+                  )}
+                  {!((humanPortfolio.metadata as any)?.basic?.description) && topInterests.length > 0 && (
+                    <div className="sm:col-span-2">
+                      <dt className="text-sm font-medium text-gray-500">Interests</dt>
+                      <dd className="mt-1">
+                        <InterestTags topics={topInterests} />
                       </dd>
                     </div>
                   )}

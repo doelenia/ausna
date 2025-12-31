@@ -64,3 +64,16 @@ export interface ExtractionResult {
   intentions?: Array<{ name: string; description: string }>
 }
 
+/**
+ * User interest tracking entry
+ */
+export interface UserInterest {
+  id: string
+  user_id: string
+  topic_id: string
+  aggregate_score: number
+  memory_score: number
+  created_at: string
+  updated_at: string
+}
+

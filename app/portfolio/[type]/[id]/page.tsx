@@ -1,9 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute } from '@/lib/portfolio/routes'
-import { Portfolio, isProjectPortfolio, isDiscussionPortfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
 import { notFound } from 'next/navigation'
 import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { PortfolioView } from '@/components/portfolio/PortfolioView'
+import { getTopInterestedTopics } from '@/lib/indexing/interest-tracking'
 import Link from 'next/link'
 
 interface PortfolioPageProps {
@@ -99,12 +100,23 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
   // Extract basic info
   const basic = getPortfolioBasic(portfolio)
 
+  // Fetch top 5 interested topics for human portfolios
+  let topInterests: Array<{ topic: any; memory_score: number; aggregate_score: number }> = []
+  if (isHumanPortfolio(portfolio)) {
+    try {
+      topInterests = await getTopInterestedTopics(portfolio.user_id, 5)
+    } catch (error) {
+      console.error('Failed to fetch top interests:', error)
+    }
+  }
+
   return (
     <PortfolioView
       portfolio={portfolio}
       basic={basic}
       isOwner={isOwner}
       currentUserId={user?.id}
+      topInterests={topInterests}
     />
   )
 }

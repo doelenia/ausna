@@ -24,17 +24,36 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
     redirect('/')
   }
 
-  // Get source portfolio if provided
+  // Get source portfolio if provided - must be a project
   let sourcePortfolio: Portfolio | null = null
   if (searchParams.portfolio) {
     const { data, error } = await supabase
       .from('portfolios')
       .select('*')
       .eq('id', searchParams.portfolio)
+      .eq('type', 'projects')
       .single()
 
     if (!error && data) {
       sourcePortfolio = data as Portfolio
+      // Verify it's actually a project portfolio
+      if (sourcePortfolio.type !== 'projects') {
+        sourcePortfolio = null
+      }
+    }
+  }
+  
+  // If portfolio was provided but is not a project, redirect
+  if (searchParams.portfolio && !sourcePortfolio) {
+    redirect('/portfolio')
+  }
+  
+  // Validate user is a member of the project if provided
+  if (sourcePortfolio) {
+    const { isPortfolioMember } = await import('@/lib/notes/helpers')
+    const isMember = await isPortfolioMember(sourcePortfolio.id, user.id)
+    if (!isMember) {
+      redirect('/portfolio')
     }
   }
 
@@ -52,19 +71,17 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
     }
   }
 
-  // Build portfolios list: source portfolio + human portfolio
+  // Build portfolios list: only source project portfolio (no human portfolio)
   const portfolios: Portfolio[] = []
   if (sourcePortfolio) {
     portfolios.push(sourcePortfolio)
   }
-  portfolios.push(humanPortfolio)
 
-  // Default assigned portfolios
+  // Default assigned portfolios: only the project (required)
   const defaultPortfolioIds: string[] = []
   if (sourcePortfolio) {
     defaultPortfolioIds.push(sourcePortfolio.id)
   }
-  defaultPortfolioIds.push(humanPortfolio.id)
 
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -91,7 +108,7 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
           <CreateNoteForm
             portfolios={portfolios}
             defaultPortfolioIds={defaultPortfolioIds}
-            humanPortfolioId={humanPortfolio.id}
+            humanPortfolioId={undefined}
             mentionedNoteId={searchParams.annotate || undefined}
             redirectUrl={sourcePortfolio ? `/portfolio/${sourcePortfolio.type}/${sourcePortfolio.id}/all` : '/portfolio'}
           />

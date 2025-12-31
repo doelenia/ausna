@@ -7,16 +7,17 @@ import { getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
 
 interface SubPortfolio {
   id: string
-  type: 'projects' | 'discussion'
+  type: 'projects' | 'community'
   name: string
   avatar?: string
   slug: string
+  role?: 'manager' | 'member' // Role of the current user in this portfolio
 }
 
 interface SubPortfoliosTabProps {
   portfolioId: string
-  portfolioType: 'human' | 'projects' | 'discussion'
-  showOnly?: 'projects' | 'discussions' // Optional filter to show only one type
+  portfolioType: 'human' | 'projects' | 'community'
+  showOnly?: 'projects' | 'communities' // Optional filter to show only one type
   hideTitles?: boolean // Hide section titles (for All page)
 }
 
@@ -27,7 +28,7 @@ export function SubPortfoliosTab({
   hideTitles = false,
 }: SubPortfoliosTabProps) {
   const [projects, setProjects] = useState<SubPortfolio[]>([])
-  const [discussions, setDiscussions] = useState<SubPortfolio[]>([])
+  const [communities, setCommunities] = useState<SubPortfolio[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -45,7 +46,7 @@ export function SubPortfoliosTab({
       }
 
       setProjects(result.projects || [])
-      setDiscussions(result.discussions || [])
+      setCommunities(result.communities || [])
       setLoading(false)
     }
 
@@ -70,24 +71,24 @@ export function SubPortfoliosTab({
 
   // Filter based on showOnly prop
   const showProjects = !showOnly || showOnly === 'projects'
-  const showDiscussions = !showOnly || showOnly === 'discussions'
+  const showCommunities = !showOnly || showOnly === 'communities'
 
   return (
     <div className="space-y-8">
-      {/* Discussions - Horizontal Scroll (Top 10) */}
-      {showDiscussions && discussions.length > 0 && (
+      {/* Communities - Horizontal Scroll (Top 10) */}
+      {showCommunities && communities.length > 0 && (
         <div className="overflow-x-auto pb-4 -mx-6 px-6" style={{ scrollbarWidth: 'thin' }}>
           <div className="flex gap-4 min-w-max">
-            {discussions.slice(0, 10).map((discussion) => (
+            {communities.slice(0, 10).map((community) => (
               <Link
-                key={discussion.id}
-                href={getPortfolioUrl('discussion', discussion.id)}
+                key={community.id}
+                href={getPortfolioUrl('community', community.id)}
                 className="flex-shrink-0 w-64 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow overflow-hidden"
               >
-                {discussion.avatar ? (
+                {community.avatar ? (
                   <img
-                    src={discussion.avatar}
-                    alt={discussion.name}
+                    src={community.avatar}
+                    alt={community.name}
                     className="w-full h-32 object-cover"
                   />
                 ) : (
@@ -108,9 +109,20 @@ export function SubPortfoliosTab({
                   </div>
                 )}
                 <div className="p-4">
-                  <h3 className="font-semibold text-gray-900 truncate">
-                    {discussion.name}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold text-gray-900 truncate">
+                      {community.name}
+                    </h3>
+                    {community.role && (
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${
+                        community.role === 'manager'
+                          ? 'bg-purple-100 text-purple-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {community.role === 'manager' ? 'Manager' : 'Member'}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </Link>
             ))}
@@ -152,9 +164,20 @@ export function SubPortfoliosTab({
                   </div>
                 )}
                 <div className="flex-1 p-4">
-                  <h3 className="font-semibold text-gray-900">
-                    {project.name}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold text-gray-900">
+                      {project.name}
+                    </h3>
+                    {project.role && (
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${
+                        project.role === 'manager'
+                          ? 'bg-purple-100 text-purple-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {project.role === 'manager' ? 'Manager' : 'Member'}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </Link>
@@ -163,16 +186,16 @@ export function SubPortfoliosTab({
       )}
 
       {/* Empty State */}
-      {((showProjects && projects.length === 0) || (showDiscussions && discussions.length === 0)) &&
+      {((showProjects && projects.length === 0) || (showCommunities && communities.length === 0)) &&
         (showOnly
           ? (showOnly === 'projects' && projects.length === 0) ||
-            (showOnly === 'discussions' && discussions.length === 0)
-          : projects.length === 0 && discussions.length === 0) && (
+            (showOnly === 'communities' && communities.length === 0)
+          : projects.length === 0 && communities.length === 0) && (
           <div className="py-12 text-center text-gray-500">
             {showOnly === 'projects'
               ? 'No projects found'
-              : showOnly === 'discussions'
-              ? 'No discussions found'
+              : showOnly === 'communities'
+              ? 'No communities found'
               : portfolioType === 'human'
               ? 'No involvement found'
               : 'No navigations found'}

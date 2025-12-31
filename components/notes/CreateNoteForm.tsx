@@ -2,7 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { createNote } from '@/app/notes/actions'
-import { Portfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 
@@ -37,8 +37,8 @@ export function CreateNoteForm({
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Filter out human portfolio from displayed portfolios
-  const displayablePortfolios = portfolios.filter((p) => p.id !== humanPortfolioId)
+  // Filter to only show project portfolios (exclude human and community)
+  const displayablePortfolios = portfolios.filter((p) => isProjectPortfolio(p))
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -50,8 +50,9 @@ export function CreateNoteForm({
   }
 
   const removePortfolio = (portfolioId: string) => {
-    // Don't allow removing human portfolio
-    if (portfolioId === humanPortfolioId) {
+    // Don't allow removing the assigned project - notes must be assigned to exactly one project
+    // Only allow removal if there are multiple portfolios selected (shouldn't happen, but safety check)
+    if (selectedPortfolios.length <= 1) {
       return
     }
     setSelectedPortfolios((prev) => prev.filter((id) => id !== portfolioId))
@@ -83,15 +84,20 @@ export function CreateNoteForm({
         })
       }
       
-      // Always include human portfolio in assigned portfolios
-      const finalPortfolioIds = [...selectedPortfolios]
-      if (humanPortfolioId && !finalPortfolioIds.includes(humanPortfolioId)) {
-        finalPortfolioIds.push(humanPortfolioId)
+      // Only allow project portfolios - filter out any non-project portfolios
+      const projectPortfolios = selectedPortfolios.filter((id) => {
+        const portfolio = portfolios.find((p) => p.id === id)
+        return portfolio && isProjectPortfolio(portfolio)
+      })
+      
+      // Must have exactly one project assigned
+      if (projectPortfolios.length !== 1) {
+        setError('Note must be assigned to exactly one project')
+        setIsSubmitting(false)
+        return
       }
       
-      if (finalPortfolioIds.length > 0) {
-        formData.append('assigned_portfolios', JSON.stringify(finalPortfolioIds))
-      }
+      formData.append('assigned_portfolios', JSON.stringify(projectPortfolios))
       
       if (mentionedNoteId) {
         formData.append('mentioned_note_id', mentionedNoteId)
@@ -244,15 +250,18 @@ export function CreateNoteForm({
         </div>
       )}
 
-      {/* Portfolio assignment - show as removable chips (excluding human portfolio) */}
-      {displayablePortfolios.length > 0 && selectedPortfolios.some((id) => id !== humanPortfolioId) && (
+      {/* Portfolio assignment - show assigned project (cannot be removed) */}
+      {selectedPortfolios.length > 0 && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Assigned to Portfolios
+            Assigned to Project <span className="text-red-500">*</span>
           </label>
           <div className="flex flex-wrap gap-2">
             {selectedPortfolios
-              .filter((portfolioId) => portfolioId !== humanPortfolioId)
+              .filter((portfolioId) => {
+                const portfolio = portfolios.find((p) => p.id === portfolioId)
+                return portfolio && isProjectPortfolio(portfolio)
+              })
               .map((portfolioId) => {
                 const portfolio = portfolios.find((p) => p.id === portfolioId)
                 if (!portfolio) return null
@@ -262,17 +271,14 @@ export function CreateNoteForm({
                     className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
                   >
                     {getPortfolioName(portfolio)}
-                    <button
-                      type="button"
-                      onClick={() => removePortfolio(portfolioId)}
-                      className="text-blue-600 hover:text-blue-800 font-bold"
-                    >
-                      ×
-                    </button>
+                    {/* Disable removal - note must be assigned to exactly one project */}
                   </span>
                 )
               })}
           </div>
+          {selectedPortfolios.length === 0 && (
+            <p className="text-sm text-red-600 mt-1">A project must be assigned to create a note</p>
+          )}
         </div>
       )}
 

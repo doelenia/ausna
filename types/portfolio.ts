@@ -3,7 +3,7 @@ import { Json } from './supabase'
 /**
  * Base portfolio types that all portfolio types extend
  */
-export type PortfolioType = 'human' | 'projects' | 'discussion'
+export type PortfolioType = 'human' | 'projects' | 'community'
 
 /**
  * Basic metadata fields shared by all portfolios
@@ -58,7 +58,7 @@ export interface HumanPortfolioMetadata extends PortfolioMetadata {
  */
 export interface ProjectPortfolioMetadata extends PortfolioMetadata {
   members: string[] // Array of user IDs (includes owner)
-  hosts?: string[] // Optional array of portfolio IDs
+  managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
   technologies?: string[]
   github_url?: string
   live_url?: string
@@ -70,16 +70,16 @@ export interface ProjectPortfolioMetadata extends PortfolioMetadata {
 }
 
 /**
- * Discussion portfolio metadata
+ * Community portfolio metadata
  */
-export interface DiscussionPortfolioMetadata extends PortfolioMetadata {
+export interface CommunityPortfolioMetadata extends PortfolioMetadata {
   members: string[] // Array of user IDs (includes owner)
-  hosts?: string[] // Optional array of portfolio IDs
+  managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
   topic_tags?: string[]
   category?: string
   related_projects?: string[] // portfolio IDs
   related_humans?: string[] // user IDs
-  discussion_type?: 'question' | 'idea' | 'collaboration' | 'feedback'
+  community_type?: 'question' | 'idea' | 'collaboration' | 'feedback'
   [key: string]: any
 }
 
@@ -109,15 +109,15 @@ export interface ProjectPortfolio extends BasePortfolio {
   metadata: ProjectPortfolioMetadata
 }
 
-export interface DiscussionPortfolio extends BasePortfolio {
-  type: 'discussion'
-  metadata: DiscussionPortfolioMetadata
+export interface CommunityPortfolio extends BasePortfolio {
+  type: 'community'
+  metadata: CommunityPortfolioMetadata
 }
 
 /**
  * Union type for all portfolio types
  */
-export type Portfolio = HumanPortfolio | ProjectPortfolio | DiscussionPortfolio
+export type Portfolio = HumanPortfolio | ProjectPortfolio | CommunityPortfolio
 
 /**
  * Type guard functions
@@ -130,18 +130,17 @@ export function isProjectPortfolio(portfolio: Portfolio): portfolio is ProjectPo
   return portfolio.type === 'projects'
 }
 
-export function isDiscussionPortfolio(portfolio: Portfolio): portfolio is DiscussionPortfolio {
-  return portfolio.type === 'discussion'
+export function isCommunityPortfolio(portfolio: Portfolio): portfolio is CommunityPortfolio {
+  return portfolio.type === 'community'
 }
 
 /**
  * Portfolio creation input type
  */
 export interface CreatePortfolioInput {
-  type: 'projects' | 'discussion' // Only projects and discussions can be created
+  type: 'projects' | 'community' // Only projects and communities can be created
   name: string
   avatar?: string // Optional avatar URL
-  fromPortfolioId?: string // Portfolio ID where this was created from (for hosts)
 }
 
 /**

@@ -26,7 +26,7 @@ export function parsePortfolioRoute(
   type: string | undefined,
   id: string | undefined
 ): { type: PortfolioType | null; id: string | null; isValid: boolean } {
-  const validTypes: PortfolioType[] = ['human', 'projects', 'discussion']
+  const validTypes: PortfolioType[] = ['human', 'projects', 'community']
   
   if (!type || !id) {
     return { type: null, id: null, isValid: false }
@@ -46,7 +46,7 @@ export function parsePortfolioRoute(
  * Validate portfolio type
  */
 export function isValidPortfolioType(type: string): type is PortfolioType {
-  const validTypes: PortfolioType[] = ['human', 'projects', 'discussion']
+  const validTypes: PortfolioType[] = ['human', 'projects', 'community']
   return validTypes.includes(type.toLowerCase() as PortfolioType)
 }
 
@@ -54,7 +54,7 @@ export function isValidPortfolioType(type: string): type is PortfolioType {
  * Get all valid portfolio types
  */
 export function getPortfolioTypes(): PortfolioType[] {
-  return ['human', 'projects', 'discussion']
+  return ['human', 'projects', 'community']
 }
 
 /**
@@ -64,7 +64,7 @@ export function getPortfolioTypeDisplayName(type: PortfolioType): string {
   const displayNames: Record<PortfolioType, string> = {
     human: 'Human',
     projects: 'Projects',
-    discussion: 'Discussion',
+    community: 'Community',
   }
   return displayNames[type]
 }

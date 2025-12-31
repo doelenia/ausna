@@ -32,8 +32,7 @@ Return a JSON object with these fields:
         },
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.3,
-      max_tokens: 2000,
+      max_completion_tokens: 2000,
     })
 
     const content = completion.choices[0]?.message?.content
@@ -79,8 +78,7 @@ export async function extractSummary(compoundText: string): Promise<string> {
           content: `Summarize this text in one sentence:\n\n${compoundText}`,
         },
       ],
-      temperature: 0.3,
-      max_tokens: 100,
+      max_completion_tokens: 100,
     })
 
     const summary = completion.choices[0]?.message?.content?.trim()

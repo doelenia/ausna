@@ -61,7 +61,7 @@ export default async function NotePage({ params }: NotePageProps) {
   if (portfolios) {
     portfolios.forEach((portfolio) => {
       creatorUserIds.add(portfolio.user_id) // Portfolio owners
-      // Also add members if it's a project/discussion
+      // Also add members if it's a project/community
       const metadata = portfolio.metadata as any
       const members = metadata?.members || []
       if (Array.isArray(members)) {

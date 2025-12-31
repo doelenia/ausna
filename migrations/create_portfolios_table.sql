@@ -1,5 +1,5 @@
 -- Create portfolio_type enum
-CREATE TYPE portfolio_type AS ENUM ('human', 'projects', 'discussion');
+CREATE TYPE portfolio_type AS ENUM ('human', 'projects', 'community');
 
 -- Create portfolios table
 CREATE TABLE portfolios (
@@ -86,7 +86,7 @@ CREATE POLICY "Users can delete their own portfolios"
   USING (auth.uid() = user_id);
 
 -- Add comment to table
-COMMENT ON TABLE portfolios IS 'Unified table for all portfolio types (human, projects, discussion)';
+COMMENT ON TABLE portfolios IS 'Unified table for all portfolio types (human, projects, community)';
 COMMENT ON COLUMN portfolios.type IS 'Type discriminator for portfolio type';
 COMMENT ON COLUMN portfolios.metadata IS 'Type-specific data stored as JSONB';
 

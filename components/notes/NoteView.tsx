@@ -9,7 +9,7 @@ import { NoteActions } from './NoteActions'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
-import { isHumanPortfolio, isProjectPortfolio, isDiscussionPortfolio } from '@/types/portfolio'
+import { isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
 import { NoteCard } from './NoteCard'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
 
@@ -117,10 +117,10 @@ export function NoteView({
     return null
   }
 
-  // Organize portfolios: human (owner first), then projects, then discussions
+  // Organize portfolios: human (owner first), then projects, then communities
   const organizedHumanPortfolios: Portfolio[] = []
   const projectPortfolios: Portfolio[] = []
-  const discussionPortfolios: Portfolio[] = []
+  const communityPortfolios: Portfolio[] = []
 
   // Organize human portfolios (note owner first)
   humanPortfolios.forEach((portfolio) => {
@@ -135,8 +135,8 @@ export function NoteView({
   portfolios.forEach((portfolio) => {
     if (isProjectPortfolio(portfolio)) {
       projectPortfolios.push(portfolio)
-    } else if (isDiscussionPortfolio(portfolio)) {
-      discussionPortfolios.push(portfolio)
+    } else if (isCommunityPortfolio(portfolio)) {
+      communityPortfolios.push(portfolio)
     }
   })
 
@@ -162,8 +162,8 @@ export function NoteView({
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
-      {/* Portfolios Section - 3 rows: Creators, Projects, Discussions */}
-      {(organizedHumanPortfolios.length > 0 || projectPortfolios.length > 0 || discussionPortfolios.length > 0) && (
+      {/* Portfolios Section - 3 rows: Creators, Projects, Communities */}
+      {(organizedHumanPortfolios.length > 0 || projectPortfolios.length > 0 || communityPortfolios.length > 0) && (
         <div className="mb-6 pb-6 border-b border-gray-200 space-y-4">
           {/* Creators Row */}
           {organizedHumanPortfolios.length > 0 && (
@@ -185,12 +185,12 @@ export function NoteView({
             </div>
           )}
 
-          {/* Discussions Row */}
-          {discussionPortfolios.length > 0 && (
+          {/* Communities Row */}
+          {communityPortfolios.length > 0 && (
             <div>
-              <h2 className="text-sm font-medium text-gray-700 mb-3">Discussions</h2>
+              <h2 className="text-sm font-medium text-gray-700 mb-3">Communities</h2>
               <div className="flex flex-wrap gap-3">
-                {discussionPortfolios.map((portfolio) => renderPortfolioAvatar(portfolio))}
+                {communityPortfolios.map((portfolio) => renderPortfolioAvatar(portfolio))}
               </div>
             </div>
           )}

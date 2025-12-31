@@ -1,10 +1,10 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, isHumanPortfolio, isProjectPortfolio, isDiscussionPortfolio } from '@/types/portfolio'
+import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
 
 /**
  * Check if user is a member of a portfolio (server-side)
  * For human portfolios: user is member if they own it
- * For project/discussion portfolios: user is member if they're in the members array or are the owner
+ * For project/community portfolios: user is member if they're in the members array or are the owner
  */
 export async function isPortfolioMember(
   portfolioId: string,
@@ -32,7 +32,7 @@ export async function isPortfolioMember(
     return false
   }
 
-  // For project/discussion portfolios, check members array
+  // For project/community portfolios, check members array
   const metadata = portfolio.metadata as any
   const members = metadata?.members || []
   
@@ -150,11 +150,11 @@ export async function getUserPortfolios(userId: string): Promise<Portfolio[]> {
     return []
   }
 
-  // Get all project and discussion portfolios
+  // Get all project and community portfolios
   const { data: allPortfolios, error: allError } = await supabase
     .from('portfolios')
     .select('*')
-    .in('type', ['projects', 'discussion'])
+    .in('type', ['projects', 'community'])
 
   if (allError) {
     return (ownedPortfolios || []) as Portfolio[]

@@ -115,6 +115,27 @@ export async function POST(request: NextRequest) {
         throw new Error(`Failed to update note: ${updateError.message}`)
       }
 
+      // 9. Process interest tracking for note topics
+      if (topicIds.length > 0) {
+        try {
+          const { updateUserInterests } = await import('@/lib/indexing/interest-tracking')
+          // Get note owner
+          const { data: noteData } = await supabase
+            .from('notes')
+            .select('owner_account_id')
+            .eq('id', noteId)
+            .single()
+
+          if (noteData?.owner_account_id) {
+            // Update user interests with weight 0.1 for posting a note
+            await updateUserInterests(noteData.owner_account_id, topicIds, 0.1)
+          }
+        } catch (interestError: any) {
+          // Log error but don't fail indexing
+          console.error('Failed to process interest tracking for note:', interestError)
+        }
+      }
+
       return NextResponse.json({ success: true, noteId })
     } catch (error: any) {
       console.error('Indexing error:', error)

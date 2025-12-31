@@ -14,6 +14,7 @@ interface PinnedItemWithData {
     name: string
     avatar?: string
     slug: string
+    role?: 'manager' | 'member' // Role of the human portfolio owner in this pinned portfolio
   }
   note?: {
     id: string
@@ -110,9 +111,20 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
                   </div>
                 )}
                 <div className="p-4">
-                  <h3 className="font-semibold text-gray-900 truncate">
-                    {portfolio.name}
-                  </h3>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <h3 className="font-semibold text-gray-900 truncate">
+                      {portfolio.name}
+                    </h3>
+                    {portfolio.role && (
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${
+                        portfolio.role === 'manager'
+                          ? 'bg-purple-100 text-purple-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {portfolio.role === 'manager' ? 'Manager' : 'Member'}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-gray-500 uppercase">
                     {portfolio.type}
                   </span>

@@ -1,11 +1,14 @@
 'use client'
 
-import { Portfolio, isProjectPortfolio, isDiscussionPortfolio, isHumanPortfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
-import { HostsDisplay } from './HostsDisplay'
 import { PinnedSection } from './PinnedSection'
+import { SubscribeButton } from './SubscribeButton'
+import { FriendButton } from './FriendButton'
+import { InterestTags } from './InterestTags'
+import { Topic } from '@/types/indexing'
 import { useState, useEffect } from 'react'
 import { deletePortfolio } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
@@ -20,12 +23,14 @@ interface PortfolioViewProps {
   }
   isOwner: boolean
   currentUserId?: string
+  topInterests?: Array<{ topic: Topic; memory_score: number; aggregate_score: number }>
 }
 
-export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId }: PortfolioViewProps) {
+export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [] }: PortfolioViewProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
+  const [isManager, setIsManager] = useState(false)
   const [isMember, setIsMember] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
@@ -60,20 +65,23 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
         // Only trust server check if it matches client check, otherwise use client check
         setIsOwner(clientIsOwner && (serverIsOwner || clientIsOwner))
         
-        // Check if user is a member (for project/discussion portfolios)
-        if (clientIsOwner) {
-          setIsMember(true) // Owner is always a member
-        } else if (isProjectPortfolio(portfolio) || isDiscussionPortfolio(portfolio)) {
+        // Check if user is a manager or member (for project/community portfolios)
+        if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) {
           const metadata = portfolio.metadata as any
+          const managers = metadata?.managers || []
           const members = metadata?.members || []
+          
+          setIsManager(Array.isArray(managers) && managers.includes(user.id))
           setIsMember(Array.isArray(members) && members.includes(user.id))
         } else {
+          setIsManager(false)
           setIsMember(false)
         }
       } catch (err) {
         console.error('Error checking authentication:', err)
         setIsAuthenticated(false)
         setIsOwner(false)
+        setIsManager(false)
         setIsMember(false)
       } finally {
         setAuthChecked(true)
@@ -90,6 +98,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       if (event === 'SIGNED_OUT' || !session) {
         setIsAuthenticated(false)
         setIsOwner(false)
+        setIsManager(false)
         setIsMember(false)
         setAuthChecked(true)
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -135,7 +144,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
   const metadata = portfolio.metadata as any
   const members = metadata?.members || []
-  const hosts = metadata?.hosts || []
+  const managers = metadata?.managers || []
 
   // Determine tab label based on portfolio type
   const tabLabel = isHumanPortfolio(portfolio) ? 'Involvement' : 'Navigations'
@@ -190,16 +199,22 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     isAuthenticated &&
                     !isOwner &&
                     isHumanPortfolio(portfolio) && (
-                      <Link
-                        href={`/messages?userId=${portfolio.user_id}`}
-                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                      >
-                        Message
-                      </Link>
+                      <>
+                        <FriendButton friendId={portfolio.user_id} />
+                        <Link
+                          href={`/messages?userId=${portfolio.user_id}`}
+                          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+                        >
+                          Message
+                        </Link>
+                      </>
                     )}
-                  {authChecked && isOwner && isAuthenticated && (
+                  {authChecked && isAuthenticated && !isOwner && (
+                    <SubscribeButton portfolioId={portfolio.id} />
+                  )}
+                  {authChecked && isAuthenticated && (isOwner || isManager) && (
                   <div className="flex gap-2">
-                    {isHumanPortfolio(portfolio) && (
+                    {isHumanPortfolio(portfolio) && isOwner && (
                       <Link
                         href={`/account/${portfolio.user_id}`}
                         className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
@@ -207,20 +222,24 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         Account
                       </Link>
                     )}
-                    <Link
-                      href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/pinned`}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-                    >
-                      Edit Pinned
-                    </Link>
-                    <button
-                      onClick={() => setIsEditing(true)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    {/* Don't show delete button for human portfolios */}
-                    {!isHumanPortfolio(portfolio) && (
+                    {(isOwner || isManager) && (
+                      <>
+                        <Link
+                          href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/pinned`}
+                          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                        >
+                          Edit Pinned
+                        </Link>
+                        <button
+                          onClick={() => setIsEditing(true)}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                        >
+                          Edit
+                        </button>
+                      </>
+                    )}
+                    {/* Delete button only for creator */}
+                    {!isHumanPortfolio(portfolio) && isOwner && (
                       <button
                         onClick={handleDelete}
                         disabled={isDeleting}
@@ -236,32 +255,35 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               {basic.description && (
                 <p className="text-gray-600 mt-4">{basic.description}</p>
               )}
+              {isHumanPortfolio(portfolio) && topInterests.length > 0 && (
+                <InterestTags topics={topInterests} />
+              )}
             </div>
           </div>
 
-          {/* Owner Actions - Create Project/Discussion */}
-          {authChecked && isOwner && isAuthenticated && (
+          {/* Owner Actions - Create Project/Community (only for human portfolios) */}
+          {authChecked && isOwner && isAuthenticated && isHumanPortfolio(portfolio) && (
             <div className="mb-6 pb-6 border-b border-gray-200">
               <h2 className="text-sm font-medium text-gray-700 mb-3">Create New Portfolio</h2>
               <div className="flex gap-2">
                 <Link
-                  href={`/portfolio/create/projects?from=${portfolio.id}`}
+                  href="/portfolio/create/projects"
                   className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
                 >
                   Create Project
                 </Link>
                 <Link
-                  href={`/portfolio/create/discussion?from=${portfolio.id}`}
+                  href="/portfolio/create/community"
                   className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
                 >
-                  Create Discussion
+                  Create Community
                 </Link>
               </div>
             </div>
           )}
 
-          {/* Create Note Button - Show if user is member/owner */}
-          {authChecked && isAuthenticated && (isOwner || isMember) && (
+          {/* Create Note Button - Show only for projects, if user is member/owner */}
+          {authChecked && isAuthenticated && (isOwner || isMember) && isProjectPortfolio(portfolio) && (
             <div className="mb-6 pb-6 border-b border-gray-200">
               <Link
                 href={`/notes/create?portfolio=${portfolio.id}`}
@@ -272,27 +294,84 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
           )}
 
-          {/* Members (for projects and discussions) */}
-          {(isProjectPortfolio(portfolio) || isDiscussionPortfolio(portfolio)) && members.length > 0 && (
+          {/* Members and Managers (for projects and communities) */}
+          {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
             <div className="mb-6">
-              <h2 className="text-lg font-medium text-gray-900 mb-3">Members</h2>
-              <div className="flex flex-wrap gap-2">
-                {members.map((memberId: string) => (
-                  <Link
-                    key={memberId}
-                    href={`/portfolio/human/${memberId}`}
-                    className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 transition-colors"
-                  >
-                    {memberId === currentUserId ? 'You' : `User ${memberId.slice(0, 8)}`}
-                  </Link>
-                ))}
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-medium text-gray-900">Members</h2>
+                <Link
+                  href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
+                  className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                >
+                  View All →
+                </Link>
               </div>
-            </div>
-          )}
+              
+              {/* Creator */}
+              <div className="mb-4">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Creator</h3>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href={`/portfolio/human/${portfolio.user_id}`}
+                    className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm hover:bg-blue-200 transition-colors font-medium"
+                  >
+                    {portfolio.user_id === currentUserId ? 'You (Creator)' : `User ${portfolio.user_id.slice(0, 8)} (Creator)`}
+                  </Link>
+                </div>
+              </div>
 
-          {/* Hosts (for projects and discussions) */}
-          {(isProjectPortfolio(portfolio) || isDiscussionPortfolio(portfolio)) && hosts.length > 0 && (
-            <HostsDisplay hostIds={hosts} />
+              {/* Managers */}
+              {managers.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Managers</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {managers
+                      .filter((managerId: string) => managerId !== portfolio.user_id) // Don't show creator in managers list
+                      .slice(0, 5) // Show only first 5
+                      .map((managerId: string) => (
+                        <Link
+                          key={managerId}
+                          href={`/portfolio/human/${managerId}`}
+                          className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm hover:bg-purple-200 transition-colors"
+                        >
+                          {managerId === currentUserId ? 'You (Manager)' : `User ${managerId.slice(0, 8)} (Manager)`}
+                        </Link>
+                      ))}
+                    {managers.filter((managerId: string) => managerId !== portfolio.user_id).length > 5 && (
+                      <span className="px-3 py-1 text-gray-500 text-sm">
+                        +{managers.filter((managerId: string) => managerId !== portfolio.user_id).length - 5} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Members */}
+              {members.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Members</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {members
+                      .filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)) // Don't show creator or managers in members list
+                      .slice(0, 5) // Show only first 5
+                      .map((memberId: string) => (
+                        <Link
+                          key={memberId}
+                          href={`/portfolio/human/${memberId}`}
+                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 transition-colors"
+                        >
+                          {memberId === currentUserId ? 'You' : `User ${memberId.slice(0, 8)}`}
+                        </Link>
+                      ))}
+                    {members.filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)).length > 5 && (
+                      <span className="px-3 py-1 text-gray-500 text-sm">
+                        +{members.filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)).length - 5} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Pinned Section */}

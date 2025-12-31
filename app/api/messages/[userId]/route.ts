@@ -19,25 +19,31 @@ export async function GET(
     }
 
     const { userId } = params
+    const { searchParams } = new URL(request.url)
+    const limit = parseInt(searchParams.get('limit') || '10')
+    const before = searchParams.get('before') // ISO timestamp to fetch messages before this
 
     if (!userId) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 })
     }
 
-    // Get messages between current user and the specified user
-    // Query messages where current user is sender and specified user is receiver, OR vice versa
-    const { data: messages, error } = await supabase
+    // Build query for messages between current user and the specified user
+    let query = supabase
       .from('messages')
       .select('*')
-      .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-      .order('created_at', { ascending: true })
+      .or(`and(sender_id.eq.${user.id},receiver_id.eq.${userId}),and(sender_id.eq.${userId},receiver_id.eq.${user.id})`)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    // If 'before' is provided, fetch messages older than that timestamp
+    if (before) {
+      query = query.lt('created_at', before)
+    }
+
+    const { data: messages, error } = await query
     
-    // Filter to only messages between these two users
-    const filteredMessages = (messages || []).filter(
-      (msg) =>
-        (msg.sender_id === user.id && msg.receiver_id === userId) ||
-        (msg.sender_id === userId && msg.receiver_id === user.id)
-    )
+    // Reverse to get chronological order (oldest first)
+    const filteredMessages = (messages || []).reverse()
 
     if (error) {
       console.error('Error fetching messages:', error)

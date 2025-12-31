@@ -14,6 +14,7 @@ interface EligibleItem {
   text?: string
   avatar?: string
   slug?: string
+  role?: 'manager' | 'member' // Role of the current user in this portfolio (for human portfolios)
   isPinned: boolean
 }
 
@@ -277,7 +278,18 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                     </div>
                   )}
                   <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900">{item.name}</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-gray-900">{item.name}</h3>
+                      {item.role && (
+                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                          item.role === 'manager'
+                            ? 'bg-purple-100 text-purple-700'
+                            : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {item.role === 'manager' ? 'Manager' : 'Member'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div>
                     {isPinned ? (

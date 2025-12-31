@@ -15,6 +15,8 @@ type Client = SupabaseClient<Database>
 export function createHumanPortfolioHelpers(supabase: Client) {
   return {
     async getHumanPortfolio(userId: string): Promise<HumanPortfolio | null> {
+      console.log('[getHumanPortfolio] Querying for userId:', userId)
+      
       const { data, error } = await supabase
         .from('portfolios')
         .select('*')
@@ -22,32 +24,65 @@ export function createHumanPortfolioHelpers(supabase: Client) {
         .eq('type', 'human')
         .single()
 
-      if (error || !data) {
+      if (error) {
+        // PGRST116 means no rows found, which is expected if portfolio doesn't exist
+        if (error.code === 'PGRST116') {
+          console.log('[getHumanPortfolio] No portfolio found (expected)')
+        } else {
+          console.error('[getHumanPortfolio] Error querying portfolio:', error.message, error.code)
+        }
         return null
       }
 
-      return data as HumanPortfolio
+      if (!data) {
+        console.log('[getHumanPortfolio] No data returned')
+        return null
+      }
+
+      const portfolio = data as HumanPortfolio
+      console.log('[getHumanPortfolio] Found portfolio:', portfolio.id)
+      return portfolio
     },
 
     async ensureHumanPortfolio(userId: string): Promise<HumanPortfolio> {
+      console.log('[ensureHumanPortfolio] Starting for userId:', userId)
       let portfolio = await this.getHumanPortfolio(userId)
       
       if (portfolio) {
+        console.log('[ensureHumanPortfolio] Found existing portfolio:', portfolio.id)
         return portfolio
       }
 
+      console.log('[ensureHumanPortfolio] No existing portfolio, creating new one...')
+
       // Get user info
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { user }, error: getUserError } = await supabase.auth.getUser()
+      
+      if (getUserError) {
+        console.error('[ensureHumanPortfolio] Error getting user:', getUserError.message)
+        throw new Error(`Auth error: ${getUserError.message}`)
+      }
       
       if (!user) {
+        console.error('[ensureHumanPortfolio] No authenticated user')
         throw new Error('User not authenticated')
       }
+
+      console.log('[ensureHumanPortfolio] User authenticated:', user.id, 'email:', user.email)
 
       const email = user.email || ''
       const username = email.split('@')[0] || 'user'
       const fullName = user.user_metadata?.full_name || 
                        user.user_metadata?.name || 
                        username
+
+      console.log('[ensureHumanPortfolio] Creating portfolio with data:', {
+        type: 'human',
+        slug: `user-${userId}`,
+        user_id: userId,
+        username,
+        fullName,
+      })
 
       const { data: newPortfolio, error } = await supabase
         .from('portfolios')
@@ -72,11 +107,19 @@ export function createHumanPortfolioHelpers(supabase: Client) {
         .select()
         .single()
 
-      if (error || !newPortfolio) {
+      if (error) {
+        console.error('[ensureHumanPortfolio] Error creating portfolio:', error.message, error.code, error.details)
         throw new Error(`Failed to create human portfolio: ${error?.message}`)
       }
 
-      return newPortfolio as HumanPortfolio
+      if (!newPortfolio) {
+        console.error('[ensureHumanPortfolio] No portfolio returned from insert')
+        throw new Error('Failed to create human portfolio: No data returned')
+      }
+
+      const createdPortfolio = newPortfolio as HumanPortfolio
+      console.log('[ensureHumanPortfolio] Portfolio created successfully:', createdPortfolio.id)
+      return createdPortfolio
     },
 
     async updateHumanPortfolioMetadata(
