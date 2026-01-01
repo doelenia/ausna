@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { TopNav } from '@/components/main/TopNav'
+import { InviteHandler } from '@/components/auth/InviteHandler'
 
 export const metadata: Metadata = {
   title: 'Ausna - Creative Community',
@@ -18,6 +19,7 @@ export default function RootLayout({
         <meta name="color-scheme" content="light" />
       </head>
       <body className="light bg-white text-gray-900">
+        <InviteHandler />
         <TopNav />
         {children}
       </body>

@@ -22,7 +22,7 @@ export async function createClient() {
           
           // Debug: Check if auth cookie exists and its format
           const authCookie = allCookies.find(c => c.name.includes('auth-token'))
-          if (authCookie) {
+          if (authCookie && authCookie.value) {
             console.log('Auth cookie found:', {
               name: authCookie.name,
               valueLength: authCookie.value.length,

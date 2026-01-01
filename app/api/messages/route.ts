@@ -16,13 +16,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { receiver_id, text } = await request.json()
+    const { receiver_id, text, note_id } = await request.json()
 
-    if (!receiver_id || !text) {
+    if (!receiver_id) {
       return NextResponse.json(
-        { error: 'receiver_id and text are required' },
+        { error: 'receiver_id is required' },
         { status: 400 }
       )
+    }
+
+    // Text is required unless note_id is provided (in which case we can send just the note)
+    if (!text && !note_id) {
+      return NextResponse.json(
+        { error: 'text or note_id is required' },
+        { status: 400 }
+      )
+    }
+
+    // If note_id is provided, verify the note exists and is not deleted
+    if (note_id) {
+      const { data: note, error: noteError } = await supabase
+        .from('notes')
+        .select('id, deleted_at')
+        .eq('id', note_id)
+        .maybeSingle()
+
+      if (noteError || !note || note.deleted_at) {
+        return NextResponse.json(
+          { error: 'Note not found or has been deleted' },
+          { status: 404 }
+        )
+      }
     }
 
     if (receiver_id === user.id) {
@@ -50,7 +74,8 @@ export async function POST(request: NextRequest) {
       .insert({
         sender_id: user.id,
         receiver_id,
-        text: text.trim(),
+        text: text ? text.trim() : '', // Allow empty string if note_id is provided
+        note_id: note_id || null,
       })
       .select()
       .single()

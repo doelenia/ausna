@@ -25,6 +25,11 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
 # Get this from Supabase Dashboard > Settings > API > service_role key (keep secret!)
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
+# Site URL (required for invite emails and OAuth redirects)
+# In production, set this to your domain (e.g., https://yourdomain.com)
+# If using Vercel, this is automatically set via VERCEL_URL
+NEXT_PUBLIC_SITE_URL=https://yourdomain.com
+
 # OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
 ```

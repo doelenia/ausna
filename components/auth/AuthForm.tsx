@@ -16,8 +16,208 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [emailSent, setEmailSent] = useState(false)
+  const [waitlistSuccess, setWaitlistSuccess] = useState(false)
+  const [emailChecked, setEmailChecked] = useState(false)
+  const [isApproved, setIsApproved] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+
+  // Step 1: Check email against waitlist
+  const handleEmailCheck = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email) return
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      // Check waitlist
+      const { data: waitlistEntry, error: waitlistError } = await supabase
+        .from('waitlist')
+        .select('status, id')
+        .eq('email', email.toLowerCase())
+        .single()
+
+      // If no waitlist entry exists, create one as pending
+      if (waitlistError && waitlistError.code === 'PGRST116') {
+        // No entry found, create pending entry
+        const { error: insertError } = await supabase
+          .from('waitlist')
+          .insert({
+            email: email.toLowerCase(),
+            username: null, // Username will be set later
+            status: 'pending',
+          })
+
+        if (insertError) {
+          console.error('Error creating waitlist entry:', insertError)
+          // Check if error is due to unique constraint (email already exists)
+          if (insertError.code === '23505' || insertError.message?.includes('duplicate') || insertError.message?.includes('unique')) {
+            // Email already exists in waitlist, check its status
+            const { data: existingEntry } = await supabase
+              .from('waitlist')
+              .select('status')
+              .eq('email', email.toLowerCase())
+              .single()
+            
+            if (existingEntry) {
+              if (existingEntry.status === 'approved') {
+                // Approved - allow signup to continue
+                setEmailChecked(true)
+                setIsApproved(true)
+                setLoading(false)
+                return
+              } else if (existingEntry.status === 'pending') {
+                setError('Your email is on the waitlist but has not been approved yet. Please wait for approval.')
+                setLoading(false)
+                return
+              }
+            }
+          }
+          setError('Failed to add to waitlist. Please try again.')
+          setLoading(false)
+          return
+        }
+
+        // Show success message with green checkmark
+        setWaitlistSuccess(true)
+        setLoading(false)
+        return
+      }
+
+      // If waitlist entry exists, check status
+      if (waitlistEntry) {
+        if (waitlistEntry.status === 'approved') {
+          // Approved - allow signup to continue
+          setEmailChecked(true)
+          setIsApproved(true)
+          setLoading(false)
+          return
+        } else if (waitlistEntry.status === 'pending') {
+          setError('Your email is on the waitlist but has not been approved yet. Please wait for approval.')
+          setLoading(false)
+          return
+        } else if (waitlistEntry.status === 'rejected') {
+          // If rejected, delete the old entry to allow them to try again
+          const { error: deleteError } = await supabase
+            .from('waitlist')
+            .delete()
+            .eq('id', waitlistEntry.id)
+
+          if (deleteError) {
+            console.error('Error deleting rejected entry:', deleteError)
+          }
+
+          // Create new pending entry
+          const { error: insertError } = await supabase
+            .from('waitlist')
+            .insert({
+              email: email.toLowerCase(),
+              username: null,
+              status: 'pending',
+            })
+
+          if (insertError) {
+            console.error('Error creating new waitlist entry:', insertError)
+            setError('Error creating new waitlist entry. Please try again.')
+            setLoading(false)
+            return
+          }
+
+          // Show success message for new request
+          setWaitlistSuccess(true)
+          setLoading(false)
+          return
+        } else {
+          setError('Your email is on the waitlist but has not been approved yet.')
+          setLoading(false)
+          return
+        }
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred')
+      setLoading(false)
+    }
+  }
+
+  // Step 2: Complete signup (only for approved users)
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+
+    try {
+
+      // Validate username if provided
+      if (username) {
+        const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/
+        if (!usernameRegex.test(username)) {
+          setError(
+            'Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens'
+          )
+          setLoading(false)
+          return
+        }
+
+        // Check if username is already taken in human portfolios
+        const { data: existingPortfolios, error: checkError } = await supabase
+          .from('portfolios')
+          .select('metadata')
+          .eq('type', 'human')
+
+        if (checkError) {
+          console.error('Error checking username:', checkError)
+        } else if (existingPortfolios) {
+          // Check if any portfolio has this username in metadata
+          const usernameTaken = existingPortfolios.some(portfolio => {
+            const metadata = portfolio.metadata as any
+            return metadata?.username?.toLowerCase() === username.toLowerCase()
+          })
+
+          if (usernameTaken) {
+            setError('Username is already taken. Please choose another.')
+            setLoading(false)
+            return
+          }
+        }
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            username: username.toLowerCase() || undefined,
+          },
+        },
+      })
+
+      if (error) {
+        console.error('Signup error:', error)
+        throw error
+      }
+
+      if (data.user) {
+        console.log('User created:', data.user.id, 'Email confirmed:', data.user.email_confirmed_at)
+        // Check if email confirmation is required
+        if (data.user.email_confirmed_at) {
+          // Email already confirmed (e.g., OAuth), redirect to main
+          router.push('/main')
+        } else {
+          // Email confirmation required
+          console.log('Email confirmation required, showing email sent message')
+          setEmailSent(true)
+        }
+      } else {
+        console.error('No user returned from signup')
+        setError('Failed to create account. Please try again.')
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred')
+      setLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -26,64 +226,18 @@ export function AuthForm({ mode }: AuthFormProps) {
 
     try {
       if (mode === 'signup') {
-        // Validate username if provided
-        if (username) {
-          const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/
-          if (!usernameRegex.test(username)) {
-            setError(
-              'Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens'
-            )
-            setLoading(false)
-            return
-          }
-
-          // Check if username is already taken in human portfolios
-          const { data: existingPortfolios, error: checkError } = await supabase
-            .from('portfolios')
-            .select('metadata')
-            .eq('type', 'human')
-
-          if (checkError) {
-            console.error('Error checking username:', checkError)
-          } else if (existingPortfolios) {
-            // Check if any portfolio has this username in metadata
-            const usernameTaken = existingPortfolios.some(portfolio => {
-              const metadata = portfolio.metadata as any
-              return metadata?.username?.toLowerCase() === username.toLowerCase()
-            })
-
-            if (usernameTaken) {
-              setError('Username is already taken. Please choose another.')
-              setLoading(false)
-              return
-            }
-          }
+        // If email not checked yet, check it first
+        if (!emailChecked) {
+          await handleEmailCheck(e)
+          return
         }
-
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-            data: {
-              username: username.toLowerCase() || undefined,
-            },
-          },
-        })
-
-        if (error) throw error
-
-        if (data.user) {
-          // Check if email confirmation is required
-          if (data.user.email_confirmed_at) {
-            // Email already confirmed (e.g., OAuth), redirect to main
-            router.push('/main')
-          } else {
-            // Email confirmation required
-            setEmailSent(true)
-          }
+        // If approved, proceed with signup
+        if (isApproved) {
+          await handleSignup(e)
+          return
         }
       } else {
+        // Login flow
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
@@ -108,7 +262,42 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   }
 
-  // Show email confirmation message after signup
+  // Show waitlist success message
+  if (mode === 'signup' && waitlistSuccess) {
+    return (
+      <div className="w-full max-w-md mx-auto">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+          <div className="mb-4">
+            <svg
+              className="mx-auto h-12 w-12 text-green-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          </div>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">You're on the waitlist!</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Your email <strong>{email}</strong> has been added to the waitlist. You will be notified when your account is approved.
+          </p>
+          <Link
+            href="/login"
+            className="text-sm text-blue-600 hover:text-blue-500"
+          >
+            Back to Sign In
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  // Show email confirmation message after signup (for approved users)
   if (mode === 'signup' && emailSent) {
     return (
       <div className="w-full max-w-md mx-auto">
@@ -170,53 +359,83 @@ export function AuthForm({ mode }: AuthFormProps) {
             id="email"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value)
+              // Reset email check if email changes
+              if (emailChecked) {
+                setEmailChecked(false)
+                setIsApproved(false)
+              }
+            }}
             required
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+            disabled={emailChecked && isApproved}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
             placeholder="your@email.com"
           />
         </div>
 
-        {mode === 'signup' && (
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-              Username <span className="text-gray-500">(optional)</span>
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => {
-                const value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
-                setUsername(value)
-              }}
-              minLength={3}
-              maxLength={30}
-              pattern="[a-zA-Z0-9_-]{3,30}"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-              placeholder="username"
-            />
-            <p className="mt-1 text-xs text-gray-500">
-              3-30 characters, letters, numbers, underscores, and hyphens only
-            </p>
-          </div>
+        {/* Show password and username only if email is checked and approved */}
+        {mode === 'signup' && emailChecked && isApproved && (
+          <>
+            <div>
+              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
+                Username <span className="text-gray-500">(optional)</span>
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => {
+                  const value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                  setUsername(value)
+                }}
+                minLength={3}
+                maxLength={30}
+                pattern="[a-zA-Z0-9_-]{3,30}"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                placeholder="username"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                3-30 characters, letters, numbers, underscores, and hyphens only
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                placeholder="••••••••"
+              />
+            </div>
+          </>
         )}
 
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            minLength={6}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-            placeholder="••••••••"
-          />
-        </div>
+        {/* Show password for login */}
+        {mode === 'login' && (
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+              placeholder="••••••••"
+            />
+          </div>
+        )}
 
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm">
@@ -229,8 +448,29 @@ export function AuthForm({ mode }: AuthFormProps) {
           disabled={loading}
           className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {loading ? 'Loading...' : mode === 'login' ? 'Sign In' : 'Sign Up'}
+          {loading
+            ? 'Loading...'
+            : mode === 'login'
+            ? 'Sign In'
+            : emailChecked && isApproved
+            ? 'Sign Up'
+            : 'Check Email'}
         </button>
+
+        {mode === 'signup' && emailChecked && isApproved && (
+          <button
+            type="button"
+            onClick={() => {
+              setEmailChecked(false)
+              setIsApproved(false)
+              setPassword('')
+              setUsername('')
+            }}
+            className="w-full text-sm text-gray-600 hover:text-gray-800"
+          >
+            Use different email
+          </button>
+        )}
       </form>
     </div>
   )

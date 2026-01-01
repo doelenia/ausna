@@ -7,6 +7,7 @@ import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { Portfolio } from '@/types/portfolio'
+import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 
 interface Conversation {
   partner_id: string
@@ -136,8 +137,11 @@ function MessagesPageContent() {
 
   useEffect(() => {
     const userId = searchParams.get('userId')
-    if (userId && !partnerInfos.has(userId)) {
-      loadPartnerInfo(userId)
+    if (userId) {
+      setSelectedUserId(userId)
+      if (!partnerInfos.has(userId)) {
+        loadPartnerInfo(userId)
+      }
     }
   }, [searchParams, partnerInfos])
 
@@ -746,6 +750,7 @@ function ConversationView({
     }
   }, [])
 
+
   // Handle initial scroll to bottom after all data is loaded (including invitations)
   // With column-reverse, the container naturally starts at bottom, but we ensure it's scrolled to 0
   useEffect(() => {
@@ -1302,6 +1307,16 @@ function ConversationView({
                     key={`${message.id}-${refreshKey}`}
                     className={`flex flex-col ${isSent ? 'items-end' : 'items-start'}`}
                   >
+                    {/* Note Card - Show above message if note_id is present */}
+                    {message.note_id && (
+                      <div className={`mb-1 max-w-xs lg:max-w-md`}>
+                        <MessageNoteCard 
+                          noteId={message.note_id} 
+                          isSent={isSent}
+                        />
+                      </div>
+                    )}
+                    
                     {/* Portfolio Card - Show above invitation messages */}
                     {isPortfolioInvitationMessage && portfolio && (
                       <div className={`mb-1 max-w-xs lg:max-w-md`}>
@@ -1312,22 +1327,103 @@ function ConversationView({
                       </div>
                     )}
                     
-                    <div
-                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                        isSent
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-900'
-                      } ${(message as any).isOptimistic ? 'opacity-75' : ''}`}
-                    >
-                      <div className="flex items-center gap-2">
-                      <p className="text-sm">{message.text}</p>
-                        {(message as any).isOptimistic && (
-                          <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
+                    {/* Only show text bubble if there's text (not just a note) */}
+                    {message.text && message.text.trim() && (
+                      <div
+                        className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                          isSent
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-900'
+                        } ${(message as any).isOptimistic ? 'opacity-75' : ''}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm">{message.text}</p>
+                          {(message as any).isOptimistic && (
+                            <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                          )}
+                        </div>
+                        <p
+                          className={`text-xs mt-1 ${
+                            isSent ? 'text-blue-100' : 'text-gray-500'
+                          }`}
+                        >
+                          {(message as any).isOptimistic ? (
+                            <span className="italic">Sending...</span>
+                          ) : (
+                            new Date(message.created_at).toLocaleTimeString()
+                          )}
+                        </p>
+                        {/* Show accept button for received friend request */}
+                        {isReceivedFriendRequest && (
+                          <div className="mt-2 pt-2 border-t border-gray-300">
+                            <button
+                              onClick={handleAcceptFriendRequest}
+                              className="w-full px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
+                            >
+                              Accept Invite
+                            </button>
+                          </div>
+                        )}
+                        {/* Show cancel button for sent friend request */}
+                        {isSentFriendRequest && (
+                          <div className="mt-2 pt-2 border-t border-blue-400">
+                            <button
+                              onClick={handleCancelFriendRequest}
+                              className="w-full px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
+                            >
+                              Cancel Invitation
+                            </button>
+                          </div>
+                        )}
+                        {/* Show accept button for received portfolio invitation */}
+                        {isReceivedPortfolioInvitation && portfolioInvitation && (
+                          <div className="mt-2 pt-2 border-t border-gray-300">
+                            <button
+                              onClick={() => {
+                                handleAcceptPortfolioInvitation(portfolioInvitation!.portfolioId)
+                              }}
+                              className="w-full px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
+                            >
+                              Accept Invite
+                            </button>
+                          </div>
+                        )}
+                        {/* Show cancel button for sent portfolio invitation */}
+                        {isSentPortfolioInvitation && portfolioInvitation && (
+                          <div className="mt-2 pt-2 border-t border-blue-400">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                console.log('[DEBUG] Cancel button clicked:', { 
+                                  portfolioId: portfolioInvitation!.portfolioId, 
+                                  inviteeId: portfolioInvitation!.invitee_id,
+                                  portfolioInvitation: portfolioInvitation,
+                                  isSentPortfolioInvitation,
+                                  status: portfolioInvitation!.status
+                                })
+                                if (portfolioInvitation && portfolioInvitation.invitee_id) {
+                                  handleCancelPortfolioInvitation(portfolioInvitation.portfolioId, portfolioInvitation.invitee_id)
+                                } else {
+                                  console.error('[DEBUG] Missing invitee_id in portfolioInvitation:', portfolioInvitation)
+                                  alert('Error: Missing invitation data')
+                                }
+                              }}
+                              className="w-full px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
+                            >
+                              Cancel Invitation
+                            </button>
+                          </div>
                         )}
                       </div>
+                    )}
+                    
+                    {/* Show timestamp for note-only messages (when there's no text bubble) */}
+                    {message.note_id && (!message.text || !message.text.trim()) && (
                       <p
                         className={`text-xs mt-1 ${
                           isSent ? 'text-blue-100' : 'text-gray-500'
@@ -1339,70 +1435,7 @@ function ConversationView({
                           new Date(message.created_at).toLocaleTimeString()
                         )}
                       </p>
-                      {/* Show accept button for received friend request */}
-                      {isReceivedFriendRequest && (
-                        <div className="mt-2 pt-2 border-t border-gray-300">
-                          <button
-                            onClick={handleAcceptFriendRequest}
-                            className="w-full px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
-                          >
-                            Accept Invite
-                          </button>
-                        </div>
-                      )}
-                      {/* Show cancel button for sent friend request */}
-                      {isSentFriendRequest && (
-                        <div className="mt-2 pt-2 border-t border-blue-400">
-                          <button
-                            onClick={handleCancelFriendRequest}
-                            className="w-full px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
-                          >
-                            Cancel Invitation
-                          </button>
-                        </div>
-                      )}
-                      {/* Show accept button for received portfolio invitation */}
-                      {isReceivedPortfolioInvitation && portfolioInvitation && (
-                        <div className="mt-2 pt-2 border-t border-gray-300">
-                          <button
-                            onClick={() => {
-                              handleAcceptPortfolioInvitation(portfolioInvitation!.portfolioId)
-                            }}
-                            className="w-full px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
-                          >
-                            Accept Invite
-                          </button>
-                        </div>
-                      )}
-                      {/* Show cancel button for sent portfolio invitation */}
-                      {isSentPortfolioInvitation && portfolioInvitation && (
-                        <div className="mt-2 pt-2 border-t border-blue-400">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              console.log('[DEBUG] Cancel button clicked:', { 
-                                portfolioId: portfolioInvitation!.portfolioId, 
-                                inviteeId: portfolioInvitation!.invitee_id,
-                                portfolioInvitation: portfolioInvitation,
-                                isSentPortfolioInvitation,
-                                status: portfolioInvitation!.status
-                              })
-                              if (portfolioInvitation && portfolioInvitation.invitee_id) {
-                                handleCancelPortfolioInvitation(portfolioInvitation.portfolioId, portfolioInvitation.invitee_id)
-                              } else {
-                                console.error('[DEBUG] Missing invitee_id in portfolioInvitation:', portfolioInvitation)
-                                alert('Error: Missing invitation data')
-                              }
-                            }}
-                            className="w-full px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
-                          >
-                            Cancel Invitation
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    )}
                   </div>
                 )
               })}

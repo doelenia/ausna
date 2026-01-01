@@ -251,7 +251,7 @@ async function getAllCommunityMemberIds(
 
 /**
  * Determine note source for "all" feed
- * Priority: friend > community > subscribed
+ * Priority: 1. self (show nothing), 2. friend, 3. subscribed, 4. community
  */
 async function determineNoteSource(
   note: any,
@@ -263,12 +263,23 @@ async function determineNoteSource(
 ): Promise<NoteSource> {
   const noteOwnerId = note.owner_account_id
 
-  // Priority 1: Friend
+  // Priority 1: Self - show nothing (return null)
+  if (noteOwnerId === userId) {
+    return null
+  }
+
+  // Priority 2: Friend
   if (friendIds.includes(noteOwnerId)) {
     return { type: 'friend' }
   }
 
-  // Priority 2: Community member
+  // Priority 3: Subscribed portfolio
+  const assignedPortfolios = note.assigned_portfolios || []
+  if (assignedPortfolios.some((pid: string) => subscribedPortfolioIds.includes(pid))) {
+    return { type: 'subscribed' }
+  }
+
+  // Priority 4: Community member
   for (const [communityId, community] of communitiesMap.entries()) {
     if (community.members.includes(noteOwnerId)) {
       return {
@@ -277,12 +288,6 @@ async function determineNoteSource(
         communityId: community.id,
       }
     }
-  }
-
-  // Priority 3: Subscribed portfolio
-  const assignedPortfolios = note.assigned_portfolios || []
-  if (assignedPortfolios.some((pid: string) => subscribedPortfolioIds.includes(pid))) {
-    return { type: 'subscribed' }
   }
 
   return null
@@ -408,7 +413,24 @@ export async function getFeedNotes(
         allNotesMap.set(note.id, note)
       })
 
-      const allNotes = Array.from(allNotesMap.values())
+      // Final validation: ensure each note meets at least one visibility criteria
+      const validatedNotes = Array.from(allNotesMap.values()).filter((note: any) => {
+        const noteOwnerId = note.owner_account_id
+        const assignedPortfolios = note.assigned_portfolios || []
+        
+        // Check if note owner is a friend or community member
+        const isOwnerVisible = allUserIds.includes(noteOwnerId)
+        
+        // Check if note is assigned to a portfolio the user subscribes to or is a member of
+        const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) =>
+          allPortfolioIds.includes(pid)
+        )
+        
+        // Only include note if it meets at least one criteria
+        return isOwnerVisible || isAssignedToVisiblePortfolio
+      })
+
+      const allNotes = validatedNotes
         .sort(
           (a, b) =>
             new Date(b.created_at).getTime() -

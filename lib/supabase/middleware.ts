@@ -57,6 +57,39 @@ export async function updateSession(request: NextRequest) {
     return redirectResponse
   }
 
+  // Admin routes - require admin access
+  const isAdminRoute = request.nextUrl.pathname.startsWith('/admin')
+  
+  if (isAdminRoute) {
+    const ADMIN_EMAILS = ['allen@doelenia.com', 'ceciliayiyan@gmail.com']
+    
+    if (!user) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      const redirectResponse = NextResponse.redirect(url)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
+
+    // Check if user is admin
+    const isAdmin = user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())
+    const metadata = user.user_metadata || {}
+    const hasAdminFlag = metadata.is_admin === true
+
+    if (!isAdmin && !hasAdminFlag) {
+      // Not admin, redirect to main
+      const url = request.nextUrl.clone()
+      url.pathname = '/main'
+      const redirectResponse = NextResponse.redirect(url)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
+  }
+
   // Check if route requires authentication
   // Protected routes: action pages (create, edit, delete) and account pages
   // These routes require authentication and will redirect to login if not authenticated
@@ -76,6 +109,24 @@ export async function updateSession(request: NextRequest) {
     (request.nextUrl.pathname.startsWith('/portfolio') && !request.nextUrl.pathname.startsWith('/portfolio/create')) ||
     // Note viewing pages are public (but /notes/create requires auth)
     (request.nextUrl.pathname.startsWith('/notes') && !request.nextUrl.pathname.startsWith('/notes/create'))
+
+  // Check if user is blocked (if authenticated)
+  if (user) {
+    const metadata = user.user_metadata || {}
+    const isBlocked = metadata.is_blocked === true
+
+    // Blocked users can only access login/signup pages
+    if (isBlocked && !isPublicRoute && !isAdminRoute) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/login'
+      url.searchParams.set('blocked', 'true')
+      const redirectResponse = NextResponse.redirect(url)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
+  }
 
   // Only redirect to login if user is not authenticated and route requires auth
   // Public routes can be viewed without authentication
