@@ -24,9 +24,10 @@ interface PortfolioViewProps {
   isOwner: boolean
   currentUserId?: string
   topInterests?: Array<{ topic: Topic; memory_score: number; aggregate_score: number }>
+  isAdmin?: boolean
 }
 
-export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [] }: PortfolioViewProps) {
+export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [], isAdmin = false }: PortfolioViewProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
@@ -272,12 +273,14 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 >
                   Create Project
                 </Link>
-                <Link
-                  href="/portfolio/create/community"
-                  className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-                >
-                  Create Community
-                </Link>
+                {isAdmin && (
+                  <Link
+                    href="/portfolio/create/community"
+                    className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                  >
+                    Create Community
+                  </Link>
+                )}
               </div>
             </div>
           )}

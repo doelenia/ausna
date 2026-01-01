@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { PortfolioView } from '@/components/portfolio/PortfolioView'
 import { getTopInterestedTopics } from '@/lib/indexing/interest-tracking'
+import { checkAdmin } from '@/lib/auth/requireAdmin'
 import Link from 'next/link'
 
 interface PortfolioPageProps {
@@ -110,6 +111,10 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
     }
   }
 
+  // Check if user is admin
+  const adminUser = await checkAdmin()
+  const isAdmin = adminUser !== null
+
   return (
     <PortfolioView
       portfolio={portfolio}
@@ -117,6 +122,7 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
       isOwner={isOwner}
       currentUserId={user?.id}
       topInterests={topInterests}
+      isAdmin={isAdmin}
     />
   )
 }

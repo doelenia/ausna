@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
+import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { uploadAvatar } from '@/lib/storage/avatars-server'
 import { generateSlug } from '@/lib/portfolio/helpers'
 
@@ -28,6 +29,17 @@ export async function createPortfolio(
       return {
         success: false,
         error: 'Invalid portfolio type. Only projects and communities can be created.',
+      }
+    }
+
+    // Check if user is admin for community creation
+    if (type === 'community') {
+      const adminUser = await checkAdmin()
+      if (!adminUser) {
+        return {
+          success: false,
+          error: 'Only administrators can create communities.',
+        }
       }
     }
 

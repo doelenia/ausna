@@ -1,6 +1,7 @@
 import { requireAuth } from '@/lib/auth/requireAuth'
+import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { isValidPortfolioType } from '@/lib/portfolio/routes'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { CreatePortfolioForm } from '@/components/portfolio/CreatePortfolioForm'
 
 interface CreatePortfolioPageProps {
@@ -26,6 +27,14 @@ export default async function CreatePortfolioPage({
   }
   
   const type = normalizedType as 'projects' | 'community'
+
+  // Check if user is admin for community creation
+  if (type === 'community') {
+    const adminUser = await checkAdmin()
+    if (!adminUser) {
+      redirect('/main')
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
