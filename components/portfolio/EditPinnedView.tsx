@@ -197,8 +197,8 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                   key={`note-${item.id}`}
                   className={`flex items-center justify-between p-4 rounded-lg border-2 transition-colors cursor-pointer ${
                     isPinned
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
+                      ? 'border-blue-500 bg-transparent'
+                      : 'border-gray-200 bg-transparent hover:border-gray-300'
                   }`}
                   onClick={() => togglePinned('note', item.id)}
                 >
@@ -249,8 +249,8 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                   key={`portfolio-${item.id}`}
                   className={`flex items-center gap-4 p-4 rounded-lg border-2 transition-colors cursor-pointer ${
                     isPinned
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
+                      ? 'border-blue-500 bg-transparent'
+                      : 'border-gray-200 bg-transparent hover:border-gray-300'
                   }`}
                   onClick={() => togglePinned('portfolio', item.id)}
                 >

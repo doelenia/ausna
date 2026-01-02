@@ -147,12 +147,8 @@ function MessagesPageContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white shadow rounded-lg p-6">
-            <div className="text-center">Loading conversations...</div>
-          </div>
-        </div>
+      <div className="bg-white shadow rounded-lg p-6">
+        <div className="text-center">Loading conversations...</div>
       </div>
     )
   }
@@ -185,10 +181,8 @@ function MessagesPageContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow rounded-lg p-6">
-          <h1 className="text-2xl font-bold mb-6">Messages</h1>
+    <div className="bg-transparent p-6 h-full flex flex-col">
+      <h1 className="text-2xl font-bold mb-6">Messages</h1>
 
           {/* Tabs */}
           <div className="flex gap-2 mb-6 border-b border-gray-200">
@@ -308,8 +302,6 @@ function MessagesPageContent() {
               })}
             </div>
           )}
-        </div>
-      </div>
     </div>
   )
 }
@@ -460,8 +452,13 @@ function ConversationView({
               
               // Add new message at the end (newest messages)
               const updated = [...prev, newMessage]
-              // Keep only the most recent messages (limit to last 50 for performance)
-              return updated.slice(-50)
+              // Only limit to last 100 messages if we're at the bottom (user hasn't scrolled up)
+              // Check if user is near bottom (scrollTop < 200 in column-reverse)
+              const container = messagesContainerRef.current
+              const isNearBottom = container && container.scrollTop < 200
+              // If user has scrolled up to load older messages, keep all messages
+              // Otherwise, limit to 100 for performance
+              return isNearBottom && updated.length > 100 ? updated.slice(-100) : updated
             })
             
             // Mark as read if current user is receiver
@@ -1111,9 +1108,7 @@ function ConversationView({
   }, [supabase])
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow rounded-lg flex flex-col" style={{ height: '80vh' }}>
+    <div className="bg-transparent flex flex-col" style={{ height: 'calc(100dvh - 4rem)', maxHeight: 'calc(100dvh - 4rem)' }}>
           {/* Header */}
           <div className="flex items-center gap-4 p-4 border-b border-gray-200">
             <button
@@ -1482,8 +1477,6 @@ function ConversationView({
               </button>
             </div>
           </form>
-        </div>
-      </div>
     </div>
   )
 }
@@ -1491,12 +1484,8 @@ function ConversationView({
 export default function MessagesPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white shadow rounded-lg p-6">
-            <div className="text-center">Loading...</div>
-          </div>
-        </div>
+      <div className="bg-white shadow rounded-lg p-6">
+        <div className="text-center">Loading...</div>
       </div>
     }>
       <MessagesPageContent />

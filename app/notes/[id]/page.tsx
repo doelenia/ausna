@@ -94,31 +94,29 @@ export default async function NotePage({ params }: NotePageProps) {
   const firstPortfolio = portfolios && portfolios.length > 0 ? portfolios[0] : null
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="mb-6">
-          {firstPortfolio && (
-            <Link
-              href={`/portfolio/${firstPortfolio.type}/${firstPortfolio.id}/all`}
-              className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-block"
-            >
-              ← Back to Portfolio
-            </Link>
-          )}
-        </div>
+    <>
+      <div className="mb-6">
+            {firstPortfolio && (
+              <Link
+                href={`/portfolio/${firstPortfolio.type}/${firstPortfolio.id}/all`}
+                className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-block"
+              >
+                ← Back to Portfolio
+              </Link>
+            )}
+          </div>
 
-        <NoteView
-          note={note}
-          annotations={annotations}
-          portfolios={portfolios || []}
-          humanPortfolios={humanPortfolios || []}
-          currentUserId={user?.id}
-          canAnnotate={canAnnotate}
-          annotatePortfolioId={firstPortfolio?.id}
+          <NoteView
+            note={note}
+            annotations={annotations}
+            portfolios={portfolios || []}
+            humanPortfolios={humanPortfolios || []}
+            currentUserId={user?.id}
+            canAnnotate={canAnnotate}
+            annotatePortfolioId={firstPortfolio?.id}
           referencedNoteDeleted={referencedNoteDeleted}
         />
-      </div>
-    </div>
+    </>
   )
 }
 

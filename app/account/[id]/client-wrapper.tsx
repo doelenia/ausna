@@ -83,12 +83,8 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white shadow rounded-lg p-6">
-            <p className="text-center text-gray-500">Loading...</p>
-          </div>
-        </div>
+      <div className="bg-white shadow rounded-lg p-6">
+        <p className="text-center text-gray-500">Loading...</p>
       </div>
     )
   }
@@ -98,9 +94,7 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow rounded-lg p-6">
+    <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-3xl font-bold text-gray-900">Account Settings</h1>
             <Link
@@ -217,8 +211,6 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
             </div>
           </div>
         </div>
-      </div>
-    </div>
   )
 }
 

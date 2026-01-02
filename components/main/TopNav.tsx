@@ -9,6 +9,7 @@ import { HumanPortfolio } from '@/types/portfolio'
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [unreadCount, setUnreadCount] = useState(0)
   const supabase = createClient()
 
   useEffect(() => {
@@ -100,17 +101,61 @@ export function TopNav() {
     return () => subscription.unsubscribe()
   }, [supabase])
 
+  // Fetch unread message count from active conversations
+  useEffect(() => {
+    if (!user) {
+      setUnreadCount(0)
+      return
+    }
+
+    const fetchUnreadCount = async () => {
+      try {
+        const response = await fetch('/api/messages?tab=active')
+        if (response.ok) {
+          const data = await response.json()
+          const conversations = data.conversations || []
+          const totalUnread = conversations.reduce((sum: number, conv: any) => {
+            return sum + (conv.unread_count || 0)
+          }, 0)
+          setUnreadCount(totalUnread)
+        }
+      } catch (error) {
+        console.error('Error fetching unread count:', error)
+      }
+    }
+
+    fetchUnreadCount()
+
+    // Poll for updates every 30 seconds
+    const interval = setInterval(fetchUnreadCount, 30000)
+
+    return () => clearInterval(interval)
+  }, [user])
+
   return (
-    <nav className="bg-white shadow-sm border-b border-gray-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
+      <div className="w-full px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Left side - Home link */}
           <div className="flex items-center">
             <Link 
               href="/main" 
-              className="text-xl font-bold text-gray-900 hover:text-gray-700 transition-colors"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center"
+              title="Home"
             >
-              Ausna
+              <svg
+                className="w-5 h-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
+                />
+              </svg>
             </Link>
           </div>
 
@@ -122,7 +167,7 @@ export function TopNav() {
               <>
                 <Link
                   href="/messages"
-                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2"
+                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center relative"
                   title="Messages"
                 >
                   <svg
@@ -138,7 +183,11 @@ export function TopNav() {
                       d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
                     />
                   </svg>
-                  <span className="hidden sm:inline">Messages</span>
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
                 </Link>
                 <UserAvatarClient userId={user.id} />
               </>
@@ -314,7 +363,7 @@ function UserAvatarClient({ userId }: { userId: string }) {
           alt={fallbackDisplayName}
           className="h-8 w-8 rounded-full border-2 border-gray-300 object-cover"
         />
-        <span className="text-sm font-medium text-gray-700 hidden sm:inline">
+        <span className="text-sm font-medium text-gray-700 hidden md:inline">
           {fallbackDisplayName}
         </span>
       </Link>
@@ -336,7 +385,7 @@ function UserAvatarClient({ userId }: { userId: string }) {
           target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
         }}
       />
-      <span className="text-sm font-medium text-gray-700 hidden sm:inline">
+      <span className="text-sm font-medium text-gray-700 hidden md:inline">
         {displayName}
       </span>
     </Link>

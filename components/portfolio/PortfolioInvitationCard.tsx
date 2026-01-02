@@ -17,10 +17,10 @@ export function PortfolioInvitationCard({ portfolio, isSent = false }: Portfolio
   return (
     <Link
       href={getPortfolioUrl(portfolio.type, portfolio.id)}
-      className={`block mb-2 rounded-lg border-2 overflow-hidden transition-all hover:shadow-md ${
+      className={`block mb-2 rounded-lg border-2 overflow-hidden transition-all ${
         isSent 
-          ? 'border-blue-400 bg-blue-50' 
-          : 'border-gray-300 bg-white'
+          ? 'border-blue-400 bg-transparent' 
+          : 'border-gray-300 bg-transparent'
       }`}
       onClick={(e) => e.stopPropagation()}
     >

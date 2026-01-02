@@ -58,9 +58,7 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
   const portfolioTypes = getPortfolioTypes()
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
+    <div className="mb-8">
           <h1 className="text-4xl font-bold mb-4">Portfolios</h1>
           
           {/* Type filters */}
@@ -103,10 +101,9 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
               <input type="hidden" name="type" value={searchParams.type} />
             )}
           </form>
-        </div>
 
-        {/* Portfolio list */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Portfolio list */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {portfolios && portfolios.length > 0 ? (
             portfolios.map((portfolio: Portfolio) => {
               const basic = getPortfolioBasic(portfolio)
@@ -114,7 +111,7 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
                 <Link
                   key={portfolio.id}
                   href={getPortfolioUrl(portfolio.type, portfolio.id)}
-                  className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+                  className="bg-transparent rounded-lg p-6 transition-opacity hover:opacity-80"
                 >
                   <div className="mb-2">
                     <span className="text-xs font-semibold text-blue-600 uppercase">
@@ -138,9 +135,8 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
               <p className="text-gray-500">No portfolios found.</p>
             </div>
           )}
+          </div>
         </div>
-      </div>
-    </div>
   )
 }
 

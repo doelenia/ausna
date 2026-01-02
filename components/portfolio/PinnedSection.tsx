@@ -55,7 +55,6 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
   if (loading) {
     return (
       <div className="mb-6">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">Pinned</h2>
         <div className="text-sm text-gray-500">Loading...</div>
       </div>
     )
@@ -64,7 +63,6 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
   if (error) {
     return (
       <div className="mb-6">
-        <h2 className="text-lg font-medium text-gray-900 mb-4">Pinned</h2>
         <div className="text-sm text-red-500">{error}</div>
       </div>
     )
@@ -75,8 +73,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
   }
 
   return (
-    <div className="mb-6 pb-6 border-b border-gray-200">
-      <h2 className="text-lg font-medium text-gray-900 mb-4">Pinned</h2>
+    <div className="mb-6 pb-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map((item) => {
           if (item.type === 'portfolio' && item.portfolio) {
@@ -85,7 +82,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
               <Link
                 key={`portfolio-${item.id}`}
                 href={getPortfolioUrl(portfolio.type as any, portfolio.id)}
-                className="block bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow overflow-hidden"
+                className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
               >
                 {portfolio.avatar ? (
                   <img
@@ -137,7 +134,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
               <Link
                 key={`note-${item.id}`}
                 href={`/notes/${item.id}`}
-                className="block bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4"
+                className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 p-4"
               >
                 <div className="flex items-start justify-between mb-2">
                   <span className="text-xs text-gray-500">

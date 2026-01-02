@@ -7,7 +7,6 @@ import { PortfolioEditor } from './PortfolioEditor'
 import { PinnedSection } from './PinnedSection'
 import { SubscribeButton } from './SubscribeButton'
 import { FriendButton } from './FriendButton'
-import { InterestTags } from './InterestTags'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect } from 'react'
 import { deletePortfolio } from '@/app/portfolio/[type]/[id]/actions'
@@ -151,9 +150,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const tabLabel = isHumanPortfolio(portfolio) ? 'Involvement' : 'Navigations'
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow rounded-lg p-6">
+    <div className="bg-transparent rounded-lg p-6">
           {/* Header with avatar and name */}
           <div className="flex items-start gap-6 mb-6">
             {basic.avatar ? (
@@ -256,15 +253,12 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               {basic.description && (
                 <p className="text-gray-600 mt-4">{basic.description}</p>
               )}
-              {isHumanPortfolio(portfolio) && topInterests.length > 0 && (
-                <InterestTags topics={topInterests} />
-              )}
             </div>
           </div>
 
           {/* Owner Actions - Create Project/Community (only for human portfolios) */}
           {authChecked && isOwner && isAuthenticated && isHumanPortfolio(portfolio) && (
-            <div className="mb-6 pb-6 border-b border-gray-200">
+            <div className="mb-6 pb-6">
               <h2 className="text-sm font-medium text-gray-700 mb-3">Create New Portfolio</h2>
               <div className="flex gap-2">
                 <Link
@@ -273,7 +267,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 >
                   Create Project
                 </Link>
-                {isAdmin && (
+                {/* Create Community button - Admin only */}
+                {isAdmin === true && (
                   <Link
                     href="/portfolio/create/community"
                     className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
@@ -287,7 +282,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
           {/* Create Note Button - Show only for projects, if user is member/owner */}
           {authChecked && isAuthenticated && (isOwner || isMember) && isProjectPortfolio(portfolio) && (
-            <div className="mb-6 pb-6 border-b border-gray-200">
+            <div className="mb-6 pb-6">
               <Link
                 href={`/notes/create?portfolio=${portfolio.id}`}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors inline-block"
@@ -380,18 +375,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           {/* Pinned Section */}
           <PinnedSection portfolioId={portfolio.id} />
 
-          {/* Metadata */}
-          <div className="text-sm text-gray-500 mt-6 pt-6 border-t border-gray-200">
-            <span>Created: {new Date(portfolio.created_at).toLocaleDateString()}</span>
-            {portfolio.updated_at !== portfolio.created_at && (
-              <span className="ml-4">
-                Updated: {new Date(portfolio.updated_at).toLocaleDateString()}
-              </span>
-            )}
-          </div>
-
           {/* All Button */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
+          <div className="mt-6 pt-6">
             <Link
               href={`/portfolio/${portfolio.type}/${portfolio.id}/all`}
               className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
@@ -400,7 +385,5 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </Link>
           </div>
         </div>
-      </div>
-    </div>
   )
 }

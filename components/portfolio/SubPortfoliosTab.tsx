@@ -83,7 +83,7 @@ export function SubPortfoliosTab({
               <Link
                 key={community.id}
                 href={getPortfolioUrl('community', community.id)}
-                className="flex-shrink-0 w-64 bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow overflow-hidden"
+                className="flex-shrink-0 w-64 bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
               >
                 {community.avatar ? (
                   <img
@@ -137,7 +137,7 @@ export function SubPortfoliosTab({
             <Link
               key={project.id}
               href={getPortfolioUrl('projects', project.id)}
-              className="block bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow overflow-hidden"
+              className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
             >
               <div className="flex gap-4">
                 {project.avatar ? (

@@ -87,9 +87,7 @@ export default async function EditPinnedPage({ params }: EditPinnedPageProps) {
   const basic = getPortfolioBasic(portfolio)
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white shadow rounded-lg p-6">
+    <div className="bg-white shadow rounded-lg p-6">
           {/* Header */}
           <div className="mb-6">
             <Link
@@ -105,8 +103,6 @@ export default async function EditPinnedPage({ params }: EditPinnedPageProps) {
           {/* Edit View */}
           <EditPinnedView portfolioId={portfolio.id} portfolioType={portfolio.type} />
         </div>
-      </div>
-    </div>
   )
 }
 
