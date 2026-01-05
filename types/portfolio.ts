@@ -60,6 +60,9 @@ export interface HumanPortfolioMetadata extends PortfolioMetadata {
 export interface ProjectPortfolioMetadata extends PortfolioMetadata {
   members: string[] // Array of user IDs (includes owner)
   managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
+  project_type_general?: string // General category (e.g., "Arts & Culture")
+  project_type_specific?: string // Specific type (e.g., "Film", max 2 words)
+  memberRoles?: { [userId: string]: string } // Object mapping userId to role (max 2 words)
   technologies?: string[]
   github_url?: string
   live_url?: string
@@ -76,6 +79,9 @@ export interface ProjectPortfolioMetadata extends PortfolioMetadata {
 export interface CommunityPortfolioMetadata extends PortfolioMetadata {
   members: string[] // Array of user IDs (includes owner)
   managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
+  project_type_general?: string // General category (e.g., "Arts & Culture")
+  project_type_specific?: string // Specific type (e.g., "Film", max 2 words)
+  memberRoles?: { [userId: string]: string } // Object mapping userId to role (max 2 words)
   topic_tags?: string[]
   category?: string
   related_projects?: string[] // portfolio IDs

@@ -22,7 +22,8 @@ interface SubPortfolio {
   name: string
   avatar?: string
   slug: string
-  role?: 'manager' | 'member' // Role of the current user in this portfolio
+  role: string // Role of the current user in this portfolio
+  projectType?: string | null // Project type specific
 }
 
 interface GetSubPortfoliosResult {
@@ -89,7 +90,7 @@ interface EligibleItem {
   text?: string
   avatar?: string
   slug?: string
-  role?: 'manager' | 'member' // Role of the current user in this portfolio (for human portfolios)
+  role?: string // Role of the current user in this portfolio (for human portfolios)
   isPinned: boolean
 }
 
@@ -166,6 +167,9 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
           const managers = metadata?.managers || []
           const members = metadata?.members || []
           const isManager = Array.isArray(managers) && managers.includes(userId)
+          const memberRoles = metadata?.memberRoles || {}
+          const userRole = memberRoles[userId] || (isManager ? 'Manager' : 'Member')
+          const projectTypeSpecific = metadata?.project_type_specific || null
           const basic = getPortfolioBasic(p as Portfolio)
           return {
             id: p.id,
@@ -173,7 +177,8 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
             name: basic.name,
             avatar: basic.avatar,
             slug: p.slug,
-            role: isManager ? ('manager' as const) : ('member' as const),
+            role: userRole,
+            projectType: projectTypeSpecific,
           }
         })
 
@@ -190,6 +195,9 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
           const metadata = p.metadata as any
           const managers = metadata?.managers || []
           const isManager = Array.isArray(managers) && managers.includes(userId)
+          const memberRoles = metadata?.memberRoles || {}
+          const userRole = memberRoles[userId] || (isManager ? 'Manager' : 'Member')
+          const projectTypeSpecific = metadata?.project_type_specific || null
           const basic = getPortfolioBasic(p as Portfolio)
           return {
             id: p.id,
@@ -197,7 +205,8 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
             name: basic.name,
             avatar: basic.avatar,
             slug: p.slug,
-            role: isManager ? ('manager' as const) : ('member' as const),
+            role: userRole,
+            projectType: projectTypeSpecific,
           }
         })
 
@@ -239,6 +248,8 @@ export async function updatePortfolio(
     const description = formData.get('description') as string | null
     const avatarFile = formData.get('avatar') as File | null
     const emoji = formData.get('emoji') as string | null
+    const projectTypeGeneral = formData.get('project_type_general') as string | null
+    const projectTypeSpecific = formData.get('project_type_specific') as string | null
 
     if (!portfolioId) {
       return {
@@ -281,7 +292,7 @@ export async function updatePortfolio(
       : (basicMetadata.description || '').trim()
 
     // Update basic metadata
-    const updatedMetadata = {
+    const updatedMetadata: any = {
       ...currentMetadata,
       basic: {
         ...basicMetadata,
@@ -291,6 +302,12 @@ export async function updatePortfolio(
         // Update emoji if provided, or clear it if empty string is sent
         emoji: emoji !== null ? (emoji || '') : basicMetadata.emoji,
       },
+    }
+
+    // Update project type if provided (for projects and communities)
+    if ((portfolio.type === 'projects' || portfolio.type === 'community') && projectTypeGeneral && projectTypeSpecific) {
+      updatedMetadata.project_type_general = projectTypeGeneral
+      updatedMetadata.project_type_specific = projectTypeSpecific
     }
 
     // Check if description changed (compare trimmed versions)
@@ -534,7 +551,7 @@ interface EligibleItem {
   text?: string
   avatar?: string
   slug?: string
-  role?: 'manager' | 'member' // Role of the current user in this portfolio (for human portfolios)
+  role?: string // Role of the current user in this portfolio (for human portfolios)
   isPinned: boolean
 }
 

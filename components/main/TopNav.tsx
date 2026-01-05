@@ -5,13 +5,17 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
-import { UIText, IconButton } from '@/components/ui'
-import { Home, MessageCircle } from 'lucide-react'
+import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
+import { Home, MessageCircle, Pen } from 'lucide-react'
+import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [showProjectSelector, setShowProjectSelector] = useState(false)
+  const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [userProjectsLoading, setUserProjectsLoading] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -134,6 +138,62 @@ export function TopNav() {
     return () => clearInterval(interval)
   }, [user])
 
+  // Fetch all projects user is a member of (for project selector popup)
+  useEffect(() => {
+    const fetchUserProjects = async () => {
+      if (!user) {
+        setUserProjects([])
+        return
+      }
+
+      setUserProjectsLoading(true)
+      try {
+        // Fetch all projects
+        const { data: allProjects } = await supabase
+          .from('portfolios')
+          .select('id, metadata')
+          .eq('type', 'projects')
+          .order('created_at', { ascending: false })
+
+        if (!allProjects) {
+          setUserProjects([])
+          setUserProjectsLoading(false)
+          return
+        }
+
+        // Filter projects where user is a manager or member
+        const userProjectData = allProjects
+          .filter((p: any) => {
+            const metadata = p.metadata as any
+            const managers = metadata?.managers || []
+            const members = metadata?.members || []
+            return p.user_id === user.id || // Creator
+                   (Array.isArray(managers) && managers.includes(user.id)) ||
+                   (Array.isArray(members) && members.includes(user.id))
+          })
+          .map((p: any) => {
+            const metadata = p.metadata as any
+            const basic = metadata?.basic || {}
+            return {
+              id: p.id,
+              name: basic.name || 'Project',
+              avatar: basic.avatar,
+              emoji: basic.emoji,
+            }
+          })
+
+        setUserProjects(userProjectData)
+      } catch (error) {
+        console.error('Failed to fetch user projects:', error)
+        setUserProjects([])
+      } finally {
+        setUserProjectsLoading(false)
+      }
+    }
+
+    fetchUserProjects()
+  }, [user, supabase])
+
   return (
     <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
       <div className="w-full px-4 sm:px-6 lg:px-8">
@@ -154,6 +214,12 @@ export function TopNav() {
               <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
             ) : user ? (
               <>
+                <IconButton
+                  icon={Pen}
+                  onClick={() => setShowProjectSelector(true)}
+                  title="Create Note"
+                  aria-label="Create Note"
+                />
                 <IconButton
                   icon={MessageCircle}
                   href="/messages"
@@ -180,6 +246,83 @@ export function TopNav() {
           </div>
         </div>
       </div>
+
+      {/* Project Selector Popup */}
+      {showProjectSelector && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowProjectSelector(false)}
+        >
+          <div 
+            className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Card variant="default" padding="sm">
+              
+              {userProjectsLoading ? (
+                <div className="py-8 text-center">
+                  <UIText className="text-gray-500">Loading projects...</UIText>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-x-4 gap-y-8 mb-4">
+                  {userProjects.map((project) => (
+                    <Link
+                      key={project.id}
+                      href={`/notes/create?portfolio=${project.id}`}
+                      className="flex flex-col items-center gap-4 py-8 px-8 hover:opacity-80 transition-opacity"
+                      onClick={() => setShowProjectSelector(false)}
+                    >
+                      <StickerAvatar
+                        src={project.avatar}
+                        alt={project.name}
+                        type="projects"
+                        size={96}
+                        emoji={project.emoji}
+                        name={project.name}
+                      />
+                      <UIText className="text-center max-w-[96px] truncate" title={project.name}>
+                        {project.name}
+                      </UIText>
+                    </Link>
+                  ))}
+                  {/* Create Project Button */}
+                  <Link
+                    href="/portfolio/create/projects"
+                    className="flex flex-col items-center gap-4 py-4 px-4 hover:opacity-80 transition-opacity"
+                    onClick={() => setShowProjectSelector(false)}
+                  >
+                    <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
+                      <svg
+                        className="h-12 w-12 text-gray-600"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M12 4v16m8-8H4"
+                        />
+                      </svg>
+                    </div>
+                    <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
+                  </Link>
+                </div>
+              )}
+              
+              <div className="flex justify-end">
+                <Button
+                  variant="secondary"
+                  onClick={() => setShowProjectSelector(false)}
+                >
+                  <UIText>Cancel</UIText>
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
     </nav>
   )
 }
@@ -195,46 +338,9 @@ function UserAvatarClient({ userId }: { userId: string }) {
     let timeoutId: NodeJS.Timeout | null = null
 
     const loadHumanPortfolio = async () => {
-      console.log('[UserAvatarClient] Starting to load portfolio for userId:', userId)
       const portfolioHelpers = createHumanPortfolioHelpers(supabase)
       
-      // Safari detection
-      const isSafari = typeof window !== 'undefined' && 
-                       /safari/.test(navigator.userAgent.toLowerCase()) && 
-                       !/chrome/.test(navigator.userAgent.toLowerCase()) &&
-                       !/chromium/.test(navigator.userAgent.toLowerCase())
-      
       try {
-        // In Safari, try getSession first as it's more reliable
-        if (isSafari) {
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-          if (sessionError) {
-            console.error('[UserAvatarClient] Safari session error:', sessionError.message)
-          }
-          if (session?.user) {
-            console.log('[UserAvatarClient] Safari: Using session user:', session.user.id)
-            // Continue with session user
-          }
-        }
-        
-        // Verify auth before loading portfolio
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
-        if (authError) {
-          console.error('[UserAvatarClient] Auth error:', authError.message)
-          if (isSafari) {
-            console.error('[UserAvatarClient] Safari: Auth error may be due to cookie/ITP restrictions')
-          }
-          throw new Error(`Auth error: ${authError.message}`)
-        }
-        if (!authUser) {
-          console.error('[UserAvatarClient] No authenticated user')
-          if (isSafari) {
-            console.error('[UserAvatarClient] Safari: User not found - cookies may be blocked')
-          }
-          throw new Error('No authenticated user')
-        }
-        console.log('[UserAvatarClient] User authenticated:', authUser.id)
-
         // Add timeout to prevent infinite loading (10 seconds)
         const timeoutPromise = new Promise((_, reject) => {
           timeoutId = setTimeout(() => {
@@ -242,51 +348,26 @@ function UserAvatarClient({ userId }: { userId: string }) {
           }, 10000)
         })
 
-        console.log('[UserAvatarClient] Calling ensureHumanPortfolio...')
         const portfolioPromise = portfolioHelpers.ensureHumanPortfolio(userId)
-        
         const portfolio = await Promise.race([portfolioPromise, timeoutPromise]) as HumanPortfolio
         
         if (timeoutId) {
           clearTimeout(timeoutId)
         }
 
-        console.log('[UserAvatarClient] Portfolio loaded successfully:', portfolio?.id)
-
         if (isMounted) {
-          console.log('[UserAvatarClient] Setting portfolio state')
           setHumanPortfolio(portfolio)
           setError(null)
         }
       } catch (error: any) {
-        console.error('[UserAvatarClient] Error loading human portfolio:', error)
-        // Log additional details for debugging
-        if (error?.message) {
-          console.error('[UserAvatarClient] Error message:', error.message)
-        }
-        if (error?.stack) {
-          console.error('[UserAvatarClient] Error stack:', error.stack)
-        }
-        // Check if it's an auth error
-        try {
-          const { data: { user } } = await supabase.auth.getUser()
-          if (!user) {
-            console.warn('[UserAvatarClient] User not authenticated when loading portfolio')
-          }
-        } catch (authError) {
-          console.warn('[UserAvatarClient] Failed to check auth status:', authError)
-        }
-        
         if (isMounted) {
           setError(error?.message || 'Failed to load profile')
-          // Still set loading to false so we can show fallback UI
         }
       } finally {
         if (timeoutId) {
           clearTimeout(timeoutId)
         }
         if (isMounted) {
-          console.log('[UserAvatarClient] Setting loading to false')
           setLoading(false)
         }
       }
@@ -304,12 +385,8 @@ function UserAvatarClient({ userId }: { userId: string }) {
 
   const metadata = humanPortfolio?.metadata as any
   const basic = metadata?.basic || {}
-  // Prioritize basic.name from human portfolio, fallback to username
   const displayName = basic.name || metadata?.username || 'User'
   const avatarUrl = basic?.avatar || metadata?.avatar_url
-  const finalAvatarUrl =
-    avatarUrl ||
-    `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
 
   // Link to human portfolio instead of account page
   const humanPortfolioUrl = humanPortfolio 
@@ -317,50 +394,19 @@ function UserAvatarClient({ userId }: { userId: string }) {
     : `/portfolio/human/${userId}`
 
   if (loading) {
-    console.log('[UserAvatarClient] Rendering loading skeleton')
     return (
       <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
     )
   }
 
-  console.log('[UserAvatarClient] Rendering avatar. Loading:', loading, 'Error:', error, 'Portfolio:', humanPortfolio?.id)
-
-  // Fallback UI if loading failed - still show avatar with user ID
-  if (error || !humanPortfolio) {
-    const fallbackDisplayName = 'User'
-    const fallbackAvatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(fallbackDisplayName)}&background=random`
-    
-    return (
-      <Link
-        href={`/portfolio/human/${userId}`}
-        className="hover:opacity-80 transition-opacity"
-        title={error ? `Error: ${error}` : 'Loading profile...'}
-      >
-        <img
-          src={fallbackAvatarUrl}
-          alt={fallbackDisplayName}
-          className="h-8 w-8 rounded-full border-2 border-gray-300 object-cover"
-        />
-      </Link>
-    )
-  }
-
   return (
-    <Link
+    <UserAvatar
+      userId={userId}
+      name={displayName}
+      avatar={avatarUrl}
+      size={32}
       href={humanPortfolioUrl}
-      className="hover:opacity-80 transition-opacity"
-    >
-      <img
-        src={finalAvatarUrl}
-        alt={displayName}
-        className="h-8 w-8 rounded-full border-2 border-gray-300 object-cover"
-        onError={(e) => {
-          // Fallback to generated avatar if image fails to load
-          const target = e.target as HTMLImageElement
-          target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
-        }}
-      />
-    </Link>
+    />
   )
 }
 

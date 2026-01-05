@@ -95,6 +95,10 @@ export default async function MembersPage({ params }: MembersPageProps) {
         .eq('type', 'human')
         .maybeSingle()
 
+      const metadata = portfolio.metadata as any
+      const memberRoles = metadata?.memberRoles || {}
+      const role = memberRoles[memberId] || null
+      
       if (memberPortfolio) {
         const memberMetadata = memberPortfolio.metadata as any
         const memberBasic = memberMetadata?.basic || {}
@@ -105,6 +109,7 @@ export default async function MembersPage({ params }: MembersPageProps) {
           avatar: memberBasic.avatar || memberMetadata?.avatar_url || null,
           isManager: managers.includes(memberId),
           isCreator: portfolio.user_id === memberId,
+          role: role,
         }
       }
       return {
@@ -114,6 +119,7 @@ export default async function MembersPage({ params }: MembersPageProps) {
         avatar: null,
         isManager: managers.includes(memberId),
         isCreator: portfolio.user_id === memberId,
+        role: role,
       }
     })
   )
@@ -138,30 +144,67 @@ export default async function MembersPage({ params }: MembersPageProps) {
     }
   }
 
-  return (
-    <div className="bg-white shadow rounded-lg p-6">
-          {/* Header */}
-          <div className="mb-6">
-            <Link
-              href={getPortfolioUrl(portfolio.type, portfolio.id)}
-              className="text-blue-600 hover:text-blue-800 mb-4 inline-block"
-            >
-              <UIText>← Back to Portfolio</UIText>
-            </Link>
-            <Title as="h1" className="mb-2">Members</Title>
-            <UIText as="p">{basic.name}</UIText>
-          </div>
+  // Get subscriber details
+  const { data: subscriptions } = await supabase
+    .from('subscriptions')
+    .select('user_id')
+    .eq('portfolio_id', portfolio.id)
 
-          {/* Members List */}
-          <MembersPageClient
-            portfolioId={portfolio.id}
-            portfolioName={basic.name}
-            portfolioType={portfolio.type}
-            creatorInfo={creatorInfo}
-            memberDetails={memberDetails}
-            canManage={canManage}
-            currentUserId={user?.id}
-          />
+  const subscriberIds = (subscriptions || []).map((sub: any) => sub.user_id)
+  
+  const subscriberDetails = await Promise.all(
+    subscriberIds.map(async (subscriberId: string) => {
+      const { data: subscriberPortfolio } = await supabase
+        .from('portfolios')
+        .select('user_id, metadata')
+        .eq('user_id', subscriberId)
+        .eq('type', 'human')
+        .maybeSingle()
+
+      if (subscriberPortfolio) {
+        const subscriberMetadata = subscriberPortfolio.metadata as any
+        const subscriberBasic = subscriberMetadata?.basic || {}
+        return {
+          id: subscriberId,
+          username: subscriberMetadata?.username || null,
+          name: subscriberBasic.name || subscriberMetadata?.full_name || null,
+          avatar: subscriberBasic.avatar || subscriberMetadata?.avatar_url || null,
+        }
+      }
+      return {
+        id: subscriberId,
+        username: null,
+        name: null,
+        avatar: null,
+      }
+    })
+  )
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="mb-6">
+        <Link
+          href={getPortfolioUrl(portfolio.type, portfolio.id)}
+          className="text-blue-600 hover:text-blue-800 mb-4 inline-block"
+        >
+          <UIText>← Back to Portfolio</UIText>
+        </Link>
+        <Title as="h1" className="mb-2">Members</Title>
+        <UIText as="p">{basic.name}</UIText>
+      </div>
+
+      {/* Members List */}
+      <MembersPageClient
+        portfolioId={portfolio.id}
+        portfolioName={basic.name}
+        portfolioType={portfolio.type}
+        creatorInfo={creatorInfo}
+        memberDetails={memberDetails}
+        subscriberDetails={subscriberDetails}
+        canManage={canManage}
+        currentUserId={user?.id}
+      />
     </div>
   )
 }

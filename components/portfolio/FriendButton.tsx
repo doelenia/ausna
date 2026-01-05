@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button, UIText } from '@/components/ui'
+import { UserPlus, UserMinus, Check } from 'lucide-react'
 
 interface FriendButtonProps {
   friendId: string
@@ -135,6 +136,7 @@ export function FriendButton({
         variant="secondary"
         className={className}
       >
+        <UserMinus className="w-4 h-4 mr-2" strokeWidth={1.5} />
         <UIText>{isLoading ? '...' : 'Unfriend'}</UIText>
       </Button>
     )
@@ -147,6 +149,7 @@ export function FriendButton({
         variant="secondary"
         className={className}
       >
+        <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
         <UIText>Friend Request Sent</UIText>
       </Button>
     )
@@ -160,6 +163,7 @@ export function FriendButton({
         variant="success"
         className={className}
       >
+        <Check className="w-4 h-4 mr-2" strokeWidth={1.5} />
         <UIText>{isLoading ? '...' : 'Accept Invite'}</UIText>
       </Button>
     )
@@ -172,6 +176,7 @@ export function FriendButton({
       variant="primary"
       className={className}
     >
+      <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
       <UIText>{isLoading ? '...' : 'Friend'}</UIText>
     </Button>
   )

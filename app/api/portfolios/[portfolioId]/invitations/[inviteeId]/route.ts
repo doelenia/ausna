@@ -275,10 +275,21 @@ export async function PUT(
     // Add user to members array (avoid duplicates)
     const updatedMembers = members.includes(user.id) ? members : [...members, user.id]
 
+    // Get role from invitation (default to "Member")
+    const invitationRole = invitation.role || 'Member'
+    
+    // Update memberRoles in metadata
+    const currentMemberRoles = metadata?.memberRoles || {}
+    const updatedMemberRoles = {
+      ...currentMemberRoles,
+      [user.id]: invitationRole,
+    }
+
     // Update portfolio metadata - preserve all existing metadata structure
     const updatedMetadata = {
       ...metadata,
       members: updatedMembers,
+      memberRoles: updatedMemberRoles,
     }
 
     // Update portfolio using RPC function (bypasses RLS for the update)

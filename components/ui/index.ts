@@ -27,3 +27,9 @@ export type { TypographyProps, TypographyVariant } from './Typography'
 export { IconButton } from './IconButton'
 export type { IconButtonProps } from './IconButton'
 
+export { UserAvatar } from './UserAvatar'
+export type { UserAvatarProps } from './UserAvatar'
+
+export { Dropdown } from './Dropdown'
+export type { DropdownProps, DropdownItem } from './Dropdown'
+

@@ -9,6 +9,7 @@ import { PortfolioType } from '@/types/portfolio'
 import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
+import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { UIText, Button } from '@/components/ui'
 
 interface CreatePortfolioFormProps {
@@ -21,6 +22,9 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [selectedEmoji, setSelectedEmoji] = useState<string | null>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>('')
+  const [projectTypeSpecific, setProjectTypeSpecific] = useState<string>('')
+  const [creatorRole, setCreatorRole] = useState<string>('Creator')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -80,6 +84,21 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       return
     }
 
+    // Require project type
+    if (!projectTypeGeneral || !projectTypeSpecific) {
+      setError('Please select a project type')
+      return
+    }
+
+    // Validate creator role (max 2 words)
+    if (creatorRole.trim()) {
+      const words = creatorRole.trim().split(/\s+/)
+      if (words.length > 2) {
+        setError('Creator role must be 2 words or less')
+        return
+      }
+    }
+
     setLoading(true)
     setError(null)
 
@@ -95,6 +114,9 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       if (selectedEmoji) {
         formData.append('emoji', selectedEmoji)
       }
+      formData.append('project_type_general', projectTypeGeneral)
+      formData.append('project_type_specific', projectTypeSpecific)
+      formData.append('creator_role', creatorRole.trim() || 'Creator')
 
       const result = await createPortfolio(formData)
 
@@ -237,6 +259,39 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
         />
       </div>
 
+      {/* Project Type Selection */}
+      <div>
+        <ProjectTypeSelector
+          generalCategory={projectTypeGeneral}
+          specificType={projectTypeSpecific}
+          onSelect={(general, specific) => {
+            setProjectTypeGeneral(general)
+            setProjectTypeSpecific(specific)
+          }}
+          disabled={loading}
+        />
+      </div>
+
+      {/* Creator Role Input */}
+      <div>
+        <UIText as="label" htmlFor="creator_role" className="block mb-2">
+          Your Role <span className="text-gray-500">(optional, defaults to "Creator")</span>
+        </UIText>
+        <input
+          type="text"
+          id="creator_role"
+          value={creatorRole}
+          onChange={(e) => setCreatorRole(e.target.value)}
+          maxLength={50}
+          placeholder="Creator"
+          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          disabled={loading}
+        />
+        <UIText as="p" className="text-xs text-gray-500 mt-1">
+          Your role in this {type === 'projects' ? 'project' : 'community'} (max 2 words)
+        </UIText>
+      </div>
+
       {/* Error Message */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
@@ -250,7 +305,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           type="submit"
           variant="primary"
           fullWidth
-          disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji)}
+          disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji) || !projectTypeGeneral || !projectTypeSpecific}
         >
           <UIText>{loading ? 'Creating...' : 'Create Portfolio'}</UIText>
         </Button>

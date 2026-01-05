@@ -8,7 +8,7 @@ import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
-import { Title, Subtitle, Content, UIText, Card } from '@/components/ui'
+import { Title, Subtitle, Content, UIText, Card, UserAvatar } from '@/components/ui'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -182,7 +182,6 @@ export function NoteCard({
   }
 
   const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
-  const ownerAvatarUrl = ownerBasic?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(ownerBasic?.name || 'User')}&background=random`
   const ownerName = ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`
 
   const projectBasic = assignedProject ? getPortfolioBasic(assignedProject) : null
@@ -372,10 +371,12 @@ export function NoteCard({
                 onClick={(e) => e.stopPropagation()}
                 className="flex items-center gap-2 hover:opacity-80 transition-opacity"
               >
-                <img
-                  src={ownerAvatarUrl}
-                  alt={ownerName}
-                  className="h-8 w-8 rounded-full object-cover border-2 border-gray-300"
+                <UserAvatar
+                  userId={note.owner_account_id}
+                  name={ownerName}
+                  avatar={ownerBasic?.avatar}
+                  size={32}
+                  showLink={false}
                 />
                 <UIText as="span" className="hover:text-blue-600">
                   {ownerName}

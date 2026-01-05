@@ -223,6 +223,44 @@ export async function canAddToPinned(
 }
 
 /**
+ * Get project type from portfolio (server-side)
+ * Returns the specific type if available, otherwise null
+ */
+export function getProjectType(portfolio: Portfolio): string | null {
+  if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    return null
+  }
+  
+  const metadata = portfolio.metadata as any
+  return metadata?.project_type_specific || null
+}
+
+/**
+ * Get member role from portfolio (server-side)
+ * Returns the role for a specific user, or null if not set
+ */
+export function getMemberRole(portfolio: Portfolio, userId: string): string | null {
+  if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    return null
+  }
+  
+  const metadata = portfolio.metadata as any
+  const memberRoles = metadata?.memberRoles || {}
+  return memberRoles[userId] || null
+}
+
+/**
+ * Check if user can edit project type (server-side)
+ * Returns true if user is creator or manager
+ */
+export async function canEditProjectType(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  return await canEditPortfolio(portfolioId, userId)
+}
+
+/**
  * Client-side portfolio helpers
  */
 export function createPortfolioHelpers(supabase: SupabaseClient) {

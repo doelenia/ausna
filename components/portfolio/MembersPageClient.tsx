@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Title, Content, UIText, Button } from '@/components/ui'
+import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
 
 interface UserInfo {
   id: string
@@ -13,6 +13,7 @@ interface UserInfo {
   avatar: string | null
   isManager?: boolean
   isCreator?: boolean
+  role?: string | null
 }
 
 interface MembersPageClientProps {
@@ -21,6 +22,7 @@ interface MembersPageClientProps {
   portfolioType: string
   creatorInfo: UserInfo | null
   memberDetails: UserInfo[]
+  subscriberDetails: UserInfo[]
   canManage: boolean
   currentUserId?: string
 }
@@ -31,9 +33,11 @@ export function MembersPageClient({
   portfolioType,
   creatorInfo,
   memberDetails,
+  subscriberDetails,
   canManage,
   currentUserId,
 }: MembersPageClientProps) {
+  const [activeTab, setActiveTab] = useState<'members' | 'subscribers'>('members')
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<UserInfo[]>([])
   const [searching, setSearching] = useState(false)
@@ -41,9 +45,12 @@ export function MembersPageClient({
   const [invitingManager, setInvitingManager] = useState<string | null>(null)
   const [invitedManagers, setInvitedManagers] = useState<Set<string>>(new Set())
   const [removing, setRemoving] = useState<string | null>(null)
+  const [inviteRoleInputs, setInviteRoleInputs] = useState<{ [userId: string]: string }>({})
   const [members, setMembers] = useState(memberDetails)
   const [showCreatorTransfer, setShowCreatorTransfer] = useState(false)
   const [newCreatorId, setNewCreatorId] = useState<string>('')
+  const [editingRole, setEditingRole] = useState<string | null>(null)
+  const [roleInputs, setRoleInputs] = useState<{ [userId: string]: string }>({})
   const router = useRouter()
   
   // Filter members to separate creators, managers, and regular members
@@ -149,7 +156,7 @@ export function MembersPageClient({
     loadPendingInvitations()
   }, [portfolioId])
 
-  const handleInvite = async (userId: string) => {
+  const handleInvite = async (userId: string, role: string = 'Member') => {
     setInviting(userId)
     try {
       const response = await fetch(`/api/portfolios/${portfolioId}/members/invite`, {
@@ -157,7 +164,7 @@ export function MembersPageClient({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId, role }),
       })
 
       if (response.ok) {
@@ -258,6 +265,41 @@ export function MembersPageClient({
     }
   }
 
+  const handleRoleUpdate = async (userId: string, role: string) => {
+    // Validate role (max 2 words)
+    const words = role.trim().split(/\s+/)
+    if (words.length > 2) {
+      alert('Role must be 2 words or less')
+      return
+    }
+
+    try {
+      const response = await fetch(`/api/portfolios/${portfolioId}/members/${userId}/role`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ role: role.trim() || null }),
+      })
+
+      if (response.ok) {
+        // Update local state
+        setMembers(members.map(m => 
+          m.id === userId ? { ...m, role: role.trim() || null } : m
+        ))
+        setEditingRole(null)
+        setRoleInputs({ ...roleInputs, [userId]: '' })
+        router.refresh()
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to update role')
+      }
+    } catch (error) {
+      console.error('Error updating role:', error)
+      alert('Failed to update role')
+    }
+  }
+
   const handleCreatorTransfer = async () => {
     if (!newCreatorId) {
       alert('Please select a new creator')
@@ -306,8 +348,35 @@ export function MembersPageClient({
 
   return (
     <div>
-      {/* Invite Section - Only for managers */}
-      {canManage && (
+      {/* Tabs */}
+      <div className="flex gap-4 mb-6 border-b border-gray-200">
+        <button
+          onClick={() => setActiveTab('members')}
+          className={`pb-2 px-1 border-b-2 transition-colors ${
+            activeTab === 'members'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <UIText as="span">Members {allMembers.length > 0 && `(${allMembers.length})`}</UIText>
+        </button>
+        <button
+          onClick={() => setActiveTab('subscribers')}
+          className={`pb-2 px-1 border-b-2 transition-colors ${
+            activeTab === 'subscribers'
+              ? 'border-blue-600 text-blue-600'
+              : 'border-transparent text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <UIText as="span">Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
+        </button>
+      </div>
+
+      {/* Members Tab */}
+      {activeTab === 'members' && (
+        <>
+          {/* Invite Section - Only for managers */}
+          {canManage && (
         <div className="mb-8 pb-6 border-b border-gray-200">
           <UIText as="h2" className="mb-4">Invite Members</UIText>
           {isManager && (
@@ -350,13 +419,23 @@ export function MembersPageClient({
                       )}
                     </div>
                   </div>
-                  <Button
-                    variant="primary"
-                    onClick={() => handleInvite(user.id)}
-                    disabled={inviting === user.id}
-                  >
-                    <UIText>{inviting === user.id ? 'Sending...' : 'Invite'}</UIText>
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={inviteRoleInputs[user.id] || 'Member'}
+                      onChange={(e) => setInviteRoleInputs({ ...inviteRoleInputs, [user.id]: e.target.value })}
+                      placeholder="Role (max 2 words)"
+                      maxLength={50}
+                      className="px-2 py-1 text-sm border border-gray-300 rounded w-32"
+                    />
+                    <Button
+                      variant="primary"
+                      onClick={() => handleInvite(user.id, inviteRoleInputs[user.id] || 'Member')}
+                      disabled={inviting === user.id}
+                    >
+                      <UIText>{inviting === user.id ? 'Sending...' : 'Invite'}</UIText>
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -365,107 +444,210 @@ export function MembersPageClient({
           {searchQuery && !searching && searchResults.length === 0 && (
             <div className="mt-4"><UIText>No users found</UIText></div>
           )}
-        </div>
-      )}
+          </div>
+        )}
 
-      {/* Members Section - Combined List */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <UIText as="h2">
-            Members {allMembers.length > 0 && `(${allMembers.length})`}
-          </UIText>
-          {(isMember || isManager || isCreator) && currentUserId && (
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => handleRemove(currentUserId, true)}
-              disabled={removing === currentUserId}
-            >
-              <UIText>{removing === currentUserId ? 'Leaving...' : 'Leave'}</UIText>
-            </Button>
+        {/* Members Section - Combined List */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <UIText as="h2">
+              Members {allMembers.length > 0 && `(${allMembers.length})`}
+            </UIText>
+            {(isMember || isManager || isCreator) && currentUserId && (
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => handleRemove(currentUserId, true)}
+                disabled={removing === currentUserId}
+              >
+                <UIText>{removing === currentUserId ? 'Leaving...' : 'Leave'}</UIText>
+              </Button>
+            )}
+          </div>
+          {allMembers.length === 0 ? (
+            <div><UIText>No members yet</UIText></div>
+          ) : (
+            <div className="space-y-2">
+              {allMembers.map((member) => {
+                const memberIsCreator = member.isCreator || false
+                const memberIsManager = member.isManager || false
+                const bgColor = memberIsCreator 
+                  ? 'bg-blue-50' 
+                  : memberIsManager 
+                  ? 'bg-purple-50' 
+                  : 'bg-gray-50'
+                
+                return (
+                  <div
+                    key={member.id}
+                    className={`flex items-center justify-between p-3 ${bgColor} rounded-md`}
+                  >
+                    <Link
+                      href={`/portfolio/human/${member.id}`}
+                      className="flex items-center gap-3 hover:opacity-80"
+                    >
+                      <img
+                        src={getAvatarUrl(member)}
+                        alt={getDisplayName(member)}
+                        className="h-10 w-10 rounded-full"
+                      />
+                      <div>
+                        <UIText as="div">
+                          {getDisplayName(member)}
+                          {member.id === currentUserId && ' (You)'}
+                        </UIText>
+                        {member.username && (
+                          <UIText as="div">@{member.username}</UIText>
+                        )}
+                        {member.role && (
+                          <UIText as="div" className="text-gray-600 text-xs mt-1">
+                            {member.role}
+                          </UIText>
+                        )}
+                      </div>
+                    </Link>
+                    <div className="flex items-center gap-2">
+                      {memberIsCreator && (
+                        <UIText as="span" className="px-2 py-1 text-blue-600 bg-blue-100 rounded uppercase">
+                          Creator
+                        </UIText>
+                      )}
+                      {memberIsManager && !memberIsCreator && (
+                        <UIText as="span" className="px-2 py-1 text-purple-600 bg-purple-100 rounded uppercase">
+                          Manager
+                        </UIText>
+                      )}
+                      {/* Allow editing own role OR managers editing others */}
+                      {(member.id === currentUserId || canManage) && (
+                        <>
+                          {editingRole === member.id ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={roleInputs[member.id] || member.role || ''}
+                                onChange={(e) => setRoleInputs({ ...roleInputs, [member.id]: e.target.value })}
+                                placeholder="Role (max 2 words)"
+                                maxLength={50}
+                                className="px-2 py-1 text-sm border border-gray-300 rounded"
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    handleRoleUpdate(member.id, roleInputs[member.id] || '')
+                                  } else if (e.key === 'Escape') {
+                                    setEditingRole(null)
+                                    setRoleInputs({ ...roleInputs, [member.id]: '' })
+                                  }
+                                }}
+                                autoFocus
+                              />
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => handleRoleUpdate(member.id, roleInputs[member.id] || '')}
+                              >
+                                <UIText>Save</UIText>
+                              </Button>
+                              <Button
+                                variant="text"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingRole(null)
+                                  setRoleInputs({ ...roleInputs, [member.id]: '' })
+                                }}
+                              >
+                                <UIText>Cancel</UIText>
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="text"
+                              size="sm"
+                              onClick={() => {
+                                setEditingRole(member.id)
+                                setRoleInputs({ ...roleInputs, [member.id]: member.role || '' })
+                              }}
+                            >
+                              <UIText>{member.role ? 'Edit Role' : 'Set Role'}</UIText>
+                            </Button>
+                          )}
+                        </>
+                      )}
+                      {canManage && member.id !== currentUserId && !memberIsCreator && (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => handleRemove(member.id)}
+                          disabled={removing === member.id}
+                        >
+                          <UIText>{removing === member.id ? 'Removing...' : 'Remove'}</UIText>
+                        </Button>
+                      )}
+                      {isManager && member.id !== currentUserId && !memberIsCreator && !memberIsManager && (
+                        <Button
+                          variant="text"
+                          size="sm"
+                          onClick={() => handleInviteManager(member.id)}
+                          disabled={invitingManager === member.id || invitedManagers.has(member.id)}
+                        >
+                          <UIText>
+                          {invitingManager === member.id 
+                            ? 'Sending...' 
+                            : invitedManagers.has(member.id) 
+                            ? 'Invited' 
+                            : 'Make Manager'}
+                          </UIText>
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
-        {allMembers.length === 0 ? (
-          <div><UIText>No members yet</UIText></div>
-        ) : (
-          <div className="space-y-2">
-            {allMembers.map((member) => {
-              const memberIsCreator = member.isCreator || false
-              const memberIsManager = member.isManager || false
-              const bgColor = memberIsCreator 
-                ? 'bg-blue-50' 
-                : memberIsManager 
-                ? 'bg-purple-50' 
-                : 'bg-gray-50'
-              
-              return (
+      </>)}
+
+      {/* Subscribers Tab */}
+      {activeTab === 'subscribers' && (
+        <div>
+          <div className="mb-3">
+            <UIText as="h2">
+              Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}
+            </UIText>
+          </div>
+          {subscriberDetails.length === 0 ? (
+            <div><UIText>No subscribers yet</UIText></div>
+          ) : (
+            <div className="space-y-2">
+              {subscriberDetails.map((subscriber) => (
                 <div
-                  key={member.id}
-                  className={`flex items-center justify-between p-3 ${bgColor} rounded-md`}
+                  key={subscriber.id}
+                  className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
                 >
                   <Link
-                    href={`/portfolio/human/${member.id}`}
+                    href={`/portfolio/human/${subscriber.id}`}
                     className="flex items-center gap-3 hover:opacity-80"
                   >
                     <img
-                      src={getAvatarUrl(member)}
-                      alt={getDisplayName(member)}
+                      src={getAvatarUrl(subscriber)}
+                      alt={getDisplayName(subscriber)}
                       className="h-10 w-10 rounded-full"
                     />
                     <div>
                       <UIText as="div">
-                        {getDisplayName(member)}
-                        {member.id === currentUserId && ' (You)'}
+                        {getDisplayName(subscriber)}
+                        {subscriber.id === currentUserId && ' (You)'}
                       </UIText>
-                      {member.username && (
-                        <UIText as="div">@{member.username}</UIText>
+                      {subscriber.username && (
+                        <UIText as="div">@{subscriber.username}</UIText>
                       )}
                     </div>
                   </Link>
-                  <div className="flex items-center gap-2">
-                    {memberIsCreator && (
-                      <UIText as="span" className="px-2 py-1 text-blue-600 bg-blue-100 rounded uppercase">
-                        Creator
-                      </UIText>
-                    )}
-                    {memberIsManager && !memberIsCreator && (
-                      <UIText as="span" className="px-2 py-1 text-purple-600 bg-purple-100 rounded uppercase">
-                        Manager
-                      </UIText>
-                    )}
-                    {canManage && member.id !== currentUserId && !memberIsCreator && (
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => handleRemove(member.id)}
-                        disabled={removing === member.id}
-                      >
-                        <UIText>{removing === member.id ? 'Removing...' : 'Remove'}</UIText>
-                      </Button>
-                    )}
-                    {isManager && member.id !== currentUserId && !memberIsCreator && !memberIsManager && (
-                      <Button
-                        variant="text"
-                        size="sm"
-                        onClick={() => handleInviteManager(member.id)}
-                        disabled={invitingManager === member.id || invitedManagers.has(member.id)}
-                      >
-                        <UIText>
-                        {invitingManager === member.id 
-                          ? 'Sending...' 
-                          : invitedManagers.has(member.id) 
-                          ? 'Invited' 
-                          : 'Make Manager'}
-                        </UIText>
-                      </Button>
-                    )}
-                  </div>
                 </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Creator Transfer Dialog */}
       {showCreatorTransfer && (

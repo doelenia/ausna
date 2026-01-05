@@ -15,7 +15,7 @@ interface EligibleItem {
   text?: string
   avatar?: string
   slug?: string
-  role?: 'manager' | 'member' // Role of the current user in this portfolio (for human portfolios)
+  role?: string // Role of the current user in this portfolio (for human portfolios)
   isPinned: boolean
 }
 

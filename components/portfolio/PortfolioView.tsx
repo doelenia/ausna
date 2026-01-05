@@ -5,16 +5,15 @@ import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
 import { NotesFeed } from './NotesFeed'
-import { SubscribeButton } from './SubscribeButton'
-import { FriendButton } from './FriendButton'
+import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect } from 'react'
 import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Button, Title, Content, UIText } from '@/components/ui'
-import { Apple } from 'lucide-react'
+import { Button, Title, Content, UIText, UserAvatar } from '@/components/ui'
+import { Apple, ChevronRight } from 'lucide-react'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -37,8 +36,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [isMember, setIsMember] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
-  const [projects, setProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string; role?: string; projectType?: string | null }>>([])
   const [projectsLoading, setProjectsLoading] = useState(false)
+  const [memberAvatars, setMemberAvatars] = useState<Array<{ id: string; avatar?: string; name?: string }>>([])
+  const [memberAvatarsLoading, setMemberAvatarsLoading] = useState(false)
+  const [friends, setFriends] = useState<Array<{ id: string; avatar?: string; name?: string }>>([])
+  const [friendsLoading, setFriendsLoading] = useState(false)
+  const [totalMutualFriends, setTotalMutualFriends] = useState<number>(0)
   const router = useRouter()
   const supabase = createClient()
   
@@ -156,6 +160,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               name: p.name,
               avatar: p.avatar,
               emoji: projectMap.get(p.id),
+              role: p.role,
+              projectType: p.projectType,
             }))
             setProjects(projectData)
           } else {
@@ -171,6 +177,206 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
     fetchProjects()
   }, [portfolio.id, portfolio.type, authChecked, supabase])
+
+  // Fetch member avatars for projects
+  useEffect(() => {
+    const fetchMemberAvatars = async () => {
+      if (!isProjectPortfolio(portfolio)) {
+        return
+      }
+
+      setMemberAvatarsLoading(true)
+      try {
+        const metadata = portfolio.metadata as any
+        const allMemberIds = [
+          portfolio.user_id, // Creator
+          ...(metadata?.managers || []),
+          ...(metadata?.members || []),
+        ]
+        
+        // Remove duplicates
+        const uniqueMemberIds = Array.from(new Set(allMemberIds))
+        
+        if (uniqueMemberIds.length === 0) {
+          setMemberAvatars([])
+          setMemberAvatarsLoading(false)
+          return
+        }
+
+        // Fetch human portfolios for all members
+        const { data: memberPortfolios } = await supabase
+          .from('portfolios')
+          .select('user_id, metadata')
+          .eq('type', 'human')
+          .in('user_id', uniqueMemberIds)
+
+        const avatars = (memberPortfolios || []).map((p: any) => {
+          const memberMetadata = p.metadata as any
+          const memberBasic = memberMetadata?.basic || {}
+          return {
+            id: p.user_id,
+            avatar: memberBasic.avatar || memberMetadata?.avatar_url || null,
+            name: memberBasic.name || memberMetadata?.username || null,
+          }
+        })
+
+        setMemberAvatars(avatars)
+      } catch (error) {
+        console.error('Failed to fetch member avatars:', error)
+        setMemberAvatars([])
+      } finally {
+        setMemberAvatarsLoading(false)
+      }
+    }
+
+    fetchMemberAvatars()
+  }, [portfolio, supabase])
+
+  // Fetch friends for human portfolios
+  // For visitors: show mutual friends, for owner: show all friends
+  useEffect(() => {
+    const fetchFriends = async () => {
+      if (!isHumanPortfolio(portfolio)) {
+        return
+      }
+
+      // Wait for auth check to complete
+      if (!authChecked) {
+        return
+      }
+
+      setFriendsLoading(true)
+      try {
+        const isVisitor = currentUserId && currentUserId !== portfolio.user_id
+
+        if (isVisitor) {
+          // Fetch mutual friends for visitors
+          // Get current user's friends
+          const { data: currentUserFriendships } = await supabase
+            .from('friends')
+            .select('user_id, friend_id, status')
+            .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+            .eq('status', 'accepted')
+
+          if (!currentUserFriendships || currentUserFriendships.length === 0) {
+            setFriends([])
+            setTotalMutualFriends(0)
+            setFriendsLoading(false)
+            return
+          }
+
+          const currentUserFriendIds = new Set(
+            currentUserFriendships.map((f: any) => 
+              f.user_id === currentUserId ? f.friend_id : f.user_id
+            )
+          )
+
+          // Get portfolio owner's friends
+          const { data: ownerFriendships } = await supabase
+            .from('friends')
+            .select('user_id, friend_id, status')
+            .or(`user_id.eq.${portfolio.user_id},friend_id.eq.${portfolio.user_id}`)
+            .eq('status', 'accepted')
+
+          if (!ownerFriendships || ownerFriendships.length === 0) {
+            setFriends([])
+            setTotalMutualFriends(0)
+            setFriendsLoading(false)
+            return
+          }
+
+          const ownerFriendIds = ownerFriendships.map((f: any) => 
+            f.user_id === portfolio.user_id ? f.friend_id : f.user_id
+          )
+
+          // Find mutual friends
+          const mutualFriendIds = ownerFriendIds.filter((id: string) => 
+            currentUserFriendIds.has(id)
+          )
+
+          setTotalMutualFriends(mutualFriendIds.length)
+
+          if (mutualFriendIds.length === 0) {
+            setFriends([])
+            setFriendsLoading(false)
+            return
+          }
+
+          // Fetch mutual friend portfolios (limit to 5 for display)
+          const displayIds = mutualFriendIds.slice(0, 5)
+          const { data: friendPortfolios } = await supabase
+            .from('portfolios')
+            .select('user_id, metadata')
+            .eq('type', 'human')
+            .in('user_id', displayIds)
+
+          const friendData = (friendPortfolios || []).map((p: any) => {
+            const friendMetadata = p.metadata as any
+            const friendBasic = friendMetadata?.basic || {}
+            return {
+              id: p.user_id,
+              avatar: friendBasic.avatar || friendMetadata?.avatar_url || null,
+              name: friendBasic.name || friendMetadata?.username || null,
+            }
+          })
+
+          setFriends(friendData)
+        } else {
+          // For owner: show all friends
+          // First, get total count of all friendships (no limit)
+          const { data: allFriendships } = await supabase
+            .from('friends')
+            .select('user_id, friend_id, status')
+            .or(`user_id.eq.${portfolio.user_id},friend_id.eq.${portfolio.user_id}`)
+            .eq('status', 'accepted')
+
+          if (!allFriendships || allFriendships.length === 0) {
+            setFriends([])
+            setTotalMutualFriends(0)
+            setFriendsLoading(false)
+            return
+          }
+
+          // Set total friends count
+          const totalFriends = allFriendships.length
+          setTotalMutualFriends(totalFriends)
+
+          // Extract friend IDs (limit to 5 for display)
+          const allFriendIds = allFriendships.map((f: any) => 
+            f.user_id === portfolio.user_id ? f.friend_id : f.user_id
+          )
+          const displayFriendIds = allFriendIds.slice(0, 5)
+
+          // Fetch friend portfolios for display (only first 5)
+          const { data: friendPortfolios } = await supabase
+            .from('portfolios')
+            .select('user_id, metadata')
+            .eq('type', 'human')
+            .in('user_id', displayFriendIds)
+
+          const friendData = (friendPortfolios || []).map((p: any) => {
+            const friendMetadata = p.metadata as any
+            const friendBasic = friendMetadata?.basic || {}
+            return {
+              id: p.user_id,
+              avatar: friendBasic.avatar || friendMetadata?.avatar_url || null,
+              name: friendBasic.name || friendMetadata?.username || null,
+            }
+          })
+
+          setFriends(friendData)
+        }
+      } catch (error) {
+        console.error('Failed to fetch friends:', error)
+        setFriends([])
+        setTotalMutualFriends(0)
+      } finally {
+        setFriendsLoading(false)
+      }
+    }
+
+    fetchFriends()
+  }, [portfolio, supabase, currentUserId, authChecked])
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this portfolio? This action cannot be undone.')) {
@@ -210,6 +416,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const tabLabel = isHumanPortfolio(portfolio) ? 'Involvement' : 'Navigations'
 
   return (
+    <>
     <div className="bg-transparent rounded-lg p-6">
           {/* Header with avatar, name, description, and buttons */}
           <div className="mb-6">
@@ -256,74 +463,174 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )}
             </div>
 
-            {/* Name */}
-            <Title as="h1" className="mb-2">{basic.name}</Title>
+            {/* Name and Project Type */}
+            <div className="flex items-baseline gap-3 mb-2 flex-wrap">
+              <Title as="h1">{basic.name}</Title>
+              {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
+                const metadata = portfolio.metadata as any
+                const projectTypeSpecific = metadata?.project_type_specific
+                if (projectTypeSpecific) {
+                  return (
+                    <UIText className="text-gray-600">
+                      {projectTypeSpecific}
+                    </UIText>
+                  )
+                }
+                return null
+              })()}
+            </div>
 
             {/* Description */}
             {basic.description && (
               <Content className="mb-4">{basic.description}</Content>
             )}
 
-            {/* Buttons */}
-            <div className="flex flex-wrap items-center gap-2">
-              {authChecked &&
-                isAuthenticated &&
-                !isOwner &&
-                isHumanPortfolio(portfolio) && (
-                  <>
-                    <FriendButton friendId={portfolio.user_id} />
-                    <Button
-                      variant="success"
-                      asLink
-                      href={`/messages?userId=${portfolio.user_id}`}
-                    >
-                      <UIText>Message</UIText>
-                    </Button>
-                  </>
-                )}
-              {authChecked && isAuthenticated && !isOwner && (
-                <SubscribeButton portfolioId={portfolio.id} />
-              )}
-              {authChecked && isAuthenticated && (isOwner || isManager) && (
-                <>
-                  {isHumanPortfolio(portfolio) && isOwner && (
-                    <Button
-                      variant="secondary"
-                      asLink
-                      href={`/account/${portfolio.user_id}`}
-                    >
-                      <UIText>Account</UIText>
-                    </Button>
+            {/* Friends Section (for human portfolios only) - Under description, no title */}
+            {isHumanPortfolio(portfolio) && (() => {
+              if (friendsLoading) {
+                return (
+                  <div className="mb-4">
+                    <UIText className="text-gray-500">Loading friends...</UIText>
+                  </div>
+                )
+              }
+
+              if (friends.length === 0) {
+                return null
+              }
+
+              const isVisitor = currentUserId && currentUserId !== portfolio.user_id
+
+              return (
+                <div className="mb-4 flex items-center gap-2">
+                  {/* Show friends count */}
+                  {totalMutualFriends > 0 && (
+                    <UIText className="text-gray-600">
+                      {isVisitor 
+                        ? `${totalMutualFriends} mutual ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
+                        : `${totalMutualFriends} ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
+                      }
+                    </UIText>
                   )}
-                  {(isOwner || isManager) && (
+                  {friends.map((friend) => (
+                    <UserAvatar
+                      key={friend.id}
+                      userId={friend.id}
+                      name={friend.name}
+                      avatar={friend.avatar}
+                      size={32}
+                      href={`/portfolio/human/${friend.id}`}
+                    />
+                  ))}
+                  {/* More button */}
+                  <Link
+                    href={`/portfolio/human/${portfolio.user_id}/friends`}
+                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                    title={isVisitor ? "View all mutual friends" : "View all friends"}
+                  >
+                    <ChevronRight className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                  </Link>
+                </div>
+              )
+            })()}
+
+            {/* Members Section - Projects only */}
+            {isProjectPortfolio(portfolio) && (() => {
+              // Combine all members: creator, managers, members
+              const allMemberIds: string[] = []
+              
+              // Add creator
+              allMemberIds.push(portfolio.user_id)
+              
+              // Add managers (excluding creator)
+              managers.forEach((managerId: string) => {
+                if (managerId !== portfolio.user_id) {
+                  allMemberIds.push(managerId)
+                }
+              })
+              
+              // Add members (excluding creator and managers)
+              members.forEach((memberId: string) => {
+                if (memberId !== portfolio.user_id && !managers.includes(memberId)) {
+                  allMemberIds.push(memberId)
+                }
+              })
+              
+              // Only show section if there are members
+              if (allMemberIds.length === 0) {
+                return null
+              }
+              
+              return (
+                <div className="mb-4 flex items-center gap-2">
+                  {memberAvatarsLoading ? (
+                    <UIText className="text-gray-500">Loading members...</UIText>
+                  ) : (
                     <>
-                      <Button
-                        variant="secondary"
-                        asLink
-                        href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/pinned`}
-                      >
-                        <UIText>Edit Pinned</UIText>
-                      </Button>
-                      <Button
-                        variant="primary"
-                        onClick={() => setIsEditing(true)}
-                      >
-                        <UIText>Edit</UIText>
-                      </Button>
+                      {(() => {
+                        // Create member info array with avatars
+                        const memberInfo = allMemberIds.map((memberId: string) => {
+                          const avatarInfo = memberAvatars.find(m => m.id === memberId)
+                          return {
+                            id: memberId,
+                            avatar: avatarInfo?.avatar || null,
+                            name: avatarInfo?.name || null,
+                          }
+                        })
+                        
+                        // Sort: current user first if they're a member
+                        const sortedMembers = [...memberInfo].sort((a, b) => {
+                          if (currentUserId && a.id === currentUserId) return -1
+                          if (currentUserId && b.id === currentUserId) return 1
+                          return 0
+                        })
+                        
+                        // Limit to 5
+                        const displayMembers = sortedMembers.slice(0, 5)
+                        
+                        return (
+                          <>
+                            {displayMembers.map((member) => (
+                              <UserAvatar
+                                key={member.id}
+                                userId={member.id}
+                                name={member.name}
+                                avatar={member.avatar}
+                                size={32}
+                                href={`/portfolio/human/${member.id}`}
+                              />
+                            ))}
+                            {/* More button */}
+                            <Link
+                              href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
+                              className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+                              title="View all members"
+                            >
+                              <ChevronRight className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                            </Link>
+                          </>
+                        )
+                      })()}
                     </>
                   )}
-                  {/* Delete button only for creator */}
-                  {!isHumanPortfolio(portfolio) && isOwner && (
-                    <Button
-                      variant="danger"
-                      onClick={handleDelete}
-                      disabled={isDeleting}
-                    >
-                      <UIText>{isDeleting ? 'Deleting...' : 'Delete'}</UIText>
-                    </Button>
-                  )}
-                </>
-              )}
+                </div>
+              )
+            })()}
+
+            {/* Buttons */}
+            <div className="mb-12">
+              <PortfolioActions
+                portfolio={portfolio}
+                isOwner={isOwner}
+                isManager={isManager}
+                isMember={isMember}
+                isAuthenticated={isAuthenticated}
+                authChecked={authChecked}
+                currentUserId={currentUserId}
+                onEdit={() => setIsEditing(true)}
+                onDelete={handleDelete}
+                isDeleting={isDeleting}
+              />
             </div>
           </div>
 
@@ -334,13 +641,16 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
                 <UIText>Involvement</UIText>
               </div>
-              <div className="flex items-start gap-12 overflow-x-auto pt-2 pb-2">
+              <div className="flex items-start gap-8 overflow-x-auto pt-2 pb-2">
                 {projectsLoading ? (
                   <UIText className="text-gray-500">Loading projects...</UIText>
                 ) : (
                   <>
                     {projects.map((project) => (
-                      <div key={project.id} className="flex flex-col items-center gap-4 flex-shrink-0">
+                      <div
+                        key={project.id}
+                        className="flex flex-col items-center gap-4 flex-shrink-0 px-4"
+                      >
                         <StickerAvatar
                           src={project.avatar}
                           alt={project.name}
@@ -350,9 +660,21 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                           emoji={project.emoji}
                           name={project.name}
                         />
-                        <UIText className="text-center max-w-[96px] truncate" title={project.name}>
-                          {project.name}
-                        </UIText>
+                        <div className="flex flex-col items-center gap-1">
+                          <Content
+                            className="text-center max-w-[140px] line-clamp-2"
+                            title={project.name}
+                          >
+                            {project.name}
+                          </Content>
+                          {(project.projectType || project.role) && (
+                            <UIText className="text-center max-w-[140px] truncate text-gray-600">
+                              {project.projectType && project.role
+                                ? `${project.projectType} · ${project.role}`
+                                : project.projectType || project.role}
+                            </UIText>
+                          )}
+                        </div>
                       </div>
                     ))}
                     {/* Create Project Button - Only visible to owner */}
@@ -409,98 +731,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
           )}
 
-          {/* Create Note Button - Show only for projects, if user is member/owner */}
-          {authChecked && isAuthenticated && (isOwner || isMember) && isProjectPortfolio(portfolio) && (
-            <div className="mb-6 pb-6">
-              <Button
-                variant="primary"
-                asLink
-                href={`/notes/create?portfolio=${portfolio.id}`}
-              >
-                <UIText>Create Note</UIText>
-              </Button>
-            </div>
-          )}
 
-          {/* Members and Managers (for projects and communities) */}
-          {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <UIText as="h2">Members</UIText>
-                <Link
-                  href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
-                  className="text-blue-600 hover:text-blue-800"
-                >
-                  <UIText>View All →</UIText>
-                </Link>
-              </div>
-              
-              {/* Creator */}
-              <div className="mb-4">
-                <UIText as="h3" className="mb-2">Creator</UIText>
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    href={`/portfolio/human/${portfolio.user_id}`}
-                    className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
-                  >
-                    <UIText>{portfolio.user_id === currentUserId ? 'You (Creator)' : `User ${portfolio.user_id.slice(0, 8)} (Creator)`}</UIText>
-                  </Link>
-                </div>
-              </div>
-
-              {/* Managers */}
-              {managers.length > 0 && (
-                <div className="mb-4">
-                  <UIText as="h3" className="mb-2">Managers</UIText>
-                  <div className="flex flex-wrap gap-2">
-                    {managers
-                      .filter((managerId: string) => managerId !== portfolio.user_id) // Don't show creator in managers list
-                      .slice(0, 5) // Show only first 5
-                      .map((managerId: string) => (
-                        <Link
-                          key={managerId}
-                          href={`/portfolio/human/${managerId}`}
-                          className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
-                        >
-                          <UIText>{managerId === currentUserId ? 'You (Manager)' : `User ${managerId.slice(0, 8)} (Manager)`}</UIText>
-                        </Link>
-                      ))}
-                    {managers.filter((managerId: string) => managerId !== portfolio.user_id).length > 5 && (
-                      <UIText as="span" className="px-3 py-1">
-                        +{managers.filter((managerId: string) => managerId !== portfolio.user_id).length - 5} more
-                      </UIText>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Members */}
-              {members.length > 0 && (
-                <div>
-                  <UIText as="h3" className="mb-2">Members</UIText>
-                  <div className="flex flex-wrap gap-2">
-                    {members
-                      .filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)) // Don't show creator or managers in members list
-                      .slice(0, 5) // Show only first 5
-                      .map((memberId: string) => (
-                        <Link
-                          key={memberId}
-                          href={`/portfolio/human/${memberId}`}
-                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
-                        >
-                          <UIText>{memberId === currentUserId ? 'You' : `User ${memberId.slice(0, 8)}`}</UIText>
-                        </Link>
-                      ))}
-                    {members.filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)).length > 5 && (
-                      <UIText as="span" className="px-3 py-1">
-                        +{members.filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)).length - 5} more
-                      </UIText>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Notes Feed (combines pinned notes with regular notes) */}
           <NotesFeed
@@ -510,5 +741,6 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             canCreateNote={canCreateNote}
           />
         </div>
+    </>
   )
 }

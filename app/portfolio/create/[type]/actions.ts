@@ -24,6 +24,9 @@ export async function createPortfolio(
     const name = formData.get('name') as string
     const avatarFile = formData.get('avatar') as File | null
     const emoji = formData.get('emoji') as string | null
+    const projectTypeGeneral = formData.get('project_type_general') as string
+    const projectTypeSpecific = formData.get('project_type_specific') as string
+    const creatorRole = formData.get('creator_role') as string || 'Creator'
 
     // Validate type
     if (type !== 'projects' && type !== 'community') {
@@ -49,6 +52,25 @@ export async function createPortfolio(
       return {
         success: false,
         error: 'Portfolio name is required',
+      }
+    }
+
+    // Validate project type
+    if (!projectTypeGeneral || !projectTypeSpecific) {
+      return {
+        success: false,
+        error: 'Project type is required',
+      }
+    }
+
+    // Validate creator role (max 2 words)
+    if (creatorRole.trim()) {
+      const words = creatorRole.trim().split(/\s+/)
+      if (words.length > 2) {
+        return {
+          success: false,
+          error: 'Creator role must be 2 words or less',
+        }
       }
     }
 
@@ -94,6 +116,11 @@ export async function createPortfolio(
       settings: {},
       members: [user.id], // Creator is automatically a member
       managers: [user.id], // Creator is automatically a manager
+      project_type_general: projectTypeGeneral,
+      project_type_specific: projectTypeSpecific,
+      memberRoles: {
+        [user.id]: creatorRole.trim() || 'Creator',
+      },
     }
 
     // Create portfolio

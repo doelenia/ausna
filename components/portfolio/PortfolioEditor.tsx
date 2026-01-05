@@ -8,6 +8,8 @@ import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { updatePortfolio } from '@/app/portfolio/[type]/[id]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
+import { ProjectTypeSelector } from './ProjectTypeSelector'
+import { isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
 import { Title, UIText, Button } from '@/components/ui'
 
 interface PortfolioEditorProps {
@@ -25,6 +27,8 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
   const [avatarPreview, setAvatarPreview] = useState<string | null>(basic.avatar || null)
   const [selectedEmoji, setSelectedEmoji] = useState<string | null>(metadata?.basic?.emoji || null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>(metadata?.project_type_general || '')
+  const [projectTypeSpecific, setProjectTypeSpecific] = useState<string>(metadata?.project_type_specific || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -91,8 +95,17 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
         return
       }
       
-      // Verify ownership
-      if (portfolio.user_id !== user.id) {
+      // Verify ownership or manager status (for project/community portfolios)
+      const isOwner = portfolio.user_id === user.id
+      let isManager = false
+      
+      if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) {
+        const portfolioMetadata = portfolio.metadata as any
+        const managers = portfolioMetadata?.managers || []
+        isManager = Array.isArray(managers) && managers.includes(user.id)
+      }
+      
+      if (!isOwner && !isManager) {
         setError('You do not have permission to edit this portfolio')
         setLoading(false)
         return
@@ -119,8 +132,17 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
         return
       }
       
-      // Verify ownership one more time before submitting
-      if (portfolio.user_id !== currentUser.id) {
+      // Verify ownership or manager status one more time before submitting
+      const isOwner = portfolio.user_id === currentUser.id
+      let isManager = false
+      
+      if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) {
+        const portfolioMetadata = portfolio.metadata as any
+        const managers = portfolioMetadata?.managers || []
+        isManager = Array.isArray(managers) && managers.includes(currentUser.id)
+      }
+      
+      if (!isOwner && !isManager) {
         setError('You do not have permission to edit this portfolio')
         setLoading(false)
         return
@@ -149,6 +171,10 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       } else if (!avatarFile && !basic.avatar) {
         // If removing both image and emoji, send empty string to clear emoji
         formData.append('emoji', '')
+      }
+      if (projectTypeGeneral && projectTypeSpecific) {
+        formData.append('project_type_general', projectTypeGeneral)
+        formData.append('project_type_specific', projectTypeSpecific)
       }
 
       const result = await updatePortfolio(formData)
@@ -301,6 +327,21 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
                 disabled={loading}
               />
             </div>
+
+            {/* Project Type Selection (for projects and communities only) */}
+            {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
+              <div>
+                <ProjectTypeSelector
+                  generalCategory={projectTypeGeneral}
+                  specificType={projectTypeSpecific}
+                  onSelect={(general, specific) => {
+                    setProjectTypeGeneral(general)
+                    setProjectTypeSpecific(specific)
+                  }}
+                  disabled={loading}
+                />
+              </div>
+            )}
 
             {/* Error Message */}
             {error && (

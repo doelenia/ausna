@@ -21,7 +21,19 @@ export async function POST(
     }
 
     const { portfolioId } = params
-    const { userId } = await request.json()
+    const { userId, role } = await request.json()
+    const memberRole = role && typeof role === 'string' && role.trim() ? role.trim() : 'Member'
+    
+    // Validate role (max 2 words)
+    if (memberRole !== 'Member') {
+      const words = memberRole.split(/\s+/)
+      if (words.length > 2) {
+        return NextResponse.json(
+          { error: 'Role must be 2 words or less' },
+          { status: 400 }
+        )
+      }
+    }
 
     if (!userId) {
       return NextResponse.json(
@@ -121,6 +133,8 @@ export async function POST(
         inviter_id: user.id,
         invitee_id: userId,
         status: 'pending',
+        invitation_type: 'member',
+        role: memberRole,
       })
       .select()
       .single()

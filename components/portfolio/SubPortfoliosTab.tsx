@@ -11,7 +11,7 @@ interface SubPortfolio {
   name: string
   avatar?: string
   slug: string
-  role?: 'manager' | 'member' // Role of the current user in this portfolio
+  role?: string // Role of the current user in this portfolio
 }
 
 interface SubPortfoliosTabProps {
