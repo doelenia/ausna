@@ -25,3 +25,4 @@ WHERE metadata->'pinned' IS NOT NULL
 -- Step 3: Update the comment to reflect the new structure
 COMMENT ON COLUMN portfolios.metadata IS 'Portfolio metadata with structure: {basic: {name, description, avatar}, pinned: [{type: "portfolio"|"note", id: string}], settings: {}, members?: [], hosts?: []}';
 
+

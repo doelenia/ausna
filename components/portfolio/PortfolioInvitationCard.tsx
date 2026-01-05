@@ -58,13 +58,6 @@ export function PortfolioInvitationCard({ portfolio, isSent = false }: Portfolio
         <div className="flex-1 p-3">
           <div className="flex items-start justify-between">
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-semibold uppercase ${
-                  isSent ? 'text-blue-600' : 'text-gray-600'
-                }`}>
-                  {portfolio.type === 'projects' ? 'Project' : 'Community'}
-                </span>
-              </div>
               <h3 className={`font-semibold truncate ${
                 isSent ? 'text-blue-900' : 'text-gray-900'
               }`}>

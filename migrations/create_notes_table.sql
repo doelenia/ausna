@@ -61,3 +61,4 @@ COMMENT ON TABLE notes IS 'Notes created by users, can be assigned to portfolios
 COMMENT ON COLUMN notes.references IS 'Array of reference objects (images or URLs) stored as JSONB';
 COMMENT ON COLUMN notes.assigned_portfolios IS 'Array of portfolio IDs where this note is assigned';
 
+

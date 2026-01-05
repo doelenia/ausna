@@ -3,6 +3,7 @@ import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { isValidPortfolioType } from '@/lib/portfolio/routes'
 import { notFound, redirect } from 'next/navigation'
 import { CreatePortfolioForm } from '@/components/portfolio/CreatePortfolioForm'
+import { Title } from '@/components/ui'
 
 interface CreatePortfolioPageProps {
   params: {
@@ -38,9 +39,9 @@ export default async function CreatePortfolioPage({
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
-            <h1 className="text-3xl font-bold mb-6">
+            <Title as="h1" className="mb-6">
               Create {type === 'projects' ? 'Project' : 'Community'} Portfolio
-            </h1>
+            </Title>
           <CreatePortfolioForm type={type} />
         </div>
   )

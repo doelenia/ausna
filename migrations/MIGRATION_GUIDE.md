@@ -121,3 +121,4 @@ If you need to rollback:
 - The human portfolio slug is auto-generated as `user-{user_id}` but can be customized
 - All existing profile data is preserved in the portfolio `metadata` field
 
+

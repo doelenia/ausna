@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { Title, Content, UIText, Button } from '@/components/ui'
 
 interface UserInfo {
   id: string
@@ -308,11 +309,11 @@ export function MembersPageClient({
       {/* Invite Section - Only for managers */}
       {canManage && (
         <div className="mb-8 pb-6 border-b border-gray-200">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Invite Members</h2>
+          <UIText as="h2" className="mb-4">Invite Members</UIText>
           {isManager && (
-            <p className="text-sm text-gray-600 mb-4">
+            <UIText as="p" className="mb-4">
               As a manager, you can also promote existing members to managers using the "Make Manager" button next to each member.
-            </p>
+            </UIText>
           )}
           <div className="relative">
             <input
@@ -323,14 +324,14 @@ export function MembersPageClient({
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             {searching && (
-              <div className="absolute right-3 top-2.5 text-gray-400">Searching...</div>
+              <div className="absolute right-3 top-2.5"><UIText>Searching...</UIText></div>
             )}
           </div>
 
           {/* Search Results */}
           {searchResults.length > 0 && (
             <div className="mt-4 space-y-2">
-              <h3 className="text-sm font-medium text-gray-700">Search Results</h3>
+              <UIText as="h3">Search Results</UIText>
               {searchResults.map((user) => (
                 <div
                   key={user.id}
@@ -343,26 +344,26 @@ export function MembersPageClient({
                       className="h-10 w-10 rounded-full"
                     />
                     <div>
-                      <div className="font-medium">{getDisplayName(user)}</div>
+                      <UIText as="div">{getDisplayName(user)}</UIText>
                       {user.username && (
-                        <div className="text-sm text-gray-500">@{user.username}</div>
+                        <UIText as="div">@{user.username}</UIText>
                       )}
                     </div>
                   </div>
-                  <button
+                  <Button
+                    variant="primary"
                     onClick={() => handleInvite(user.id)}
                     disabled={inviting === user.id}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
                   >
-                    {inviting === user.id ? 'Sending...' : 'Invite'}
-                  </button>
+                    <UIText>{inviting === user.id ? 'Sending...' : 'Invite'}</UIText>
+                  </Button>
                 </div>
               ))}
             </div>
           )}
 
           {searchQuery && !searching && searchResults.length === 0 && (
-            <div className="mt-4 text-sm text-gray-500">No users found</div>
+            <div className="mt-4"><UIText>No users found</UIText></div>
           )}
         </div>
       )}
@@ -370,21 +371,22 @@ export function MembersPageClient({
       {/* Members Section - Combined List */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-medium text-gray-900">
+          <UIText as="h2">
             Members {allMembers.length > 0 && `(${allMembers.length})`}
-          </h2>
+          </UIText>
           {(isMember || isManager || isCreator) && currentUserId && (
-            <button
+            <Button
+              variant="danger"
+              size="sm"
               onClick={() => handleRemove(currentUserId, true)}
               disabled={removing === currentUserId}
-              className="px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-md disabled:opacity-50 transition-colors border border-red-600"
             >
-              {removing === currentUserId ? 'Leaving...' : 'Leave'}
-            </button>
+              <UIText>{removing === currentUserId ? 'Leaving...' : 'Leave'}</UIText>
+            </Button>
           )}
         </div>
         {allMembers.length === 0 ? (
-          <div className="text-gray-500 text-sm">No members yet</div>
+          <div><UIText>No members yet</UIText></div>
         ) : (
           <div className="space-y-2">
             {allMembers.map((member) => {
@@ -411,47 +413,51 @@ export function MembersPageClient({
                       className="h-10 w-10 rounded-full"
                     />
                     <div>
-                      <div className="font-medium">
+                      <UIText as="div">
                         {getDisplayName(member)}
                         {member.id === currentUserId && ' (You)'}
-                      </div>
+                      </UIText>
                       {member.username && (
-                        <div className="text-sm text-gray-500">@{member.username}</div>
+                        <UIText as="div">@{member.username}</UIText>
                       )}
                     </div>
                   </Link>
                   <div className="flex items-center gap-2">
                     {memberIsCreator && (
-                      <span className="px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-100 rounded uppercase">
+                      <UIText as="span" className="px-2 py-1 text-blue-600 bg-blue-100 rounded uppercase">
                         Creator
-                      </span>
+                      </UIText>
                     )}
                     {memberIsManager && !memberIsCreator && (
-                      <span className="px-2 py-1 text-xs font-semibold text-purple-600 bg-purple-100 rounded uppercase">
+                      <UIText as="span" className="px-2 py-1 text-purple-600 bg-purple-100 rounded uppercase">
                         Manager
-                      </span>
+                      </UIText>
                     )}
                     {canManage && member.id !== currentUserId && !memberIsCreator && (
-                      <button
+                      <Button
+                        variant="danger"
+                        size="sm"
                         onClick={() => handleRemove(member.id)}
                         disabled={removing === member.id}
-                        className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded disabled:opacity-50 transition-colors"
                       >
-                        {removing === member.id ? 'Removing...' : 'Remove'}
-                      </button>
+                        <UIText>{removing === member.id ? 'Removing...' : 'Remove'}</UIText>
+                      </Button>
                     )}
                     {isManager && member.id !== currentUserId && !memberIsCreator && !memberIsManager && (
-                      <button
+                      <Button
+                        variant="text"
+                        size="sm"
                         onClick={() => handleInviteManager(member.id)}
                         disabled={invitingManager === member.id || invitedManagers.has(member.id)}
-                        className="px-3 py-1 text-sm text-purple-600 hover:bg-purple-50 rounded disabled:opacity-50 transition-colors"
                       >
+                        <UIText>
                         {invitingManager === member.id 
                           ? 'Sending...' 
                           : invitedManagers.has(member.id) 
                           ? 'Invited' 
                           : 'Make Manager'}
-                      </button>
+                        </UIText>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -465,14 +471,14 @@ export function MembersPageClient({
       {showCreatorTransfer && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Transfer Creator</h3>
-            <p className="text-gray-600 mb-4">
+            <Title as="h3" className="mb-4">Transfer Creator</Title>
+            <UIText as="p" className="mb-4">
               You are the creator. Please select a new creator before removing yourself as manager.
-            </p>
+            </UIText>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <UIText as="label" className="block mb-2">
                 Select New Creator
-              </label>
+              </UIText>
               <select
                 value={newCreatorId}
                 onChange={(e) => setNewCreatorId(e.target.value)}
@@ -489,22 +495,22 @@ export function MembersPageClient({
               </select>
             </div>
             <div className="flex gap-3 justify-end">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowCreatorTransfer(false)
                   setNewCreatorId('')
                 }}
-                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 transition-colors"
               >
-                Cancel
-              </button>
-              <button
+                <UIText>Cancel</UIText>
+              </Button>
+              <Button
+                variant="danger"
                 onClick={handleCreatorTransfer}
                 disabled={!newCreatorId || removing === currentUserId}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
               >
-                {removing === currentUserId ? 'Transferring...' : 'Transfer & Remove'}
-              </button>
+                <UIText>{removing === currentUserId ? 'Transferring...' : 'Transfer & Remove'}</UIText>
+              </Button>
             </div>
           </div>
         </div>

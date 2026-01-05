@@ -6,6 +6,9 @@ import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { updatePortfolio } from '@/app/portfolio/[type]/[id]/actions'
+import { EmojiPicker } from './EmojiPicker'
+import { StickerAvatar } from './StickerAvatar'
+import { Title, UIText, Button } from '@/components/ui'
 
 interface PortfolioEditorProps {
   portfolio: Portfolio
@@ -15,10 +18,13 @@ interface PortfolioEditorProps {
 
 export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditorProps) {
   const basic = getPortfolioBasic(portfolio)
+  const metadata = portfolio.metadata as any
   const [name, setName] = useState(basic.name)
   const [description, setDescription] = useState(basic.description || '')
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(basic.avatar || null)
+  const [selectedEmoji, setSelectedEmoji] = useState<string | null>(metadata?.basic?.emoji || null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -39,6 +45,7 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       }
 
       setAvatarFile(file)
+      setSelectedEmoji(null) // Clear emoji when image is selected
       setError(null)
 
       const reader = new FileReader()
@@ -47,6 +54,16 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       }
       reader.readAsDataURL(file)
     }
+  }
+
+  const handleEmojiSelect = (emoji: string) => {
+    setSelectedEmoji(emoji)
+    setAvatarFile(null) // Clear image when emoji is selected
+    setAvatarPreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+    setError(null)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,6 +144,12 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       if (avatarFile) {
         formData.append('avatar', avatarFile)
       }
+      if (selectedEmoji) {
+        formData.append('emoji', selectedEmoji)
+      } else if (!avatarFile && !basic.avatar) {
+        // If removing both image and emoji, send empty string to clear emoji
+        formData.append('emoji', '')
+      }
 
       const result = await updatePortfolio(formData)
 
@@ -149,82 +172,108 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white shadow rounded-lg p-6">
-          <h2 className="text-2xl font-bold mb-6">Edit Portfolio</h2>
-          
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Avatar Upload */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Avatar
-              </label>
-              <div className="flex items-center gap-4">
-                <div className="flex-shrink-0">
-                  {avatarPreview ? (
-                    <img
-                      src={avatarPreview}
-                      alt="Avatar preview"
-                      className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
-                    />
-                  ) : (
-                    <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
-                      <svg
-                        className="h-8 w-8 text-gray-400"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
+    <>
+      {showEmojiPicker && (
+        <EmojiPicker
+          selectedEmoji={selectedEmoji}
+          onSelect={handleEmojiSelect}
+          onClose={() => setShowEmojiPicker(false)}
+        />
+      )}
+      <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white shadow rounded-lg p-6">
+            <Title as="h2" className="mb-6">Edit Portfolio</Title>
+            
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Avatar Upload or Emoji Selection */}
+              <div>
+                <UIText as="label" className="block mb-2">
+                  Avatar
+                </UIText>
+                <div className="flex items-center gap-4">
+                  <div className="flex-shrink-0">
+                    {avatarPreview ? (
+                      <img
+                        src={avatarPreview}
+                        alt="Avatar preview"
+                        className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
+                      />
+                    ) : selectedEmoji ? (
+                      <StickerAvatar
+                        alt={name || 'Preview'}
+                        type={portfolio.type}
+                        size={80}
+                        emoji={selectedEmoji}
+                      />
+                    ) : (
+                      <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
+                        <svg
+                          className="h-8 w-8 text-gray-400"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                          />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => fileInputRef.current?.click()}
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                        />
-                      </svg>
+                        <UIText>{avatarPreview ? 'Change Image' : 'Upload Image'}</UIText>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setShowEmojiPicker(true)}
+                      >
+                        <UIText>{selectedEmoji ? 'Change Emoji' : 'Select Emoji'}</UIText>
+                      </Button>
                     </div>
-                  )}
-                </div>
-                <div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {avatarPreview ? 'Change Avatar' : 'Upload Avatar'}
-                  </button>
-                  {avatarFile && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAvatarFile(null)
-                        setAvatarPreview(basic.avatar || null)
-                        if (fileInputRef.current) {
-                          fileInputRef.current.value = ''
-                        }
-                      }}
-                      className="ml-2 px-4 py-2 text-sm text-red-600 hover:text-red-700"
-                    >
-                      Remove
-                    </button>
-                  )}
+                    {(avatarFile || selectedEmoji || basic.avatar || metadata?.basic?.emoji) && (
+                      <Button
+                        type="button"
+                        variant="text"
+                        onClick={() => {
+                          setAvatarFile(null)
+                          setAvatarPreview(basic.avatar || null)
+                          setSelectedEmoji(metadata?.basic?.emoji || null)
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = ''
+                          }
+                        }}
+                        className="text-left px-0 py-1 text-red-600"
+                      >
+                        <UIText>Remove</UIText>
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
             {/* Name Input */}
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
+              <UIText as="label" htmlFor="name" className="block mb-2">
                 Name <span className="text-red-500">*</span>
-              </label>
+              </UIText>
               <input
                 type="text"
                 id="name"
@@ -239,9 +288,9 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
 
             {/* Description Input */}
             <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+              <UIText as="label" htmlFor="description" className="block mb-2">
                 Description
-              </label>
+              </UIText>
               <textarea
                 id="description"
                 value={description}
@@ -256,32 +305,34 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
             {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-                {error}
+                <UIText>{error}</UIText>
               </div>
             )}
 
             {/* Submit Buttons */}
             <div className="flex gap-4">
-              <button
+              <Button
                 type="submit"
+                variant="primary"
+                fullWidth
                 disabled={loading || !name.trim()}
-                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {loading ? 'Saving...' : 'Save Changes'}
-              </button>
-              <button
+                <UIText>{loading ? 'Saving...' : 'Save Changes'}</UIText>
+              </Button>
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={onCancel}
                 disabled={loading}
-                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50"
               >
-                Cancel
-              </button>
+                <UIText>Cancel</UIText>
+              </Button>
             </div>
           </form>
         </div>
       </div>
     </div>
+    </>
   )
 }
 

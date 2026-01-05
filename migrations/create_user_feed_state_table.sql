@@ -40,3 +40,4 @@ COMMENT ON COLUMN user_feed_state.user_id IS 'The user this feed state belongs t
 COMMENT ON COLUMN user_feed_state.bloom_filter_data IS 'Serialized bloom filter data as JSONB';
 COMMENT ON COLUMN user_feed_state.last_updated IS 'Timestamp of last update to the bloom filter';
 
+

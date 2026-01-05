@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Note } from '@/types/note'
 import { NoteCard } from '@/components/notes/NoteCard'
 import { FeedTabs, FeedType } from './FeedTabs'
+import { Button, Content, UIText } from '@/components/ui'
 
 interface FeedViewProps {
   currentUserId?: string
@@ -154,8 +155,8 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           activeCommunityId={activeCommunityId}
           onFeedChange={handleFeedChange}
         />
-        <div className="text-center text-gray-500 py-12">
-          <p>Loading feed...</p>
+        <div className="text-center py-12">
+          <UIText>Loading feed...</UIText>
         </div>
       </>
     )
@@ -170,18 +171,19 @@ export function FeedView({ currentUserId }: FeedViewProps) {
       />
       <div>
           {error ? (
-            <div className="text-center text-red-500 py-12">
-              <p>{error}</p>
-              <button
+            <div className="text-center py-12">
+              <UIText className="text-red-500">{error}</UIText>
+              <Button
+                variant="primary"
                 onClick={() => loadNotes(true)}
-                className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                className="mt-4"
               >
-                Retry
-              </button>
+                <UIText>Retry</UIText>
+              </Button>
             </div>
           ) : notes.length === 0 ? (
-            <div className="text-center text-gray-500 py-12">
-              <p>No posts yet.</p>
+            <div className="text-center py-12">
+              <UIText>No posts yet.</UIText>
             </div>
           ) : (
             <>
@@ -201,15 +203,15 @@ export function FeedView({ currentUserId }: FeedViewProps) {
 
               {/* Loading more indicator */}
               {loadingMore && (
-                <div className="text-center text-gray-500 py-8">
-                  <p>Loading more posts...</p>
+                <div className="text-center py-8">
+                  <UIText>Loading more posts...</UIText>
                 </div>
               )}
 
               {/* No more posts indicator */}
               {!hasMore && notes.length > 0 && (
-                <div className="text-center text-gray-500 py-8">
-                  <p>No more posts to load.</p>
+                <div className="text-center py-8">
+                  <UIText>No more posts to load.</UIText>
                 </div>
               )}
             </>

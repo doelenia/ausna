@@ -63,3 +63,4 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 COMMENT ON FUNCTION create_human_portfolio_for_new_user() IS 
   'Automatically creates a human portfolio for each new user on signup using the new metadata structure';
 
+

@@ -39,3 +39,4 @@ export function getUrlDisplayInfo(urlRef: UrlReference): { hostName: string; hos
   return { hostName, hostIcon }
 }
 
+

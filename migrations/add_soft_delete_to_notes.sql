@@ -7,3 +7,4 @@ CREATE INDEX IF NOT EXISTS idx_notes_deleted_at ON notes(deleted_at);
 -- Add comment
 COMMENT ON COLUMN notes.deleted_at IS 'Timestamp when note was deleted (soft delete). NULL means note is active.';
 
+

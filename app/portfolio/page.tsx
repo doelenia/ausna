@@ -4,6 +4,7 @@ import { getPortfolioTypes, getPortfolioTypeDisplayName } from '@/lib/portfolio/
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import Link from 'next/link'
+import { Title, Content, UIText, Button } from '@/components/ui'
 
 interface PortfolioIndexPageProps {
   searchParams: {
@@ -59,32 +60,26 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
 
   return (
     <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-4">Portfolios</h1>
+          <Title as="h1" className="mb-4">Portfolios</Title>
           
           {/* Type filters */}
           <div className="flex gap-2 mb-4">
-            <Link
+            <Button
+              asLink
               href="/portfolio"
-              className={`px-4 py-2 rounded-lg ${
-                !searchParams.type
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-100'
-              }`}
+              variant={!searchParams.type ? 'primary' : 'secondary'}
             >
-              All
-            </Link>
+              <UIText>All</UIText>
+            </Button>
             {portfolioTypes.map((type) => (
-              <Link
+              <Button
                 key={type}
+                asLink
                 href={`/portfolio?type=${type}`}
-                className={`px-4 py-2 rounded-lg ${
-                  searchParams.type === type
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-white text-gray-700 hover:bg-gray-100'
-                }`}
+                variant={searchParams.type === type ? 'primary' : 'secondary'}
               >
-                {getPortfolioTypeDisplayName(type)}
-              </Link>
+                <UIText>{getPortfolioTypeDisplayName(type)}</UIText>
+              </Button>
             ))}
           </div>
 
@@ -113,26 +108,21 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
                   href={getPortfolioUrl(portfolio.type, portfolio.id)}
                   className="bg-transparent rounded-lg p-6 transition-opacity hover:opacity-80"
                 >
-                  <div className="mb-2">
-                    <span className="text-xs font-semibold text-blue-600 uppercase">
-                      {getPortfolioTypeDisplayName(portfolio.type)}
-                    </span>
-                  </div>
-                  <h2 className="text-xl font-bold mb-2">{basic.name}</h2>
+                  <Title as="h2" className="mb-2">{basic.name}</Title>
                   {basic.description && (
-                    <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+                    <Content as="p" className="mb-4 line-clamp-2">
                       {basic.description}
-                    </p>
+                    </Content>
                   )}
-                  <div className="text-xs text-gray-500">
+                  <UIText as="div">
                     {new Date(portfolio.created_at).toLocaleDateString()}
-                  </div>
+                  </UIText>
                 </Link>
               )
             })
           ) : (
             <div className="col-span-full text-center py-12">
-              <p className="text-gray-500">No portfolios found.</p>
+              <Content>No portfolios found.</Content>
             </div>
           )}
           </div>

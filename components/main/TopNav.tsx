@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
+import { UIText, IconButton } from '@/components/ui'
+import { Home, MessageCircle } from 'lucide-react'
 
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
@@ -138,25 +140,12 @@ export function TopNav() {
         <div className="flex justify-between items-center h-16">
           {/* Left side - Home link */}
           <div className="flex items-center">
-            <Link 
+            <IconButton 
+              icon={Home}
               href="/main" 
-              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center"
               title="Home"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
-                />
-              </svg>
-            </Link>
+              aria-label="Home"
+            />
           </div>
 
           {/* Right side - Avatar or Sign In */}
@@ -165,38 +154,27 @@ export function TopNav() {
               <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
             ) : user ? (
               <>
-                <Link
+                <IconButton
+                  icon={MessageCircle}
                   href="/messages"
-                  className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center relative"
                   title="Messages"
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                    />
-                  </svg>
-                  {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
-                      {unreadCount > 99 ? '99+' : unreadCount}
+                  aria-label="Messages"
+                  badge={
+                    unreadCount > 0 ? (
+                      <span className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
+                        <UIText className="text-xs">{unreadCount > 99 ? '99+' : unreadCount}</UIText>
                     </span>
-                  )}
-                </Link>
+                    ) : undefined
+                  }
+                />
                 <UserAvatarClient userId={user.id} />
               </>
             ) : (
               <Link
                 href="/login"
-                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md text-sm font-medium transition-colors"
+                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
               >
-                Sign In
+                <UIText>Sign In</UIText>
               </Link>
             )}
           </div>
@@ -355,7 +333,7 @@ function UserAvatarClient({ userId }: { userId: string }) {
     return (
       <Link
         href={`/portfolio/human/${userId}`}
-        className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+        className="hover:opacity-80 transition-opacity"
         title={error ? `Error: ${error}` : 'Loading profile...'}
       >
         <img
@@ -363,9 +341,6 @@ function UserAvatarClient({ userId }: { userId: string }) {
           alt={fallbackDisplayName}
           className="h-8 w-8 rounded-full border-2 border-gray-300 object-cover"
         />
-        <span className="text-sm font-medium text-gray-700 hidden md:inline">
-          {fallbackDisplayName}
-        </span>
       </Link>
     )
   }
@@ -373,7 +348,7 @@ function UserAvatarClient({ userId }: { userId: string }) {
   return (
     <Link
       href={humanPortfolioUrl}
-      className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+      className="hover:opacity-80 transition-opacity"
     >
       <img
         src={finalAvatarUrl}
@@ -385,9 +360,6 @@ function UserAvatarClient({ userId }: { userId: string }) {
           target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
         }}
       />
-      <span className="text-sm font-medium text-gray-700 hidden md:inline">
-        {displayName}
-      </span>
     </Link>
   )
 }

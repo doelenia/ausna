@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui'
 
 interface OAuthButtonProps {
   provider: 'google' | 'apple'
@@ -27,12 +28,15 @@ export function OAuthButton({ provider, children }: OAuthButtonProps) {
   }
 
   return (
-    <button
+    <Button
       onClick={handleOAuth}
-      className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+      variant="primary"
+      fullWidth
+      className="flex items-center justify-center gap-2"
     >
       {children}
-    </button>
+    </Button>
   )
 }
+
 

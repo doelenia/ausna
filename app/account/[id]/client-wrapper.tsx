@@ -10,6 +10,7 @@ import { HumanPortfolio } from '@/types/portfolio'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { InterestTags } from '@/components/portfolio/InterestTags'
 import { Topic } from '@/types/indexing'
+import { Title, UIText, Button } from '@/components/ui'
 
 interface ClientAccountPageProps {
   userId: string
@@ -84,7 +85,7 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
   if (loading) {
     return (
       <div className="bg-white shadow rounded-lg p-6">
-        <p className="text-center text-gray-500">Loading...</p>
+        <UIText as="p" className="text-center">Loading...</UIText>
       </div>
     )
   }
@@ -96,50 +97,50 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
   return (
     <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
-            <h1 className="text-3xl font-bold text-gray-900">Account Settings</h1>
+            <Title as="h1">Account Settings</Title>
             <Link
               href="/main"
-              className="text-blue-600 hover:text-blue-500 text-sm font-medium"
+              className="text-blue-600 hover:text-blue-500"
             >
-              Back to Main
+              <UIText>Back to Main</UIText>
             </Link>
           </div>
 
           <div className="space-y-6">
             <div>
-              <h2 className="text-lg font-medium text-gray-900 mb-4">Profile Information</h2>
+              <UIText as="h2" className="mb-4">Profile Information</UIText>
               <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
                 <div>
-                  <dt className="text-sm font-medium text-gray-500">User ID</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{user.id}</dd>
+                  <UIText as="dt" className="text-gray-500">User ID</UIText>
+                  <UIText as="dd" className="mt-1">{user.id}</UIText>
                 </div>
                 <div>
-                  <dt className="text-sm font-medium text-gray-500">Email</dt>
-                  <dd className="mt-1 text-sm text-gray-900">{user.email || 'Not set'}</dd>
+                  <UIText as="dt" className="text-gray-500">Email</UIText>
+                  <UIText as="dd" className="mt-1">{user.email || 'Not set'}</UIText>
                 </div>
                 <div>
-                  <dt className="text-sm font-medium text-gray-500">Email Verified</dt>
-                  <dd className="mt-1 text-sm text-gray-900">
+                  <UIText as="dt" className="text-gray-500">Email Verified</UIText>
+                  <UIText as="dd" className="mt-1">
                     {user.email_confirmed_at ? 'Yes' : 'No'}
-                  </dd>
+                  </UIText>
                 </div>
                 <div>
-                  <dt className="text-sm font-medium text-gray-500">Account Created</dt>
-                  <dd className="mt-1 text-sm text-gray-900">
+                  <UIText as="dt" className="text-gray-500">Account Created</UIText>
+                  <UIText as="dd" className="mt-1">
                     {user.created_at
                       ? new Date(user.created_at).toLocaleDateString()
                       : 'Unknown'}
-                  </dd>
+                  </UIText>
                 </div>
               </dl>
             </div>
 
             {humanPortfolio && (
               <div>
-                <h2 className="text-lg font-medium text-gray-900 mb-4">Human Portfolio</h2>
+                <UIText as="h2" className="mb-4">Human Portfolio</UIText>
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
                   <div className="sm:col-span-2">
-                    <dt className="text-sm font-medium text-gray-500 mb-2">Username</dt>
+                    <UIText as="dt" className="mb-2">Username</UIText>
                     <dd className="mt-1">
                       <UsernameEditor 
                         initialUsername={humanPortfolio.metadata.username || ''} 
@@ -148,16 +149,16 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                     </dd>
                   </div>
                   <div>
-                    <dt className="text-sm font-medium text-gray-500">Name</dt>
-                    <dd className="mt-1 text-sm text-gray-900">
+                    <UIText as="dt">Name</UIText>
+                    <UIText as="dd" className="mt-1">
                       {(humanPortfolio.metadata as any)?.basic?.name || 'Not set'}
-                    </dd>
+                    </UIText>
                   </div>
                   {(humanPortfolio.metadata as any)?.basic?.description && (
                     <div className="sm:col-span-2">
-                      <dt className="text-sm font-medium text-gray-500">Description</dt>
-                      <dd className="mt-1 text-sm text-gray-900">
-                        {(humanPortfolio.metadata as any)?.basic?.description}
+                      <UIText as="dt">Description</UIText>
+                      <dd className="mt-1">
+                        <UIText>{(humanPortfolio.metadata as any)?.basic?.description}</UIText>
                         {topInterests.length > 0 && (
                           <InterestTags topics={topInterests} />
                         )}
@@ -166,7 +167,7 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                   )}
                   {!((humanPortfolio.metadata as any)?.basic?.description) && topInterests.length > 0 && (
                     <div className="sm:col-span-2">
-                      <dt className="text-sm font-medium text-gray-500">Interests</dt>
+                      <UIText as="dt">Interests</UIText>
                       <dd className="mt-1">
                         <InterestTags topics={topInterests} />
                       </dd>
@@ -174,7 +175,7 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                   )}
                   {(humanPortfolio.metadata as any)?.basic?.avatar && (
                     <div>
-                      <dt className="text-sm font-medium text-gray-500">Avatar</dt>
+                      <UIText as="dt">Avatar</UIText>
                       <dd className="mt-1">
                         <img
                           src={(humanPortfolio.metadata as any)?.basic?.avatar}
@@ -185,13 +186,13 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                     </div>
                   )}
                   <div>
-                    <dt className="text-sm font-medium text-gray-500">Portfolio Slug</dt>
-                    <dd className="mt-1 text-sm text-gray-900">
+                    <UIText as="dt">Portfolio Slug</UIText>
+                    <dd className="mt-1">
                       <Link 
                         href={`/portfolio/human/${humanPortfolio.id}`}
                         className="text-blue-600 hover:text-blue-500"
                       >
-                        /portfolio/human/{humanPortfolio.slug}
+                        <UIText>/portfolio/human/{humanPortfolio.slug}</UIText>
                       </Link>
                     </dd>
                   </div>
@@ -201,12 +202,12 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
 
             <div className="pt-6 border-t border-gray-200">
               <form action={signOut}>
-                <button
+                <Button
                   type="submit"
-                  className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                  variant="danger"
                 >
-                  Sign Out
-                </button>
+                  <UIText>Sign Out</UIText>
+                </Button>
               </form>
             </div>
           </div>

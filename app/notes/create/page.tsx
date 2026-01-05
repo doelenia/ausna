@@ -6,6 +6,7 @@ import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { Title, Content, UIText } from '@/components/ui'
 
 interface CreateNotePageProps {
   searchParams: {
@@ -88,17 +89,17 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
           <div className="mb-6">
             <Link
               href={sourcePortfolio ? `/portfolio/${sourcePortfolio.type}/${sourcePortfolio.id}/all` : '/portfolio'}
-              className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-block"
+              className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
             >
-              ← Back
+              <UIText>← Back</UIText>
             </Link>
-            <h1 className="text-3xl font-bold mb-2">
+            <Title as="h1" className="mb-2">
               {annotatedNote ? 'Annotate Note' : 'Create Note'}
-            </h1>
+            </Title>
             {annotatedNote && (
               <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                <p className="text-sm text-gray-600 mb-2">Annotating:</p>
-                <p className="text-gray-900">{annotatedNote.text.substring(0, 200)}{annotatedNote.text.length > 200 ? '...' : ''}</p>
+                <UIText as="p" className="mb-2">Annotating:</UIText>
+                <Content as="p">{annotatedNote.text.substring(0, 200)}{annotatedNote.text.length > 200 ? '...' : ''}</Content>
               </div>
             )}
           </div>

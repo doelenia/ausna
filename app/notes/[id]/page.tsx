@@ -4,6 +4,7 @@ import { canCreateNoteInPortfolio } from '@/lib/notes/helpers'
 import { NoteView } from '@/components/notes/NoteView'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { UIText } from '@/components/ui'
 
 interface NotePageProps {
   params: {
@@ -99,9 +100,9 @@ export default async function NotePage({ params }: NotePageProps) {
             {firstPortfolio && (
               <Link
                 href={`/portfolio/${firstPortfolio.type}/${firstPortfolio.id}/all`}
-                className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-block"
+                className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
               >
-                ← Back to Portfolio
+                <UIText>← Back to Portfolio</UIText>
               </Link>
             )}
           </div>

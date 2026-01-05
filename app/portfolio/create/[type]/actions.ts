@@ -23,6 +23,7 @@ export async function createPortfolio(
     const type = formData.get('type') as string
     const name = formData.get('name') as string
     const avatarFile = formData.get('avatar') as File | null
+    const emoji = formData.get('emoji') as string | null
 
     // Validate type
     if (type !== 'projects' && type !== 'community') {
@@ -48,6 +49,14 @@ export async function createPortfolio(
       return {
         success: false,
         error: 'Portfolio name is required',
+      }
+    }
+
+    // Require either avatar or emoji
+    if (!avatarFile && !emoji) {
+      return {
+        success: false,
+        error: 'Please upload an image or select an emoji',
       }
     }
 
@@ -79,6 +88,7 @@ export async function createPortfolio(
         name: name.trim(),
         description: '',
         avatar: '',
+        emoji: emoji || '',
       },
       pinned: [],
       settings: {},

@@ -4,14 +4,17 @@ import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio }
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
-import { PinnedSection } from './PinnedSection'
+import { NotesFeed } from './NotesFeed'
 import { SubscribeButton } from './SubscribeButton'
 import { FriendButton } from './FriendButton'
+import { StickerAvatar } from './StickerAvatar'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect } from 'react'
-import { deletePortfolio } from '@/app/portfolio/[type]/[id]/actions'
+import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { Button, Title, Content, UIText } from '@/components/ui'
+import { Apple } from 'lucide-react'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -34,8 +37,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [isMember, setIsMember] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [projectsLoading, setProjectsLoading] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+  
+  // Determine if user can create notes (for projects, user must be owner or member)
+  const canCreateNote = isProjectPortfolio(portfolio) && (isOwner || isMember)
 
   // Double-check ownership and authentication on client side
   // This ensures ownership is detected even if server-side check had issues
@@ -112,6 +120,58 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     }
   }, [portfolio.user_id, supabase, serverIsOwner])
 
+  // Fetch projects for human portfolios (for all visitors)
+  useEffect(() => {
+    const fetchProjects = async () => {
+      if (!isHumanPortfolio(portfolio)) {
+        return
+      }
+
+      // Wait for auth check to complete before fetching
+      if (!authChecked) {
+        return
+      }
+
+      setProjectsLoading(true)
+      try {
+        const result = await getSubPortfolios(portfolio.id)
+        if (result.success && result.projects) {
+          // Fetch full portfolio data for all projects in a single query to get emoji
+          const projectIds = result.projects.map(p => p.id)
+          if (projectIds.length > 0) {
+            const { data: fullProjects } = await supabase
+              .from('portfolios')
+              .select('id, metadata')
+              .in('id', projectIds)
+            
+            const projectMap = new Map(
+              (fullProjects || []).map((p: any) => {
+                const metadata = p.metadata as any
+                return [p.id, metadata?.basic?.emoji]
+              })
+            )
+
+            const projectData = result.projects.map((p) => ({
+              id: p.id,
+              name: p.name,
+              avatar: p.avatar,
+              emoji: projectMap.get(p.id),
+            }))
+            setProjects(projectData)
+          } else {
+            setProjects([])
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch projects:', error)
+      } finally {
+        setProjectsLoading(false)
+      }
+    }
+
+    fetchProjects()
+  }, [portfolio.id, portfolio.type, authChecked, supabase])
+
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this portfolio? This action cannot be undone.')) {
       return
@@ -151,130 +211,199 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
   return (
     <div className="bg-transparent rounded-lg p-6">
-          {/* Header with avatar and name */}
-          <div className="flex items-start gap-6 mb-6">
-            {basic.avatar ? (
-              <Link
-                href={`/portfolio/human/${portfolio.user_id}`}
-                className="flex-shrink-0"
-              >
-                <img
+          {/* Header with avatar, name, description, and buttons */}
+          <div className="mb-6">
+            {/* Avatar */}
+            <div className="mb-4">
+              {basic.avatar ? (
+                <StickerAvatar
                   src={basic.avatar}
                   alt={basic.name}
-                  className="h-24 w-24 rounded-full object-cover border-2 border-gray-300 hover:border-blue-500 transition-colors cursor-pointer"
+                  type={portfolio.type}
+                  size={96}
+                  href={isHumanPortfolio(portfolio) ? `/portfolio/human/${portfolio.user_id}` : getPortfolioUrl(portfolio.type, portfolio.id)}
+                  className="flex-shrink-0"
                 />
-              </Link>
-            ) : (
-              <Link
-                href={`/portfolio/human/${portfolio.user_id}`}
-                className="flex-shrink-0 h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300 hover:border-blue-500 transition-colors cursor-pointer"
-              >
-                <svg
-                  className="h-12 w-12 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+              ) : isHumanPortfolio(portfolio) ? (
+                <Link
+                  href={`/portfolio/human/${portfolio.user_id}`}
+                  className="flex-shrink-0 h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300 hover:border-blue-500 transition-colors cursor-pointer"
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
-                </svg>
-              </Link>
+                  <svg
+                    className="h-12 w-12 text-gray-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
+                  </svg>
+                </Link>
+              ) : (
+                <StickerAvatar
+                  alt={basic.name}
+                  type={portfolio.type}
+                  size={96}
+                  emoji={(metadata as any)?.basic?.emoji || '🎨'}
+                  name={basic.name}
+                  href={getPortfolioUrl(portfolio.type, portfolio.id)}
+                  className="flex-shrink-0"
+                />
+              )}
+            </div>
+
+            {/* Name */}
+            <Title as="h1" className="mb-2">{basic.name}</Title>
+
+            {/* Description */}
+            {basic.description && (
+              <Content className="mb-4">{basic.description}</Content>
             )}
-            <div className="flex-1">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h1 className="text-3xl font-bold mb-2">{basic.name}</h1>
-                  <span className="inline-block px-2 py-1 text-xs font-semibold text-blue-600 bg-blue-100 rounded uppercase">
-                    {portfolio.type}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {authChecked &&
-                    isAuthenticated &&
-                    !isOwner &&
-                    isHumanPortfolio(portfolio) && (
-                      <>
-                        <FriendButton friendId={portfolio.user_id} />
-                        <Link
-                          href={`/messages?userId=${portfolio.user_id}`}
-                          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                        >
-                          Message
-                        </Link>
-                      </>
-                    )}
-                  {authChecked && isAuthenticated && !isOwner && (
-                    <SubscribeButton portfolioId={portfolio.id} />
+
+            {/* Buttons */}
+            <div className="flex flex-wrap items-center gap-2">
+              {authChecked &&
+                isAuthenticated &&
+                !isOwner &&
+                isHumanPortfolio(portfolio) && (
+                  <>
+                    <FriendButton friendId={portfolio.user_id} />
+                    <Button
+                      variant="success"
+                      asLink
+                      href={`/messages?userId=${portfolio.user_id}`}
+                    >
+                      <UIText>Message</UIText>
+                    </Button>
+                  </>
+                )}
+              {authChecked && isAuthenticated && !isOwner && (
+                <SubscribeButton portfolioId={portfolio.id} />
+              )}
+              {authChecked && isAuthenticated && (isOwner || isManager) && (
+                <>
+                  {isHumanPortfolio(portfolio) && isOwner && (
+                    <Button
+                      variant="secondary"
+                      asLink
+                      href={`/account/${portfolio.user_id}`}
+                    >
+                      <UIText>Account</UIText>
+                    </Button>
                   )}
-                  {authChecked && isAuthenticated && (isOwner || isManager) && (
-                  <div className="flex gap-2">
-                    {isHumanPortfolio(portfolio) && isOwner && (
-                      <Link
-                        href={`/account/${portfolio.user_id}`}
-                        className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+                  {(isOwner || isManager) && (
+                    <>
+                      <Button
+                        variant="secondary"
+                        asLink
+                        href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/pinned`}
                       >
-                        Account
-                      </Link>
-                    )}
-                    {(isOwner || isManager) && (
-                      <>
-                        <Link
-                          href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/pinned`}
-                          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-                        >
-                          Edit Pinned
-                        </Link>
-                        <button
-                          onClick={() => setIsEditing(true)}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                        >
-                          Edit
-                        </button>
-                      </>
-                    )}
-                    {/* Delete button only for creator */}
-                    {!isHumanPortfolio(portfolio) && isOwner && (
-                      <button
-                        onClick={handleDelete}
-                        disabled={isDeleting}
-                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
+                        <UIText>Edit Pinned</UIText>
+                      </Button>
+                      <Button
+                        variant="primary"
+                        onClick={() => setIsEditing(true)}
                       >
-                        {isDeleting ? 'Deleting...' : 'Delete'}
-                      </button>
-                    )}
-                  </div>
+                        <UIText>Edit</UIText>
+                      </Button>
+                    </>
                   )}
-                </div>
-              </div>
-              {basic.description && (
-                <p className="text-gray-600 mt-4">{basic.description}</p>
+                  {/* Delete button only for creator */}
+                  {!isHumanPortfolio(portfolio) && isOwner && (
+                    <Button
+                      variant="danger"
+                      onClick={handleDelete}
+                      disabled={isDeleting}
+                    >
+                      <UIText>{isDeleting ? 'Deleting...' : 'Delete'}</UIText>
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>
 
-          {/* Owner Actions - Create Project/Community (only for human portfolios) */}
-          {authChecked && isOwner && isAuthenticated && isHumanPortfolio(portfolio) && (
-            <div className="mb-6 pb-6">
-              <h2 className="text-sm font-medium text-gray-700 mb-3">Create New Portfolio</h2>
-              <div className="flex gap-2">
-                <Link
-                  href="/portfolio/create/projects"
-                  className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
-                >
-                  Create Project
-                </Link>
-                {/* Create Community button - Admin only */}
-                {isAdmin === true && (
-                  <Link
-                    href="/portfolio/create/community"
-                    className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
-                  >
-                    Create Community
-                  </Link>
+          {/* Projects Row (for all visitors, human portfolios only) */}
+          {isHumanPortfolio(portfolio) && (
+            <div className="mt-4 mb-8">
+              <div className="flex items-center gap-2 mb-4">
+                <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                <UIText>Involvement</UIText>
+              </div>
+              <div className="flex items-start gap-12 overflow-x-auto pt-2 pb-2">
+                {projectsLoading ? (
+                  <UIText className="text-gray-500">Loading projects...</UIText>
+                ) : (
+                  <>
+                    {projects.map((project) => (
+                      <div key={project.id} className="flex flex-col items-center gap-4 flex-shrink-0">
+                        <StickerAvatar
+                          src={project.avatar}
+                          alt={project.name}
+                          type="projects"
+                          size={96}
+                          href={getPortfolioUrl('projects', project.id)}
+                          emoji={project.emoji}
+                          name={project.name}
+                        />
+                        <UIText className="text-center max-w-[96px] truncate" title={project.name}>
+                          {project.name}
+                        </UIText>
+                      </div>
+                    ))}
+                    {/* Create Project Button - Only visible to owner */}
+                    {authChecked && isOwner && isAuthenticated && (
+                      <div className="flex flex-col items-center gap-4 flex-shrink-0">
+                        <Link
+                          href="/portfolio/create/projects"
+                          className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                        >
+                          <svg
+                            className="h-12 w-12 text-gray-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 4v16m8-8H4"
+                            />
+                          </svg>
+                        </Link>
+                        <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
+                      </div>
+                    )}
+                    {/* Create Community button - Admin only, owner only */}
+                    {authChecked && isOwner && isAuthenticated && isAdmin === true && (
+                      <div className="flex flex-col items-center gap-4 flex-shrink-0">
+                        <Link
+                          href="/portfolio/create/community"
+                          className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                        >
+                          <svg
+                            className="h-12 w-12 text-gray-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                            />
+                          </svg>
+                        </Link>
+                        <UIText className="text-center max-w-[96px] truncate">Create Community</UIText>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -283,12 +412,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           {/* Create Note Button - Show only for projects, if user is member/owner */}
           {authChecked && isAuthenticated && (isOwner || isMember) && isProjectPortfolio(portfolio) && (
             <div className="mb-6 pb-6">
-              <Link
+              <Button
+                variant="primary"
+                asLink
                 href={`/notes/create?portfolio=${portfolio.id}`}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors inline-block"
               >
-                Create Note
-              </Link>
+                <UIText>Create Note</UIText>
+              </Button>
             </div>
           )}
 
@@ -296,24 +426,24 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
             <div className="mb-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-medium text-gray-900">Members</h2>
+                <UIText as="h2">Members</UIText>
                 <Link
                   href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
-                  className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                  className="text-blue-600 hover:text-blue-800"
                 >
-                  View All →
+                  <UIText>View All →</UIText>
                 </Link>
               </div>
               
               {/* Creator */}
               <div className="mb-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Creator</h3>
+                <UIText as="h3" className="mb-2">Creator</UIText>
                 <div className="flex flex-wrap gap-2">
                   <Link
                     href={`/portfolio/human/${portfolio.user_id}`}
-                    className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm hover:bg-blue-200 transition-colors font-medium"
+                    className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors"
                   >
-                    {portfolio.user_id === currentUserId ? 'You (Creator)' : `User ${portfolio.user_id.slice(0, 8)} (Creator)`}
+                    <UIText>{portfolio.user_id === currentUserId ? 'You (Creator)' : `User ${portfolio.user_id.slice(0, 8)} (Creator)`}</UIText>
                   </Link>
                 </div>
               </div>
@@ -321,7 +451,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               {/* Managers */}
               {managers.length > 0 && (
                 <div className="mb-4">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Managers</h3>
+                  <UIText as="h3" className="mb-2">Managers</UIText>
                   <div className="flex flex-wrap gap-2">
                     {managers
                       .filter((managerId: string) => managerId !== portfolio.user_id) // Don't show creator in managers list
@@ -330,15 +460,15 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         <Link
                           key={managerId}
                           href={`/portfolio/human/${managerId}`}
-                          className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm hover:bg-purple-200 transition-colors"
+                          className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full hover:bg-purple-200 transition-colors"
                         >
-                          {managerId === currentUserId ? 'You (Manager)' : `User ${managerId.slice(0, 8)} (Manager)`}
+                          <UIText>{managerId === currentUserId ? 'You (Manager)' : `User ${managerId.slice(0, 8)} (Manager)`}</UIText>
                         </Link>
                       ))}
                     {managers.filter((managerId: string) => managerId !== portfolio.user_id).length > 5 && (
-                      <span className="px-3 py-1 text-gray-500 text-sm">
+                      <UIText as="span" className="px-3 py-1">
                         +{managers.filter((managerId: string) => managerId !== portfolio.user_id).length - 5} more
-                      </span>
+                      </UIText>
                     )}
                   </div>
                 </div>
@@ -347,7 +477,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               {/* Members */}
               {members.length > 0 && (
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Members</h3>
+                  <UIText as="h3" className="mb-2">Members</UIText>
                   <div className="flex flex-wrap gap-2">
                     {members
                       .filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)) // Don't show creator or managers in members list
@@ -356,15 +486,15 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         <Link
                           key={memberId}
                           href={`/portfolio/human/${memberId}`}
-                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm hover:bg-gray-200 transition-colors"
+                          className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 transition-colors"
                         >
-                          {memberId === currentUserId ? 'You' : `User ${memberId.slice(0, 8)}`}
+                          <UIText>{memberId === currentUserId ? 'You' : `User ${memberId.slice(0, 8)}`}</UIText>
                         </Link>
                       ))}
                     {members.filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)).length > 5 && (
-                      <span className="px-3 py-1 text-gray-500 text-sm">
+                      <UIText as="span" className="px-3 py-1">
                         +{members.filter((memberId: string) => memberId !== portfolio.user_id && !managers.includes(memberId)).length - 5} more
-                      </span>
+                      </UIText>
                     )}
                   </div>
                 </div>
@@ -372,18 +502,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
           )}
 
-          {/* Pinned Section */}
-          <PinnedSection portfolioId={portfolio.id} />
-
-          {/* All Button */}
-          <div className="mt-6 pt-6">
-            <Link
-              href={`/portfolio/${portfolio.type}/${portfolio.id}/all`}
-              className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium"
-            >
-              View All
-            </Link>
-          </div>
+          {/* Notes Feed (combines pinned notes with regular notes) */}
+          <NotesFeed
+            portfolio={portfolio}
+            portfolioId={portfolio.id}
+            currentUserId={currentUserId}
+            canCreateNote={canCreateNote}
+          />
         </div>
   )
 }

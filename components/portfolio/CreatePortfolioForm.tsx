@@ -7,6 +7,9 @@ import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { generateSlug } from '@/lib/portfolio/utils'
 import { PortfolioType } from '@/types/portfolio'
 import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
+import { EmojiPicker } from './EmojiPicker'
+import { StickerAvatar } from './StickerAvatar'
+import { UIText, Button } from '@/components/ui'
 
 interface CreatePortfolioFormProps {
   type: 'projects' | 'community'
@@ -16,6 +19,8 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const [name, setName] = useState('')
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const [selectedEmoji, setSelectedEmoji] = useState<string | null>(null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -39,6 +44,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       }
 
       setAvatarFile(file)
+      setSelectedEmoji(null) // Clear emoji when image is selected
       setError(null)
 
       // Create preview
@@ -50,11 +56,27 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
     }
   }
 
+  const handleEmojiSelect = (emoji: string) => {
+    setSelectedEmoji(emoji)
+    setAvatarFile(null) // Clear image when emoji is selected
+    setAvatarPreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+    setError(null)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
     if (!name.trim()) {
       setError('Name is required')
+      return
+    }
+
+    // Require either image or emoji
+    if (!avatarFile && !selectedEmoji) {
+      setError('Please upload an image or select an emoji')
       return
     }
 
@@ -69,6 +91,9 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       formData.append('name', name.trim())
       if (avatarFile) {
         formData.append('avatar', avatarFile)
+      }
+      if (selectedEmoji) {
+        formData.append('emoji', selectedEmoji)
       }
 
       const result = await createPortfolio(formData)
@@ -99,77 +124,106 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      {/* Avatar Upload */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Avatar (Optional)
-        </label>
-        <div className="flex items-center gap-4">
-          <div className="flex-shrink-0">
-            {avatarPreview ? (
-              <img
-                src={avatarPreview}
-                alt="Avatar preview"
-                className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
-              />
-            ) : (
-              <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
-                <svg
-                  className="h-8 w-8 text-gray-400"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+    <>
+      {showEmojiPicker && (
+        <EmojiPicker
+          selectedEmoji={selectedEmoji}
+          onSelect={handleEmojiSelect}
+          onClose={() => setShowEmojiPicker(false)}
+        />
+      )}
+      <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Avatar Upload or Emoji Selection */}
+        <div>
+          <UIText as="label" className="block mb-2">
+            Avatar <span className="text-red-500">*</span>
+          </UIText>
+          <div className="flex items-center gap-4">
+            <div className="flex-shrink-0">
+              {avatarPreview ? (
+                <img
+                  src={avatarPreview}
+                  alt="Avatar preview"
+                  className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
+                />
+              ) : selectedEmoji ? (
+                <StickerAvatar
+                  alt={name || 'Preview'}
+                  type={type}
+                  size={80}
+                  emoji={selectedEmoji}
+                />
+              ) : (
+                <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
+                  <svg
+                    className="h-8 w-8 text-gray-400"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                    />
+                  </svg>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                  />
-                </svg>
+                  <UIText>{avatarPreview ? 'Change Image' : 'Upload Image'}</UIText>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowEmojiPicker(true)}
+                >
+                  <UIText>{selectedEmoji ? 'Change Emoji' : 'Select Emoji'}</UIText>
+                </Button>
               </div>
-            )}
-          </div>
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {avatarPreview ? 'Change Avatar' : 'Upload Avatar'}
-            </button>
-            {avatarFile && (
-              <button
-                type="button"
-                onClick={() => {
-                  setAvatarFile(null)
-                  setAvatarPreview(null)
-                  if (fileInputRef.current) {
-                    fileInputRef.current.value = ''
-                  }
-                }}
-                className="ml-2 px-4 py-2 text-sm text-red-600 hover:text-red-700"
-              >
-                Remove
-              </button>
-            )}
+              {(avatarFile || selectedEmoji) && (
+                <Button
+                  type="button"
+                  variant="text"
+                  onClick={() => {
+                    setAvatarFile(null)
+                    setAvatarPreview(null)
+                    setSelectedEmoji(null)
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = ''
+                    }
+                  }}
+                  className="text-left px-0 py-1 text-red-600"
+                >
+                  <UIText>Remove</UIText>
+                </Button>
+              )}
+              <UIText as="p" className="text-xs text-gray-500">
+                Please upload an image or select an emoji
+              </UIText>
+            </div>
           </div>
         </div>
-      </div>
 
       {/* Name Input */}
       <div>
-        <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
+        <UIText as="label" htmlFor="name" className="block mb-2">
           Name <span className="text-red-500">*</span>
-        </label>
+        </UIText>
         <input
           type="text"
           id="name"
@@ -186,29 +240,31 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       {/* Error Message */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-          {error}
+          <UIText>{error}</UIText>
         </div>
       )}
 
       {/* Submit Button */}
       <div className="flex gap-4">
-        <button
+        <Button
           type="submit"
-          disabled={loading || !name.trim()}
-          className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-blue-500"
+          variant="primary"
+          fullWidth
+          disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji)}
         >
-          {loading ? 'Creating...' : 'Create Portfolio'}
-        </button>
-        <button
+          <UIText>{loading ? 'Creating...' : 'Create Portfolio'}</UIText>
+        </Button>
+        <Button
           type="button"
+          variant="secondary"
           onClick={() => router.back()}
           disabled={loading}
-          className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
-          Cancel
-        </button>
+          <UIText>Cancel</UIText>
+        </Button>
       </div>
     </form>
+    </>
   )
 }
 

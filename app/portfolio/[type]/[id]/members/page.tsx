@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { isPortfolioManager, isPortfolioCreator, getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { MembersPageClient } from '@/components/portfolio/MembersPageClient'
 import Link from 'next/link'
+import { Title, UIText } from '@/components/ui'
 
 interface MembersPageProps {
   params: {
@@ -145,10 +146,10 @@ export default async function MembersPage({ params }: MembersPageProps) {
               href={getPortfolioUrl(portfolio.type, portfolio.id)}
               className="text-blue-600 hover:text-blue-800 mb-4 inline-block"
             >
-              ← Back to Portfolio
+              <UIText>← Back to Portfolio</UIText>
             </Link>
-            <h1 className="text-3xl font-bold mb-2">Members</h1>
-            <p className="text-gray-600">{basic.name}</p>
+            <Title as="h1" className="mb-2">Members</Title>
+            <UIText as="p">{basic.name}</UIText>
           </div>
 
           {/* Members List */}

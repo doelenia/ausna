@@ -762,6 +762,258 @@ export async function getNotesByPortfolio(portfolioId: string): Promise<GetNotes
   }
 }
 
+interface GetNotesByPortfolioPaginatedResult {
+  success: boolean
+  notes?: Note[]
+  hasMore?: boolean
+  error?: string
+}
+
+/**
+ * Get notes assigned to a portfolio with pagination (including annotations)
+ */
+export async function getNotesByPortfolioPaginated(
+  portfolioId: string,
+  offset: number = 0,
+  limit: number = 20
+): Promise<GetNotesByPortfolioPaginatedResult> {
+  try {
+    const supabase = await createClient()
+
+    // Query notes using RPC function to properly handle 'references' reserved keyword
+    const { data: notes, error } = await supabase.rpc('get_notes_by_portfolio_with_refs', {
+      portfolio_id_param: portfolioId,
+      offset_val: offset,
+      limit_val: limit
+    })
+
+    // Log the initial response immediately after the RPC call
+    console.log('[getNotesByPortfolioPaginated] Initial RPC response:', {
+      error,
+      notesCount: notes?.length || 0,
+      notes: notes?.map((note: any) => ({
+        id: note.id,
+        textPreview: note.text?.substring(0, 50),
+        hasReferences: 'references' in note,
+        referencesValue: note.references,
+        referencesType: typeof note.references,
+        referencesIsArray: Array.isArray(note.references),
+        referencesLength: Array.isArray(note.references) ? note.references.length : 'N/A',
+        allKeys: Object.keys(note),
+      })) || [],
+      rawResponse: JSON.stringify(notes, null, 2).substring(0, 2000), // First 2000 chars
+    })
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch notes',
+      }
+    }
+
+    // Debug: log raw data from database - always log, even if references is null/empty
+    if (notes && notes.length > 0) {
+      notes.forEach((note: any) => {
+        // Check all possible ways references might be stored (case variations, etc.)
+        const refs = note.references || note.References || note['references'] || note['References']
+        console.log('[getNotesByPortfolioPaginated] Raw DB data:', {
+          noteId: note.id,
+          hasReferences: 'references' in note,
+          referencesRaw: note.references,
+          referencesAlt: refs,
+          referencesType: typeof note.references,
+          referencesIsNull: note.references === null,
+          referencesIsUndefined: note.references === undefined,
+          isArray: Array.isArray(note.references),
+          allNoteKeys: Object.keys(note),
+          allNoteEntries: Object.entries(note).slice(0, 10).map(([k, v]) => [k, typeof v, Array.isArray(v) ? `array(${Array.isArray(v) ? (v as any[]).length : 0})` : 'not-array']),
+          fullNote: JSON.stringify(note, null, 2).substring(0, 500), // First 500 chars
+        })
+      })
+    }
+
+    // Ensure references is an array for all notes (handle null/undefined cases)
+    const notesWithReferences: Note[] = (notes || []).map((note: any) => {
+      // Handle case where references might be a JSON string
+      let references = note.references
+      
+      // Debug: log before normalization
+      console.log('[getNotesByPortfolioPaginated] Before normalization:', {
+        noteId: note.id,
+        referencesBefore: references,
+        referencesType: typeof references,
+        isArray: Array.isArray(references),
+        noteKeys: Object.keys(note),
+      })
+      
+      if (typeof references === 'string') {
+        try {
+          references = JSON.parse(references)
+        } catch (e) {
+          console.error('Failed to parse references as JSON:', e)
+          references = []
+        }
+      }
+      
+      // Preserve references if they exist and are valid
+      const finalReferences = Array.isArray(references) 
+        ? references 
+        : (references !== null && references !== undefined ? [references] : [])
+      
+      // Debug: log after normalization
+      console.log('[getNotesByPortfolioPaginated] After normalization:', {
+        noteId: note.id,
+        referencesAfter: finalReferences,
+        referencesLength: finalReferences.length,
+        noteWithRefs: {
+          ...note,
+          references: finalReferences,
+        },
+      })
+      
+      // Explicitly construct the note object to ensure references are included
+      const normalizedNote: Note = {
+        id: note.id,
+        owner_account_id: note.owner_account_id,
+        text: note.text,
+        references: finalReferences, // Explicitly set references
+        assigned_portfolios: note.assigned_portfolios || [],
+        mentioned_note_id: note.mentioned_note_id,
+        created_at: note.created_at,
+        updated_at: note.updated_at,
+        deleted_at: note.deleted_at,
+        summary: note.summary || null,
+        compound_text: note.compound_text || null,
+        topics: note.topics || [],
+        intentions: note.intentions || [],
+        indexing_status: note.indexing_status || null,
+      }
+      
+      // Final check - ensure references are preserved
+      console.log('[getNotesByPortfolioPaginated] Final note:', {
+        noteId: normalizedNote.id,
+        finalReferences: normalizedNote.references,
+        finalReferencesLength: Array.isArray(normalizedNote.references) ? normalizedNote.references.length : 'not-array',
+        normalizedNoteStringified: JSON.stringify(normalizedNote).substring(0, 500),
+      })
+      
+      return normalizedNote
+    })
+
+    // Check if there are more notes
+    const { count } = await supabase
+      .from('notes')
+      .select('*', { count: 'exact', head: true })
+      .contains('assigned_portfolios', [portfolioId])
+      .is('deleted_at', null)
+
+    const hasMore = count ? offset + notesWithReferences.length < count : false
+
+    // Debug: log what we're returning
+    console.log('[getNotesByPortfolioPaginated] Returning:', {
+      notesCount: notesWithReferences.length,
+      firstNoteRefs: notesWithReferences[0]?.references,
+      firstNoteRefsLength: Array.isArray(notesWithReferences[0]?.references) ? notesWithReferences[0]?.references.length : 'N/A',
+      firstNoteStringified: JSON.stringify(notesWithReferences[0] || {}).substring(0, 500),
+    })
+
+    // Force proper serialization by using JSON to ensure plain objects
+    // Next.js server actions require plain serializable objects
+    const serializedNotes = notesWithReferences.map((note, index) => {
+      // Debug: log what we have before serialization
+      console.log(`[getNotesByPortfolioPaginated] Before serialization [${index}]:`, {
+        noteId: note.id,
+        noteReferences: note.references,
+        noteReferencesType: typeof note.references,
+        noteReferencesIsArray: Array.isArray(note.references),
+        noteReferencesLength: Array.isArray(note.references) ? note.references.length : 'N/A',
+      })
+      
+      // Get references directly from the note object
+      const refs = note.references || []
+      
+      // Build a plain object that's guaranteed to be serializable
+      const plainNote = {
+        id: String(note.id),
+        owner_account_id: String(note.owner_account_id),
+        text: String(note.text || ''),
+        references: Array.isArray(refs) && refs.length > 0
+          ? refs.map((ref: any) => {
+              if (!ref || !ref.type || !ref.url) {
+                console.warn(`[getNotesByPortfolioPaginated] Invalid ref in note ${note.id}:`, ref)
+                return null
+              }
+              const plainRef: any = {
+                type: String(ref.type),
+                url: String(ref.url),
+              }
+              if (ref.type === 'url') {
+                if (ref.hostIcon) plainRef.hostIcon = String(ref.hostIcon)
+                if (ref.hostName) plainRef.hostName = String(ref.hostName)
+                if (ref.title) plainRef.title = String(ref.title)
+                if (ref.headerImage) plainRef.headerImage = String(ref.headerImage)
+                if (ref.description) plainRef.description = String(ref.description)
+              }
+              return plainRef
+            }).filter((ref: any) => ref !== null)
+          : [],
+        assigned_portfolios: Array.isArray(note.assigned_portfolios) 
+          ? note.assigned_portfolios.map(String)
+          : [],
+        mentioned_note_id: note.mentioned_note_id ? String(note.mentioned_note_id) : null,
+        created_at: String(note.created_at),
+        updated_at: String(note.updated_at),
+        deleted_at: note.deleted_at ? String(note.deleted_at) : null,
+        summary: note.summary ? String(note.summary) : null,
+        compound_text: note.compound_text ? String(note.compound_text) : null,
+        topics: Array.isArray(note.topics) ? note.topics.map(String) : [],
+        intentions: Array.isArray(note.intentions) ? note.intentions.map(String) : [],
+        indexing_status: note.indexing_status || null,
+      }
+      
+      // Debug: log what we're about to serialize
+      console.log(`[getNotesByPortfolioPaginated] About to serialize [${index}]:`, {
+        noteId: plainNote.id,
+        referencesInPlainNote: plainNote.references,
+        referencesLength: plainNote.references.length,
+        plainNoteStringified: JSON.stringify(plainNote).substring(0, 500),
+      })
+      
+      // Force serialization through JSON to ensure it's a plain object
+      const serialized = JSON.parse(JSON.stringify(plainNote))
+      
+      // Debug: log after serialization
+      console.log(`[getNotesByPortfolioPaginated] After serialization [${index}]:`, {
+        noteId: serialized.id,
+        referencesInSerialized: serialized.references,
+        referencesLength: serialized.references.length,
+        serializedStringified: JSON.stringify(serialized).substring(0, 500),
+      })
+      
+      return serialized
+    })
+
+    // Final check before return
+    console.log('[getNotesByPortfolioPaginated] Serialized notes check:', {
+      firstNoteId: serializedNotes[0]?.id,
+      firstNoteRefs: serializedNotes[0]?.references,
+      firstNoteRefsLength: Array.isArray(serializedNotes[0]?.references) ? serializedNotes[0]?.references.length : 'N/A',
+      firstNoteRefsStringified: JSON.stringify(serializedNotes[0]?.references || []),
+    })
+
+    return {
+      success: true,
+      notes: serializedNotes,
+      hasMore,
+    }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
 /**
  * Get a note by ID (including deleted notes, for viewing annotations individually)
  */

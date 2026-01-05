@@ -5,6 +5,7 @@ import { createNote } from '@/app/notes/actions'
 import { Portfolio, isProjectPortfolio } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
+import { UIText, Button } from '@/components/ui'
 
 interface CreateNoteFormProps {
   portfolios: Portfolio[]
@@ -220,13 +221,13 @@ export function CreateNoteForm({
             onChange={handleImageSelect}
             className="hidden"
           />
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
           >
-            Add Images
-          </button>
+            <UIText>Add Images</UIText>
+          </Button>
           {images.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {images.map((image, index) => (
@@ -236,13 +237,15 @@ export function CreateNoteForm({
                     alt={`Preview ${index + 1}`}
                     className="w-20 h-20 object-cover rounded"
                   />
-                  <button
+                  <Button
                     type="button"
+                    variant="danger"
+                    size="sm"
                     onClick={() => removeImage(index)}
-                    className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-red-600"
+                    className="absolute top-0 right-0 w-5 h-5 min-w-0 p-0 rounded-full"
                   >
-                    ×
-                  </button>
+                    <UIText className="text-xs">×</UIText>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -253,9 +256,9 @@ export function CreateNoteForm({
       {/* Portfolio assignment - show assigned project (cannot be removed) */}
       {selectedPortfolios.length > 0 && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <UIText as="label" className="block mb-2">
             Assigned to Project <span className="text-red-500">*</span>
-          </label>
+          </UIText>
           <div className="flex flex-wrap gap-2">
             {selectedPortfolios
               .filter((portfolioId) => {
@@ -277,28 +280,28 @@ export function CreateNoteForm({
               })}
           </div>
           {selectedPortfolios.length === 0 && (
-            <p className="text-sm text-red-600 mt-1">A project must be assigned to create a note</p>
+            <UIText as="p" className="text-red-600 mt-1">A project must be assigned to create a note</UIText>
           )}
         </div>
       )}
 
       {/* Actions */}
       <div className="flex gap-2">
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={isSubmitting || !text.trim()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
-          {isSubmitting ? 'Creating...' : 'Create Note'}
-        </button>
+          <UIText>{isSubmitting ? 'Creating...' : 'Create Note'}</UIText>
+        </Button>
         {onCancel && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={onCancel}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
           >
-            Cancel
-          </button>
+            <UIText>Cancel</UIText>
+          </Button>
         )}
       </div>
     </form>

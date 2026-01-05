@@ -144,3 +144,4 @@ export async function processPortfolioDescriptionTopics(
   return newTopicIds
 }
 
+

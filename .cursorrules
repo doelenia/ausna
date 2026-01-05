@@ -1,0 +1,56 @@
+# Cursor Rules for Ausna Project
+
+## Style Guide Reference
+ALWAYS refer to `STYLE_GUIDE.md` for design system guidelines including:
+- Typography (fonts, sizes, weights)
+- Colors (primary, secondary, semantic colors)
+- Buttons (variants, sizes, states)
+- Cards (padding, shadows, borders)
+- Forms (inputs, labels, validation states)
+- Spacing and layout patterns
+
+## Design System Principles
+1. **Consistency**: Use predefined design tokens from `STYLE_GUIDE.md` and `tailwind.config.js`
+2. **Accessibility**: Ensure proper contrast ratios and semantic HTML
+3. **Responsive**: Mobile-first approach with Tailwind breakpoints
+4. **Component Reuse**: Prefer existing components from `components/` directory
+
+## Code Style
+- Use TypeScript for all new files
+- Use Tailwind CSS utility classes (avoid custom CSS when possible)
+- Follow existing component patterns in `components/` directory
+- Use 'use client' directive only when necessary (interactivity, hooks, browser APIs)
+
+## When Creating New Components
+1. Check `STYLE_GUIDE.md` for design patterns
+2. Use design tokens from `tailwind.config.js`
+3. Follow existing component structure patterns
+4. Ensure responsive design (mobile-first)
+5. Include proper TypeScript types
+
+## When Styling Elements
+- **Buttons**: ALWAYS use the `Button` component from `@/components/ui` instead of inline button styles. Use variants: primary, secondary, success, danger, text
+- **Cards**: ALWAYS use the `Card` component from `@/components/ui` instead of inline card styles. Use variants: default, compact, spacious, subtle
+- **Typography**: ALWAYS use `Title`, `Subtitle`, `Content`, or `UIText` components from `@/components/ui` instead of inline text styles. NEVER use direct text size/weight classes like `text-lg`, `font-bold`, etc.
+  - `Title`: For headings and titles (large, regular, black)
+  - `Subtitle`: For subtitles (extra large, regular, black)
+  - `Content`: For body content (same size as title, gray)
+  - `UIText`: For UI elements like labels, captions (smaller size)
+- **Forms**: Use form input/label patterns from STYLE_GUIDE.md
+- **Colors**: Use semantic color tokens (primary, secondary, success, danger, etc.)
+
+## Component Usage
+- **IMPORTANT**: Always import and use `Button`, `Card`, `Title`, `Subtitle`, `Content`, and `UIText` from `@/components/ui` instead of creating inline styled elements
+- This ensures style changes propagate automatically across the entire application
+- Example: `import { Button, Card, Title, Subtitle, Content, UIText } from '@/components/ui'`
+- **Typography Rules**: 
+  - NEVER use `text-*` or `font-*` classes directly
+  - ALWAYS use `Title`, `Subtitle`, `Content`, or `UIText` components
+  - Only 4 font types allowed: title, subtitle, content, ui
+
+## Layout Structure
+- Follow the root layout structure defined in STYLE_GUIDE.md
+- Max content width: 800px (via CSS variable `--max-content-width`)
+- Background: `bg-gray-50`
+- Pages render content directly without wrapper divs
+

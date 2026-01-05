@@ -12,6 +12,7 @@ import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
 import { NoteCard } from './NoteCard'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
+import { Title, Content, UIText, Button } from '@/components/ui'
 
 interface SendToAuthorButtonProps {
   noteId: string
@@ -53,10 +54,12 @@ function SendToAuthorButton({ noteId, authorId }: SendToAuthorButtonProps) {
   }
 
   return (
-    <button
+    <Button
+      variant="primary"
+      fullWidth
       onClick={handleSendToAuthor}
       disabled={isSending}
-      className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      className="flex items-center justify-center gap-2"
     >
       <svg
         className="w-5 h-5"
@@ -71,8 +74,8 @@ function SendToAuthorButton({ noteId, authorId }: SendToAuthorButtonProps) {
           d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
         />
       </svg>
-      {isSending ? 'Opening messages...' : 'Send to Author'}
-    </button>
+      <UIText>{isSending ? 'Opening messages...' : 'Send to Author'}</UIText>
+    </Button>
   )
 }
 
@@ -158,19 +161,19 @@ export function NoteView({
             />
             <div className="flex-1">
               {urlRef.title && (
-                <h4 className="font-semibold text-gray-900 mb-1">{urlRef.title}</h4>
+                <Title as="h4" className="mb-1">{urlRef.title}</Title>
               )}
               {urlRef.description && (
-                <p className="text-sm text-gray-600 mb-2">{urlRef.description}</p>
+                <Content as="p" className="mb-2">{urlRef.description}</Content>
               )}
               {/* Always show host name */}
               <a
                 href={urlRef.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:underline"
+                className="text-blue-600 hover:underline"
               >
-                {displayHostName}
+                <UIText>{displayHostName}</UIText>
               </a>
             </div>
           </div>
@@ -218,7 +221,7 @@ export function NoteView({
           alt={basic.name}
           className="h-10 w-10 rounded-full object-cover border-2 border-gray-300"
         />
-        <span className="text-sm font-medium text-gray-700">{basic.name}</span>
+        <UIText as="span">{basic.name}</UIText>
       </Link>
     )
   }
@@ -231,7 +234,7 @@ export function NoteView({
           {/* Creators Row */}
           {organizedHumanPortfolios.length > 0 && (
             <div>
-              <h2 className="text-sm font-medium text-gray-700 mb-3">Creators</h2>
+              <UIText as="h2" className="mb-3">Creators</UIText>
               <div className="flex flex-wrap gap-3">
                 {organizedHumanPortfolios.map((portfolio) => renderPortfolioAvatar(portfolio))}
               </div>
@@ -241,7 +244,7 @@ export function NoteView({
           {/* Projects Row */}
           {projectPortfolios.length > 0 && (
             <div>
-              <h2 className="text-sm font-medium text-gray-700 mb-3">Projects</h2>
+              <UIText as="h2" className="mb-3">Projects</UIText>
               <div className="flex flex-wrap gap-3">
                 {projectPortfolios.map((portfolio) => renderPortfolioAvatar(portfolio))}
               </div>
@@ -251,7 +254,7 @@ export function NoteView({
           {/* Communities Row */}
           {communityPortfolios.length > 0 && (
             <div>
-              <h2 className="text-sm font-medium text-gray-700 mb-3">Communities</h2>
+              <UIText as="h2" className="mb-3">Communities</UIText>
               <div className="flex flex-wrap gap-3">
                 {communityPortfolios.map((portfolio) => renderPortfolioAvatar(portfolio))}
               </div>
@@ -265,19 +268,20 @@ export function NoteView({
         <div className="flex items-center gap-3">
           <Link
             href={`/portfolio/human/${note.owner_account_id}`}
-            className="text-sm font-medium text-gray-900 hover:text-blue-600"
+            className="hover:text-blue-600"
           >
-            User {note.owner_account_id.slice(0, 8)}
+            <UIText as="span">User {note.owner_account_id.slice(0, 8)}</UIText>
           </Link>
-          <span className="text-sm text-gray-500">
+          <UIText as="span">
             {new Date(note.created_at).toLocaleDateString()}
-          </span>
+          </UIText>
         </div>
         <div className="flex items-center gap-2">
           {isOwner && (
             <NoteActions
               note={note}
               portfolioId={annotatePortfolioId}
+              currentUserId={currentUserId}
               onDelete={handleDelete}
               isDeleting={isDeleting}
             />
@@ -287,7 +291,7 @@ export function NoteView({
 
       {/* Text content */}
       <div className="mb-4">
-        <p className="text-gray-900 whitespace-pre-wrap">{note.text}</p>
+        <Content as="p" className="whitespace-pre-wrap">{note.text}</Content>
       </div>
 
       {/* References */}
@@ -301,19 +305,19 @@ export function NoteView({
       {note.mentioned_note_id && (
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
           {referencedNoteDeleted ? (
-            <p className="text-sm text-gray-600 italic">
-              Annotating: <span className="text-gray-500">Note (deleted)</span>
-            </p>
+            <UIText as="p" className="italic">
+              Annotating: <span>Note (deleted)</span>
+            </UIText>
           ) : (
-            <p className="text-sm text-blue-700">
+            <UIText as="p" className="text-blue-700">
               Annotating:{' '}
               <Link
                 href={`/notes/${note.mentioned_note_id}`}
-                className="font-medium hover:underline"
+                className="hover:underline"
               >
                 Note {note.mentioned_note_id.slice(0, 8)}
               </Link>
-            </p>
+            </UIText>
           )}
         </div>
       )}

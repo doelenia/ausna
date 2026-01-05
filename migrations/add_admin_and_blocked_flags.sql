@@ -56,3 +56,4 @@ COMMENT ON FUNCTION is_blocked(UUID) IS 'Check if a user is blocked from accessi
 -- Note: The actual admin flag setting will be done via Supabase Admin API or service role
 -- This migration provides the functions and structure needed
 
+

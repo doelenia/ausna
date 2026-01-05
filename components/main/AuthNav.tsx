@@ -241,7 +241,7 @@ function UserAvatarClient({ userId }: { userId: string }) {
     return (
       <Link
         href={`/portfolio/human/${userId}`}
-        className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+        className="hover:opacity-80 transition-opacity"
         title={error ? `Error: ${error}` : 'Loading profile...'}
       >
         <img
@@ -249,9 +249,6 @@ function UserAvatarClient({ userId }: { userId: string }) {
           alt={fallbackDisplayName}
           className="h-8 w-8 rounded-full border-2 border-gray-300 object-cover"
         />
-        <span className="text-sm font-medium text-gray-700 hidden sm:inline">
-          {fallbackDisplayName}
-        </span>
       </Link>
     )
   }
@@ -259,7 +256,7 @@ function UserAvatarClient({ userId }: { userId: string }) {
   return (
     <Link
       href={humanPortfolioUrl}
-      className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+      className="hover:opacity-80 transition-opacity"
     >
       <img
         src={finalAvatarUrl}
@@ -271,9 +268,6 @@ function UserAvatarClient({ userId }: { userId: string }) {
           target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
         }}
       />
-      <span className="text-sm font-medium text-gray-700 hidden sm:inline">
-        {displayName}
-      </span>
     </Link>
   )
 }

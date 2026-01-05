@@ -19,17 +19,6 @@ export async function createClient() {
           // Return all cookies - server actions should have access to all cookies
           // The cookies() API from next/headers automatically handles URL decoding
           const allCookies = cookieStore.getAll()
-          
-          // Debug: Check if auth cookie exists and its format
-          const authCookie = allCookies.find(c => c.name.includes('auth-token'))
-          if (authCookie && authCookie.value) {
-            console.log('Auth cookie found:', {
-              name: authCookie.name,
-              valueLength: authCookie.value.length,
-              valueStart: authCookie.value.substring(0, 50),
-            })
-          }
-          
           return allCookies
         },
         setAll(cookiesToSet) {

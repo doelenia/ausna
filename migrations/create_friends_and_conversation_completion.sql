@@ -92,3 +92,4 @@ COMMENT ON TABLE conversation_completions IS 'Tracks when users mark conversatio
 COMMENT ON COLUMN conversation_completions.user_id IS 'The user who marked the conversation as complete';
 COMMENT ON COLUMN conversation_completions.partner_id IS 'The conversation partner';
 
+

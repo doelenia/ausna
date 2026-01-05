@@ -51,3 +51,4 @@ USING (
 -- Note: The bucket 'note-images' should be created manually in Supabase Storage dashboard
 -- with public access enabled. The path structure is: notes/{note_id}/{filename}
 
+

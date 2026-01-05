@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { Button, Title, Content, UIText } from '@/components/ui'
 
 interface AuthFormProps {
   mode: 'login' | 'signup'
@@ -282,15 +283,15 @@ export function AuthForm({ mode }: AuthFormProps) {
               />
             </svg>
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">You're on the waitlist!</h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <Title as="h3" className="mb-2">You're on the waitlist!</Title>
+          <UIText className="mb-4">
             Your email <strong>{email}</strong> has been added to the waitlist. You will be notified when your account is approved.
-          </p>
+          </UIText>
           <Link
             href="/login"
-            className="text-sm text-blue-600 hover:text-blue-500"
+            className="text-blue-600 hover:text-blue-500"
           >
-            Back to Sign In
+            <UIText>Back to Sign In</UIText>
           </Link>
         </div>
       </div>
@@ -317,14 +318,15 @@ export function AuthForm({ mode }: AuthFormProps) {
               />
             </svg>
           </div>
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Check your email</h3>
-          <p className="text-sm text-gray-600 mb-4">
+          <Title as="h3" className="mb-2">Check your email</Title>
+          <UIText className="mb-4">
             We've sent a confirmation email to <strong>{email}</strong>. Please click the link in the
             email to verify your account.
-          </p>
-          <p className="text-xs text-gray-500 mb-4">
+          </UIText>
+          <UIText as="p" className="mb-4 text-xs text-gray-500">
             Didn't receive the email? Check your spam folder or{' '}
-            <button
+            <Button
+              variant="text"
               type="button"
               onClick={() => {
                 setEmailSent(false)
@@ -332,16 +334,16 @@ export function AuthForm({ mode }: AuthFormProps) {
                 setPassword('')
                 setUsername('')
               }}
-              className="text-blue-600 hover:text-blue-500 underline"
+              className="underline"
             >
-              try again
-            </button>
-          </p>
+              <UIText>try again</UIText>
+            </Button>
+          </UIText>
           <Link
             href="/login"
-            className="text-sm text-blue-600 hover:text-blue-500"
+            className="text-blue-600 hover:text-blue-500"
           >
-            Back to Sign In
+            <UIText>Back to Sign In</UIText>
           </Link>
         </div>
       </div>
@@ -352,9 +354,9 @@ export function AuthForm({ mode }: AuthFormProps) {
     <div className="w-full max-w-md mx-auto">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+          <UIText as="label" htmlFor="email" className="block mb-1">
             Email
-          </label>
+          </UIText>
           <input
             id="email"
             type="email"
@@ -378,9 +380,9 @@ export function AuthForm({ mode }: AuthFormProps) {
         {mode === 'signup' && emailChecked && isApproved && (
           <>
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
+              <UIText as="label" htmlFor="username" className="block mb-1">
                 Username <span className="text-gray-500">(optional)</span>
-              </label>
+              </UIText>
               <input
                 id="username"
                 type="text"
@@ -395,15 +397,15 @@ export function AuthForm({ mode }: AuthFormProps) {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                 placeholder="username"
               />
-              <p className="mt-1 text-xs text-gray-500">
+              <UIText as="p" className="mt-1">
                 3-30 characters, letters, numbers, underscores, and hyphens only
-              </p>
+              </UIText>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+              <UIText as="label" htmlFor="password" className="block mb-1">
                 Password
-              </label>
+              </UIText>
               <input
                 id="password"
                 type="password"
@@ -421,9 +423,9 @@ export function AuthForm({ mode }: AuthFormProps) {
         {/* Show password for login */}
         {mode === 'login' && (
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+            <UIText as="label" htmlFor="password" className="block mb-1">
               Password
-            </label>
+            </UIText>
             <input
               id="password"
               type="password"
@@ -443,11 +445,13 @@ export function AuthForm({ mode }: AuthFormProps) {
           </div>
         )}
 
-        <button
+        <Button
           type="submit"
+          variant="primary"
+          fullWidth
           disabled={loading}
-          className="w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
+          <UIText>
           {loading
             ? 'Loading...'
             : mode === 'login'
@@ -455,21 +459,23 @@ export function AuthForm({ mode }: AuthFormProps) {
             : emailChecked && isApproved
             ? 'Sign Up'
             : 'Check Email'}
-        </button>
+          </UIText>
+        </Button>
 
         {mode === 'signup' && emailChecked && isApproved && (
-          <button
+          <Button
             type="button"
+            variant="text"
+            fullWidth
             onClick={() => {
               setEmailChecked(false)
               setIsApproved(false)
               setPassword('')
               setUsername('')
             }}
-            className="w-full text-sm text-gray-600 hover:text-gray-800"
           >
-            Use different email
-          </button>
+            <UIText>Use different email</UIText>
+          </Button>
         )}
       </form>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Button, UIText } from '@/components/ui'
 
 interface FriendButtonProps {
   friendId: string
@@ -116,58 +117,63 @@ export function FriendButton({
 
   if (status === 'loading') {
     return (
-      <button
+      <Button
         disabled
-        className={`px-4 py-2 bg-gray-400 text-white rounded-md cursor-not-allowed ${className}`}
+        variant="secondary"
+        className={className}
       >
-        Loading...
-      </button>
+        <UIText>Loading...</UIText>
+      </Button>
     )
   }
 
   if (status === 'accepted') {
     return (
-      <button
+      <Button
         onClick={handleUnfriend}
         disabled={isLoading}
-        className={`px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors disabled:opacity-50 ${className}`}
+        variant="secondary"
+        className={className}
       >
-        {isLoading ? '...' : 'Unfriend'}
-      </button>
+        <UIText>{isLoading ? '...' : 'Unfriend'}</UIText>
+      </Button>
     )
   }
 
   if (status === 'pending_sent') {
     return (
-      <button
+      <Button
         disabled
-        className={`px-4 py-2 bg-yellow-600 text-white rounded-md cursor-not-allowed ${className}`}
+        variant="secondary"
+        className={className}
       >
-        Friend Request Sent
-      </button>
+        <UIText>Friend Request Sent</UIText>
+      </Button>
     )
   }
 
   if (status === 'pending_received') {
     return (
-      <button
+      <Button
         onClick={handleAcceptRequest}
         disabled={isLoading}
-        className={`px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors disabled:opacity-50 ${className}`}
+        variant="success"
+        className={className}
       >
-        {isLoading ? '...' : 'Accept Invite'}
-      </button>
+        <UIText>{isLoading ? '...' : 'Accept Invite'}</UIText>
+      </Button>
     )
   }
 
   return (
-    <button
+    <Button
       onClick={handleSendRequest}
       disabled={isLoading}
-      className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 ${className}`}
+      variant="primary"
+      className={className}
     >
-      {isLoading ? '...' : 'Friend'}
-    </button>
+      <UIText>{isLoading ? '...' : 'Friend'}</UIText>
+    </Button>
   )
 }
 

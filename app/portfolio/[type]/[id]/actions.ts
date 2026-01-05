@@ -48,6 +48,16 @@ interface PinnedItemWithData {
     text: string
     owner_account_id: string
     created_at: string
+    references?: any[]
+    assigned_portfolios?: string[]
+    mentioned_note_id?: string | null
+    updated_at?: string
+    deleted_at?: string | null
+    summary?: string | null
+    compound_text?: string | null
+    topics?: string[]
+    intentions?: string[]
+    indexing_status?: any
   }
 }
 
@@ -228,6 +238,7 @@ export async function updatePortfolio(
     const name = formData.get('name') as string
     const description = formData.get('description') as string | null
     const avatarFile = formData.get('avatar') as File | null
+    const emoji = formData.get('emoji') as string | null
 
     if (!portfolioId) {
       return {
@@ -277,6 +288,8 @@ export async function updatePortfolio(
         name: name || basicMetadata.name,
         description: normalizedDescription,
         avatar: basicMetadata.avatar, // Will be updated separately if avatar file is provided
+        // Update emoji if provided, or clear it if empty string is sent
+        emoji: emoji !== null ? (emoji || '') : basicMetadata.emoji,
       },
     }
 
@@ -345,7 +358,7 @@ export async function updatePortfolio(
         const { uploadAvatar } = await import('@/lib/storage/avatars-server')
         const avatarResult = await uploadAvatar(portfolioId, avatarFile)
 
-        // Update portfolio with avatar URL
+        // Update portfolio with avatar URL and clear emoji when image is uploaded
         await supabase
           .from('portfolios')
           .update({
@@ -354,6 +367,7 @@ export async function updatePortfolio(
               basic: {
                 ...updatedMetadata.basic,
                 avatar: avatarResult.url,
+                emoji: '', // Clear emoji when image is uploaded
               },
             },
           })
@@ -362,6 +376,20 @@ export async function updatePortfolio(
         // Avatar upload failed, but portfolio was updated
         console.error('Failed to upload avatar:', avatarError)
       }
+    } else if (emoji !== null) {
+      // If emoji is being set (and no new avatar file), clear avatar URL
+      await supabase
+        .from('portfolios')
+        .update({
+          metadata: {
+            ...updatedMetadata,
+            basic: {
+              ...updatedMetadata.basic,
+              avatar: emoji ? '' : updatedMetadata.basic.avatar, // Clear avatar when emoji is set
+            },
+          },
+        })
+        .eq('id', portfolioId)
     }
 
     return {
@@ -465,6 +493,16 @@ interface PinnedItemWithData {
     text: string
     owner_account_id: string
     created_at: string
+    references?: any[]
+    assigned_portfolios?: string[]
+    mentioned_note_id?: string | null
+    updated_at?: string
+    deleted_at?: string | null
+    summary?: string | null
+    compound_text?: string | null
+    topics?: string[]
+    intentions?: string[]
+    indexing_status?: any
   }
 }
 
@@ -545,7 +583,8 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
     const items: PinnedItemWithData[] = []
     
     for (const item of pinned as PinnedItem[]) {
-      if (item.type === 'portfolio') {
+      // For human portfolios, only return notes (not portfolios)
+      if (item.type === 'portfolio' && !isHumanPortfolio(portfolioData)) {
         const { data: pinnedPortfolio } = await supabase
           .from('portfolios')
           .select('*')
@@ -585,7 +624,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
       } else if (item.type === 'note') {
         const { data: pinnedNote } = await supabase
           .from('notes')
-          .select('id, text, owner_account_id, created_at')
+          .select('*') // Select all columns including references
           .eq('id', item.id)
           .is('deleted_at', null)
           .single()
@@ -599,6 +638,16 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
               text: pinnedNote.text,
               owner_account_id: pinnedNote.owner_account_id,
               created_at: pinnedNote.created_at,
+              references: Array.isArray(pinnedNote.references) ? pinnedNote.references : [],
+              assigned_portfolios: pinnedNote.assigned_portfolios || [],
+              mentioned_note_id: pinnedNote.mentioned_note_id,
+              updated_at: pinnedNote.updated_at,
+              deleted_at: pinnedNote.deleted_at,
+              summary: pinnedNote.summary,
+              compound_text: pinnedNote.compound_text,
+              topics: pinnedNote.topics || [],
+              intentions: pinnedNote.intentions || [],
+              indexing_status: pinnedNote.indexing_status,
             },
           })
         }

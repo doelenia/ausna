@@ -11,7 +11,8 @@ export type PortfolioType = 'human' | 'projects' | 'community'
 export interface PortfolioBasicMetadata {
   name: string
   description?: string
-  avatar?: string // URL to storage bucket
+  avatar?: string // URL to storage bucket (for projects/community, emoji is required if no avatar)
+  emoji?: string // Emoji for projects/community when no image avatar is provided
 }
 
 /**

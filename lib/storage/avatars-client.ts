@@ -67,3 +67,4 @@ export function createAvatarUploadHelpers(supabase: SupabaseClient) {
   }
 }
 
+

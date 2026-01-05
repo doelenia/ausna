@@ -10,3 +10,4 @@
 -- No database changes needed for compression setup
 -- Compression happens at upload time in the application layer
 
+

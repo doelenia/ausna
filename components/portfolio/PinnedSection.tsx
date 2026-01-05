@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { getPinnedItems } from '@/app/portfolio/[type]/[id]/actions'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
+import { Title, Content, UIText } from '@/components/ui'
 
 interface PinnedItemWithData {
   type: 'portfolio' | 'note'
@@ -55,7 +56,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
   if (loading) {
     return (
       <div className="mb-6">
-        <div className="text-sm text-gray-500">Loading...</div>
+        <UIText>Loading...</UIText>
       </div>
     )
   }
@@ -63,7 +64,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
   if (error) {
     return (
       <div className="mb-6">
-        <div className="text-sm text-red-500">{error}</div>
+        <UIText className="text-red-500">{error}</UIText>
       </div>
     )
   }
@@ -109,22 +110,19 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
                 )}
                 <div className="p-4">
                   <div className="flex items-center justify-between gap-2 mb-1">
-                    <h3 className="font-semibold text-gray-900 truncate">
+                    <Title as="h3" className="truncate">
                       {portfolio.name}
-                    </h3>
+                    </Title>
                     {portfolio.role && (
-                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 ${
+                      <UIText as="span" className={`px-2 py-0.5 rounded-full flex-shrink-0 ${
                         portfolio.role === 'manager'
                           ? 'bg-purple-100 text-purple-700'
                           : 'bg-gray-100 text-gray-700'
                       }`}>
                         {portfolio.role === 'manager' ? 'Manager' : 'Member'}
-                      </span>
+                      </UIText>
                     )}
                   </div>
-                  <span className="text-xs text-gray-500 uppercase">
-                    {portfolio.type}
-                  </span>
                 </div>
               </Link>
             )
@@ -137,13 +135,13 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
                 className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 p-4"
               >
                 <div className="flex items-start justify-between mb-2">
-                  <span className="text-xs text-gray-500">
+                  <UIText as="span">
                     {new Date(note.created_at).toLocaleDateString()}
-                  </span>
+                  </UIText>
                 </div>
-                <p className="text-gray-900 text-sm line-clamp-3">
+                <Content as="p" className="line-clamp-3">
                   {note.text}
-                </p>
+                </Content>
               </Link>
             )
           }

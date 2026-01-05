@@ -241,12 +241,6 @@ export async function GET(request: NextRequest) {
         // Inactive = completed (completion record exists)
         const partnerSideActive = !partnerCompletedAt
         
-        console.log(`[DEBUG] Initial active states for partner ${partnerId}:`, {
-          myCompletedAt,
-          partnerCompletedAt,
-          mySideActive,
-          partnerSideActive,
-        })
 
         // Determine status message
         // Note: We'll recalculate this when we process all messages, but set initial value
@@ -256,28 +250,17 @@ export async function GET(request: NextRequest) {
           const partnerCompletedTime = new Date(partnerCompletedAt)
           const isLastMessageFromMe = message.sender_id === user.id
           
-          console.log(`[DEBUG] Partner ${partnerId} completion check:`, {
-            lastMessageTime: lastMessageTime.toISOString(),
-            partnerCompletedTime: partnerCompletedTime.toISOString(),
-            isLastMessageFromMe,
-            messageCreatedAt: message.created_at,
-            partnerCompletedAt,
-          })
           
           if (lastMessageTime <= partnerCompletedTime) {
             // Last message was before or at partner's completion
             // Partner completed, I haven't sent a new message
             statusMessage = 'partner_completed'
-            console.log(`[DEBUG] Setting status_message to 'partner_completed' for partner ${partnerId}`)
+            
           } else if (isLastMessageFromMe) {
             // I sent a message after partner completed
             statusMessage = 'waiting_for_accept'
-            console.log(`[DEBUG] Setting status_message to 'waiting_for_accept' for partner ${partnerId}`)
           }
-        } else {
-          console.log(`[DEBUG] No partner completion found for partner ${partnerId}`)
         }
-
         conversationsMap.set(partnerId, {
           partner_id: partnerId,
           last_message: message,
@@ -314,26 +297,19 @@ export async function GET(request: NextRequest) {
           const partnerCompletedTime = new Date(partnerCompletedAt)
           const isLastMessageFromMe = message.sender_id === user.id
           
-          console.log(`[DEBUG] Updating status for partner ${partnerId} (newer message):`, {
-            lastMessageTime: lastMessageTime.toISOString(),
-            partnerCompletedTime: partnerCompletedTime.toISOString(),
-            isLastMessageFromMe,
-            currentStatus: conversation.status_message,
-          })
+          
           
           if (lastMessageTime <= partnerCompletedTime) {
             // Last message was before or at partner's completion
             // Partner completed, I haven't sent a new message
             conversation.status_message = 'partner_completed'
-            console.log(`[DEBUG] Updated status_message to 'partner_completed'`)
+            
           } else if (isLastMessageFromMe) {
             // I sent a message after partner completed
             conversation.status_message = 'waiting_for_accept'
-            console.log(`[DEBUG] Updated status_message to 'waiting_for_accept'`)
           } else {
             // Partner sent a message after their completion (they uncompleted it)
             conversation.status_message = null
-            console.log(`[DEBUG] Updated status_message to null (partner uncompleted)`)
           }
         } else {
           conversation.status_message = null
@@ -352,7 +328,6 @@ export async function GET(request: NextRequest) {
     // Filter conversations based on tab
     let filteredConversations = Array.from(conversationsMap.values())
     
-    console.log(`[DEBUG] Before filtering for tab="${tab}": ${filteredConversations.length} conversations`)
 
     if (tab === 'invitations') {
       // Invitations: 
@@ -360,18 +335,14 @@ export async function GET(request: NextRequest) {
       // - Friends where my side is inactive (completed and no new message)
       filteredConversations = filteredConversations.filter((conv) => {
         const shouldInclude = !conv.my_side_active
-        console.log(`[DEBUG] Invitations filter for ${conv.partner_id}: my_side_active=${conv.my_side_active}, include=${shouldInclude}`)
         return shouldInclude
       })
-      console.log(`[DEBUG] After invitations filter: ${filteredConversations.length} conversations`)
     } else {
       // Active: conversations where my side is active
       filteredConversations = filteredConversations.filter((conv) => {
         const shouldInclude = conv.my_side_active
-        console.log(`[DEBUG] Active filter for ${conv.partner_id}: my_side_active=${conv.my_side_active}, include=${shouldInclude}`)
         return shouldInclude
       })
-      console.log(`[DEBUG] After active filter: ${filteredConversations.length} conversations`)
     }
 
     // Sort by last message time (most recent first)
@@ -383,9 +354,6 @@ export async function GET(request: NextRequest) {
 
     // Ensure status messages and active states are set correctly for all conversations
     // Recalculate based on the actual last message
-    console.log(`[DEBUG] Final status check for tab="${tab}" with ${filteredConversations.length} conversations`)
-    console.log(`[DEBUG] Partner completion map at final check:`, Array.from(partnerCompletionMap.entries()))
-    console.log(`[DEBUG] My completion map:`, Array.from(myCompletionMap.entries()))
     
     for (const conv of filteredConversations) {
       const myCompletedAt = myCompletionMap.get(conv.partner_id)
@@ -398,18 +366,6 @@ export async function GET(request: NextRequest) {
       const mySideActive = !myCompletedAt
       const partnerSideActive = !partnerCompletedAt
       
-      console.log(`[DEBUG] Conversation with ${conv.partner_id} (tab: ${tab}):`, {
-        myCompletedAt,
-        partnerCompletedAt,
-        lastMessageSender: isLastMessageFromMe ? 'me' : 'partner',
-        lastMessageTime: conv.last_message.created_at,
-        lastMessageTimeISO: lastMessageTime.toISOString(),
-        mySideActive_old: conv.my_side_active,
-        mySideActive_new: mySideActive,
-        partnerSideActive_old: conv.partner_side_active,
-        partnerSideActive_new: partnerSideActive,
-        status_message_before: conv.status_message,
-      })
       
       // Update active states
       conv.my_side_active = mySideActive
@@ -419,32 +375,27 @@ export async function GET(request: NextRequest) {
       // This should work for both active and invitations tabs
       if (partnerCompletedAt) {
         const partnerCompletedTime = new Date(partnerCompletedAt)
-        console.log(`[DEBUG] Partner ${conv.partner_id} completed at ${partnerCompletedTime.toISOString()}`)
-        console.log(`[DEBUG] Comparing: lastMessageTime (${lastMessageTime.toISOString()}) vs partnerCompletedTime (${partnerCompletedTime.toISOString()})`)
-        console.log(`[DEBUG] lastMessageTime <= partnerCompletedTime: ${lastMessageTime <= partnerCompletedTime}`)
-        console.log(`[DEBUG] isLastMessageFromMe: ${isLastMessageFromMe}`)
         
         if (lastMessageTime <= partnerCompletedTime) {
           // Last message was before or at partner's completion
           // Partner completed, I haven't sent a new message
           conv.status_message = 'partner_completed'
-          console.log(`[DEBUG] Set status_message to 'partner_completed'`)
+          
         } else if (isLastMessageFromMe) {
           // I sent a message after partner completed
           conv.status_message = 'waiting_for_accept'
-          console.log(`[DEBUG] Set status_message to 'waiting_for_accept'`)
+
         } else {
           // Partner sent a message after their completion (they uncompleted it)
           conv.status_message = null
-          console.log(`[DEBUG] Set status_message to null (partner uncompleted)`)
+
         }
       } else {
         // No partner completion - clear status message
         conv.status_message = null
-        console.log(`[DEBUG] No partner completion found for ${conv.partner_id}, cleared status_message`)
+
       }
       
-      console.log(`[DEBUG] Final status_message for ${conv.partner_id}: ${conv.status_message}`)
     }
 
     // Fetch partner names for all conversations

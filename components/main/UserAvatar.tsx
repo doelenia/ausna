@@ -33,16 +33,13 @@ export async function UserAvatar() {
   return (
     <Link
       href={humanPortfolioUrl}
-      className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+      className="hover:opacity-80 transition-opacity"
     >
       <img
         src={finalAvatarUrl}
         alt={displayName}
         className="h-8 w-8 rounded-full border-2 border-gray-300"
       />
-      <span className="text-sm font-medium text-gray-700 hidden sm:inline">
-        {username ? `@${username}` : displayName}
-      </span>
     </Link>
   )
 }

@@ -35,3 +35,4 @@ export function generateSlug(name: string): string {
     .replace(/^-+|-+$/g, '') // Remove leading/trailing hyphens
 }
 
+

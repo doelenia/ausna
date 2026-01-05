@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { SubPortfoliosTab } from './SubPortfoliosTab'
 import { NotesTab } from '@/components/notes/NotesTab'
 import { isHumanPortfolio } from '@/types/portfolio'
+import { Title, Content, UIText, Button } from '@/components/ui'
 
 interface PortfolioAllViewProps {
   portfolio: Portfolio
@@ -38,37 +39,31 @@ export function PortfolioAllView({
           <div className="mb-6">
             <Link
               href={getPortfolioUrl(portfolio.type, portfolio.id)}
-              className="text-blue-600 hover:text-blue-700 text-sm font-medium mb-4 inline-block"
+              className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
             >
-              ← Back to Portfolio
+              <UIText>← Back to Portfolio</UIText>
             </Link>
-            <h1 className="text-3xl font-bold mb-2">{basic.name}</h1>
+            <Title as="h1" className="mb-2">{basic.name}</Title>
           </div>
 
           {/* Tabs - Only show if human portfolio */}
           {showPortfoliosTab && (
             <div className="border-b border-gray-200 mb-6">
               <nav className="-mb-px flex space-x-8">
-                <button
+                <Button
+                  variant="text"
                   onClick={() => setActiveTab('notes')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'notes'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={activeTab === 'notes' ? 'border-b-2 border-blue-500' : 'border-b-2 border-transparent'}
                 >
-                  Notes
-                </button>
-                <button
+                  <UIText>Notes</UIText>
+                </Button>
+                <Button
+                  variant="text"
                   onClick={() => setActiveTab('portfolios')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'portfolios'
-                      ? 'border-blue-500 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
+                  className={activeTab === 'portfolios' ? 'border-b-2 border-blue-500' : 'border-b-2 border-transparent'}
                 >
-                  {tabLabel}
-                </button>
+                  <UIText>{tabLabel}</UIText>
+                </Button>
               </nav>
             </div>
           )}

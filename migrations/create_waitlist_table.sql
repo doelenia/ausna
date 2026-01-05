@@ -51,3 +51,4 @@ COMMENT ON TABLE waitlist IS 'Waitlist for user signup approvals. Users must be 
 COMMENT ON COLUMN waitlist.status IS 'Status: pending (awaiting approval), approved (can sign up), rejected (denied)';
 COMMENT ON COLUMN waitlist.approved_by IS 'Admin user ID who approved this waitlist entry';
 
+

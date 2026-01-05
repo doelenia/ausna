@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { Button, UIText } from '@/components/ui'
 
 interface SubscribeButtonProps {
   portfolioId: string
@@ -63,31 +64,32 @@ export function SubscribeButton({
 
   if (isChecking) {
     return (
-      <button
+      <Button
         disabled
-        className={`px-4 py-2 bg-gray-400 text-white rounded-md cursor-not-allowed ${className}`}
+        variant="secondary"
+        className={className}
       >
-        Loading...
-      </button>
+        <UIText>Loading...</UIText>
+      </Button>
     )
   }
 
   return (
-    <button
+    <Button
       onClick={handleToggle}
       disabled={isLoading}
-      className={`px-4 py-2 rounded-md transition-colors font-medium ${
-        isSubscribed
-          ? 'bg-gray-600 text-white hover:bg-gray-700'
-          : 'bg-blue-600 text-white hover:bg-blue-700'
-      } disabled:opacity-50 disabled:cursor-not-allowed ${className}`}
+      variant={isSubscribed ? 'secondary' : 'primary'}
+      className={className}
     >
-      {isLoading
-        ? '...'
-        : isSubscribed
-        ? 'Unsubscribe'
-        : 'Subscribe'}
-    </button>
+      <UIText>
+        {isLoading
+          ? '...'
+          : isSubscribed
+          ? 'Unsubscribe'
+          : 'Subscribe'}
+      </UIText>
+    </Button>
   )
 }
+
 

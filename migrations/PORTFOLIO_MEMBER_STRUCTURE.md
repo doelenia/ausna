@@ -158,3 +158,4 @@ The following features are planned but not yet implemented:
 - Only human portfolios show the "Involvement" tab
 - Managers are assigned automatically to creator when portfolio is created
 
+

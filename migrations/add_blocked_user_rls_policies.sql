@@ -84,3 +84,4 @@ CREATE POLICY "Users can delete their own portfolios (not blocked)"
 -- Add comment
 COMMENT ON FUNCTION is_current_user_blocked() IS 'Check if the current authenticated user is blocked from accessing the platform';
 
+

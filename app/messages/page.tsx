@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
+import { Title, Content, UIText, Button } from '@/components/ui'
 
 interface Conversation {
   partner_id: string
@@ -148,7 +149,7 @@ function MessagesPageContent() {
   if (loading) {
     return (
       <div className="bg-white shadow rounded-lg p-6">
-        <div className="text-center">Loading conversations...</div>
+        <div className="text-center"><Content>Loading conversations...</Content></div>
       </div>
     )
   }
@@ -182,37 +183,33 @@ function MessagesPageContent() {
 
   return (
     <div className="bg-transparent p-6 h-full flex flex-col">
-      <h1 className="text-2xl font-bold mb-6">Messages</h1>
+      <Title as="h1" className="mb-6">Messages</Title>
 
           {/* Tabs */}
           <div className="flex gap-2 mb-6 border-b border-gray-200">
-            <button
+            <Button
+              variant="text"
               onClick={() => setActiveTab('active')}
-              className={`px-4 py-2 font-medium transition-colors ${
-                activeTab === 'active'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
+              className={activeTab === 'active' ? 'border-b-2 border-blue-600' : 'border-b-2 border-transparent'}
             >
-              Active
-            </button>
-            <button
+              <UIText>Active</UIText>
+            </Button>
+            <Button
+              variant="text"
               onClick={() => setActiveTab('invitations')}
-              className={`px-4 py-2 font-medium transition-colors ${
-                activeTab === 'invitations'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
+              className={activeTab === 'invitations' ? 'border-b-2 border-blue-600' : 'border-b-2 border-transparent'}
             >
-              Invitations
-            </button>
+              <UIText>Invitations</UIText>
+            </Button>
           </div>
 
           {conversations.length === 0 ? (
-            <div className="text-center text-gray-500 py-12">
+            <div className="text-center py-12">
+              <Content>
               {activeTab === 'active'
                 ? 'No active conversations yet.'
                 : 'No invitations yet.'}
+              </Content>
             </div>
           ) : (
             <div className="space-y-2">
@@ -248,9 +245,9 @@ function MessagesPageContent() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <h3 className="font-medium text-gray-900 truncate">
+                            <UIText as="h3" className="truncate">
                               {displayName}
-                            </h3>
+                            </UIText>
                             {conv.status_message === 'waiting_for_accept' && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
                                 Waiting
@@ -262,24 +259,24 @@ function MessagesPageContent() {
                               </span>
                             )}
                           </div>
-                          <span className="text-sm text-gray-500 ml-2">
+                          <UIText as="span" className="ml-2">
                             {new Date(
                               conv.last_message.created_at
                             ).toLocaleDateString()}
-                          </span>
+                          </UIText>
                         </div>
                         {conv.status_message === 'waiting_for_accept' ? (
-                          <p className="text-sm text-yellow-600 italic mt-1">
+                          <UIText as="p" className="text-yellow-600 italic mt-1">
                             Waiting for {conv.partner_name || displayName} to accept invite
-                          </p>
+                          </UIText>
                         ) : conv.status_message === 'partner_completed' ? (
-                          <p className="text-sm text-gray-500 italic mt-1">
+                          <UIText as="p" className="italic mt-1">
                             Chat is marked completed by {conv.partner_name || displayName}
-                          </p>
+                          </UIText>
                         ) : (
-                          <p className="text-sm text-gray-600 truncate mt-1">
+                          <UIText as="p" className="truncate mt-1">
                             {conv.last_message.text}
-                          </p>
+                          </UIText>
                         )}
                       </div>
                       {conv.unread_count > 0 && (
@@ -289,13 +286,14 @@ function MessagesPageContent() {
                       )}
                     </button>
                     {activeTab === 'active' && conv.my_side_active && (
-                      <button
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={(e) => handleCompleteConversation(conv.partner_id, e)}
-                        className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
                         title="Mark conversation as complete"
                       >
-                        Complete
-                      </button>
+                        <UIText>Complete</UIText>
+                      </Button>
                     )}
                   </div>
                 )
@@ -1111,9 +1109,9 @@ function ConversationView({
     <div className="bg-transparent flex flex-col" style={{ height: 'calc(100dvh - 4rem)', maxHeight: 'calc(100dvh - 4rem)' }}>
           {/* Header */}
           <div className="flex items-center gap-4 p-4 border-b border-gray-200">
-            <button
+            <Button
+              variant="text"
               onClick={onBack}
-              className="text-gray-600 hover:text-gray-900"
             >
               <svg
                 className="w-6 h-6"
@@ -1128,7 +1126,7 @@ function ConversationView({
                   d="M15 19l-7-7 7-7"
                 />
               </svg>
-            </button>
+            </Button>
             <Link
               href={`/portfolio/human/${userId}`}
               className="flex items-center gap-3 flex-1"
@@ -1138,16 +1136,16 @@ function ConversationView({
                 alt={displayName}
                 className="h-10 w-10 rounded-full object-cover border-2 border-gray-300"
               />
-              <h2 className="text-lg font-semibold">{displayName}</h2>
+              <UIText as="h2">{displayName}</UIText>
             </Link>
             {conversationStatus?.my_side_active && (
-              <button
+              <Button
+                variant="secondary"
                 onClick={handleCompleteConversation}
                 disabled={isCompleting}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors disabled:opacity-50"
               >
-                {isCompleting ? 'Completing...' : 'Complete'}
-              </button>
+                <UIText>{isCompleting ? 'Completing...' : 'Complete'}</UIText>
+              </Button>
             )}
           </div>
 
@@ -1163,18 +1161,18 @@ function ConversationView({
                   <svg className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <p className="text-sm text-yellow-700 italic">
+                  <UIText as="p" className="text-yellow-700 italic">
                     Waiting for {conversationStatus.partner_name || displayName} to accept invite
-                  </p>
+                  </UIText>
                 </>
               ) : (
                 <>
                   <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <p className="text-sm text-gray-600 italic">
+                  <UIText as="p" className="italic">
                     Chat is marked completed by {conversationStatus.partner_name || displayName}
-                  </p>
+                  </UIText>
                 </>
               )}
             </div>
@@ -1192,10 +1190,10 @@ function ConversationView({
             onScroll={handleScroll}
           >
             {loading ? (
-              <div className="text-center text-gray-500">Loading messages...</div>
+              <div className="text-center"><Content>Loading messages...</Content></div>
             ) : messages.length === 0 ? (
-              <div className="text-center text-gray-500 py-12">
-                No messages yet. Start the conversation!
+              <div className="text-center py-12">
+                <Content>No messages yet. Start the conversation!</Content>
               </div>
             ) : (
               <div 
@@ -1332,7 +1330,7 @@ function ConversationView({
                         } ${(message as any).isOptimistic ? 'opacity-75' : ''}`}
                       >
                         <div className="flex items-center gap-2">
-                          <p className="text-sm">{message.text}</p>
+                          <UIText as="p">{message.text}</UIText>
                           {(message as any).isOptimistic && (
                             <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -1354,42 +1352,51 @@ function ConversationView({
                         {/* Show accept button for received friend request */}
                         {isReceivedFriendRequest && (
                           <div className="mt-2 pt-2 border-t border-gray-300">
-                            <button
+                            <Button
+                              variant="success"
+                              size="sm"
+                              fullWidth
                               onClick={handleAcceptFriendRequest}
-                              className="w-full px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
                             >
-                              Accept Invite
-                            </button>
+                              <UIText>Accept Invite</UIText>
+                            </Button>
                           </div>
                         )}
                         {/* Show cancel button for sent friend request */}
                         {isSentFriendRequest && (
                           <div className="mt-2 pt-2 border-t border-blue-400">
-                            <button
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              fullWidth
                               onClick={handleCancelFriendRequest}
-                              className="w-full px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
                             >
-                              Cancel Invitation
-                            </button>
+                              <UIText>Cancel Invitation</UIText>
+                            </Button>
                           </div>
                         )}
                         {/* Show accept button for received portfolio invitation */}
                         {isReceivedPortfolioInvitation && portfolioInvitation && (
                           <div className="mt-2 pt-2 border-t border-gray-300">
-                            <button
+                            <Button
+                              variant="success"
+                              size="sm"
+                              fullWidth
                               onClick={() => {
                                 handleAcceptPortfolioInvitation(portfolioInvitation!.portfolioId)
                               }}
-                              className="w-full px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 transition-colors"
                             >
-                              Accept Invite
-                            </button>
+                              <UIText>Accept Invite</UIText>
+                            </Button>
                           </div>
                         )}
                         {/* Show cancel button for sent portfolio invitation */}
                         {isSentPortfolioInvitation && portfolioInvitation && (
                           <div className="mt-2 pt-2 border-t border-blue-400">
-                            <button
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              fullWidth
                               type="button"
                               onClick={(e) => {
                                 e.preventDefault()
@@ -1408,10 +1415,9 @@ function ConversationView({
                                   alert('Error: Missing invitation data')
                                 }
                               }}
-                              className="w-full px-3 py-1.5 bg-red-600 text-white text-sm rounded-md hover:bg-red-700 transition-colors"
                             >
-                              Cancel Invitation
-                            </button>
+                              <UIText>Cancel Invitation</UIText>
+                            </Button>
                           </div>
                         )}
                       </div>
@@ -1435,10 +1441,10 @@ function ConversationView({
                 )
               })}
                 {loadingMore && (
-                  <div className="text-center text-gray-500 py-4">Loading older messages...</div>
+                  <div className="text-center py-4"><Content>Loading older messages...</Content></div>
                 )}
                 {!hasMore && messages.length > 10 && (
-                  <div className="text-center text-gray-500 py-4 text-sm">No more messages</div>
+                  <div className="text-center py-4"><UIText>No more messages</UIText></div>
                 )}
                 <div ref={messagesEndRef} />
               </div>
@@ -1448,12 +1454,13 @@ function ConversationView({
           {/* New Messages Indicator */}
           {hasNewMessages && (
             <div className="px-4 py-2 border-t border-gray-200 bg-gray-50">
-              <button
+              <Button
+                variant="text"
+                fullWidth
                 onClick={scrollToBottom}
-                className="w-full text-center text-blue-600 hover:text-blue-700 text-sm font-medium py-2 hover:underline transition-colors"
               >
-                ↓ New messages below
-              </button>
+                <UIText>↓ New messages below</UIText>
+              </Button>
             </div>
           )}
 
@@ -1468,13 +1475,13 @@ function ConversationView({
                 className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 disabled={sending}
               />
-              <button
+              <Button
                 type="submit"
+                variant="primary"
                 disabled={!messageText.trim() || sending}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                {sending ? 'Sending...' : 'Send'}
-              </button>
+                <UIText>{sending ? 'Sending...' : 'Send'}</UIText>
+              </Button>
             </div>
           </form>
     </div>
@@ -1485,7 +1492,7 @@ export default function MessagesPage() {
   return (
     <Suspense fallback={
       <div className="bg-white shadow rounded-lg p-6">
-        <div className="text-center">Loading...</div>
+        <div className="text-center"><Content>Loading...</Content></div>
       </div>
     }>
       <MessagesPageContent />

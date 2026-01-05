@@ -6,6 +6,7 @@ import { PinnedItem } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { Title, UIText, Button } from '@/components/ui'
 
 interface EligibleItem {
   type: 'portfolio' | 'note'
@@ -124,8 +125,8 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
 
   if (loading) {
     return (
-      <div className="py-8 text-center text-gray-500">
-        Loading...
+      <div className="py-8 text-center">
+        <UIText>Loading...</UIText>
       </div>
     )
   }
@@ -133,7 +134,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
   if (error && !saving) {
     return (
       <div className="py-8 text-center text-red-500">
-        {error}
+        <UIText>{error}</UIText>
       </div>
     )
   }
@@ -145,45 +146,39 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
     <div className="space-y-6">
       {/* Info */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <p className="text-sm text-blue-800">
+        <UIText as="p" className="text-blue-800">
           Select items to pin (maximum 9 items). Click on an item to toggle its pinned status.
-        </p>
-        <p className="text-sm text-blue-700 mt-1">
+        </UIText>
+        <UIText as="p" className="text-blue-700 mt-1">
           Currently pinned: {pinnedItems.length} / 9
-        </p>
+        </UIText>
       </div>
 
       {/* Tabs */}
       <div className="border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
-          <button
+          <Button
+            variant="text"
             onClick={() => setActiveTab('notes')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'notes'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
+            className={activeTab === 'notes' ? 'border-b-2 border-blue-500' : 'border-b-2 border-transparent'}
           >
-            Notes ({notes.length})
-          </button>
-          <button
+            <UIText>Notes ({notes.length})</UIText>
+          </Button>
+          <Button
+            variant="text"
             onClick={() => setActiveTab('portfolios')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'portfolios'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
+            className={activeTab === 'portfolios' ? 'border-b-2 border-blue-500' : 'border-b-2 border-transparent'}
           >
-            {tabLabel} ({portfolios.length})
-          </button>
+            <UIText>{tabLabel} ({portfolios.length})</UIText>
+          </Button>
         </nav>
       </div>
 
       {/* Items List */}
       <div className="space-y-4">
         {currentItems.length === 0 ? (
-          <div className="py-12 text-center text-gray-500">
-            {activeTab === 'notes' ? 'No notes found' : `No ${tabLabel.toLowerCase()} found`}
+          <div className="py-12 text-center">
+            <UIText>{activeTab === 'notes' ? 'No notes found' : `No ${tabLabel.toLowerCase()} found`}</UIText>
           </div>
         ) : (
           currentItems.map((item) => {
@@ -203,9 +198,9 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                   onClick={() => togglePinned('note', item.id)}
                 >
                   <div className="flex-1">
-                    <p className="text-gray-900 text-sm line-clamp-2">
+                    <UIText as="p" className="line-clamp-2">
                       {item.text}
-                    </p>
+                    </UIText>
                   </div>
                   <div className="ml-4">
                     {isPinned ? (
@@ -221,7 +216,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                             clipRule="evenodd"
                           />
                         </svg>
-                        <span className="text-sm font-medium">Pinned</span>
+                        <UIText as="span">Pinned</UIText>
                       </div>
                     ) : (
                       <div className="text-gray-400">
@@ -279,15 +274,15 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                   )}
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-gray-900">{item.name}</h3>
+                      <UIText as="h3">{item.name}</UIText>
                       {item.role && (
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                        <UIText as="span" className={`px-2 py-0.5 rounded-full ${
                           item.role === 'manager'
                             ? 'bg-purple-100 text-purple-700'
                             : 'bg-gray-100 text-gray-700'
                         }`}>
                           {item.role === 'manager' ? 'Manager' : 'Member'}
-                        </span>
+                        </UIText>
                       )}
                     </div>
                   </div>
@@ -305,7 +300,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                             clipRule="evenodd"
                           />
                         </svg>
-                        <span className="text-sm font-medium">Pinned</span>
+                        <UIText as="span">Pinned</UIText>
                       </div>
                     ) : (
                       <div className="text-gray-400">
@@ -334,19 +329,20 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
 
       {/* Save Button */}
       <div className="flex justify-end gap-4 pt-6 border-t border-gray-200">
-        <Link
+        <Button
+          variant="secondary"
+          asLink
           href={`/portfolio/${portfolioType}/${portfolioId}`}
-          className="px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
         >
-          Cancel
-        </Link>
-        <button
+          <UIText>Cancel</UIText>
+        </Button>
+        <Button
+          variant="primary"
           onClick={handleSave}
           disabled={saving}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
-          {saving ? 'Saving...' : 'Save Changes'}
-        </button>
+          <UIText>{saving ? 'Saving...' : 'Save Changes'}</UIText>
+        </Button>
       </div>
     </div>
   )
