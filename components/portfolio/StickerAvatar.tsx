@@ -15,6 +15,7 @@ interface StickerAvatarProps {
   normalizeScale?: number // Multiplier for normalization scale (default: 1.0, set to 0 to disable)
   emoji?: string // Emoji to display (for projects/community when no image)
   name?: string // Name to display on emoji avatars
+  variant?: 'default' | 'mini' // Mini variant for compact displays (no white outline)
 }
 
 // Cache for bounding box calculations to avoid recalculating for the same image
@@ -115,6 +116,7 @@ function StickerAvatarComponent({
   normalizeScale = 1.0, // Default: apply normalization
   emoji,
   name,
+  variant = 'default',
 }: StickerAvatarProps) {
   const isHuman = type === 'human'
   const [scale, setScale] = useState<number>(1)
@@ -225,11 +227,16 @@ function StickerAvatarComponent({
     if (isHuman) {
       return undefined
     }
+    // Mini variant: no white outline, only subtle shadow
+    if (variant === 'mini') {
+      return `brightness(0.98) drop-shadow(${shadowValue})`
+    }
+    // Default variant: full white outline + shadow
     return 'brightness(0.98) ' +
       'drop-shadow(-2px -2px 0 white) drop-shadow(2px -2px 0 white) drop-shadow(-2px 2px 0 white) drop-shadow(2px 2px 0 white) ' +
       'drop-shadow(-1px 0 0 white) drop-shadow(1px 0 0 white) drop-shadow(0 -1px 0 white) drop-shadow(0 1px 0 white) ' +
       `drop-shadow(${shadowValue})`
-  }, [isHuman, shadowValue])
+  }, [isHuman, shadowValue, variant])
 
   const containerStyle = useMemo(() => {
     if (isHuman) {
@@ -242,14 +249,14 @@ function StickerAvatarComponent({
     }
     return {
       // For PNGs, add padding to ensure outline and shadow are visible (1px outline + 2px shadow)
-      padding: '4px',
+      padding: variant === 'mini' ? '2px' : '4px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       minWidth: sizeStyle.width,
       minHeight: sizeStyle.height,
     }
-  }, [isHuman, sizeStyle])
+  }, [isHuman, sizeStyle, variant])
 
   // Emoji avatar layout - match image avatar styling
   const emojiAvatarElement = isEmojiAvatar ? (
@@ -267,8 +274,12 @@ function StickerAvatarComponent({
         style={{
           fontSize: typeof size === 'number' ? `${size - 8}px` : `calc(${size} - 8px)`,
           lineHeight: 1,
-          // Match the exact same white outline as image avatars
-          filter: `brightness(0.98) drop-shadow(-2px -2px 0 white) drop-shadow(2px -2px 0 white) drop-shadow(-2px 2px 0 white) drop-shadow(2px 2px 0 white) drop-shadow(-1px 0 0 white) drop-shadow(1px 0 0 white) drop-shadow(0 -1px 0 white) drop-shadow(0 1px 0 white) drop-shadow(${shadowValue})`,
+          // Match the same styling as image avatars (variant-aware)
+          filter: isHuman
+            ? undefined
+            : variant === 'mini'
+            ? `brightness(0.98) drop-shadow(${shadowValue})`
+            : `brightness(0.98) drop-shadow(-2px -2px 0 white) drop-shadow(2px -2px 0 white) drop-shadow(-2px 2px 0 white) drop-shadow(2px 2px 0 white) drop-shadow(-1px 0 0 white) drop-shadow(1px 0 0 white) drop-shadow(0 -1px 0 white) drop-shadow(0 1px 0 white) drop-shadow(${shadowValue})`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -367,7 +378,8 @@ export const StickerAvatar = memo(StickerAvatarComponent, (prevProps, nextProps)
     prevProps.onClick === nextProps.onClick &&
     prevProps.normalizeScale === nextProps.normalizeScale &&
     prevProps.emoji === nextProps.emoji &&
-    prevProps.name === nextProps.name
+    prevProps.name === nextProps.name &&
+    prevProps.variant === nextProps.variant
   )
 })
 

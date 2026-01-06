@@ -22,6 +22,20 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
   const [humanPortfolio, setHumanPortfolio] = useState<HumanPortfolio | null>(initialHumanPortfolio)
   const [topInterests, setTopInterests] = useState<Array<{ topic: Topic; memory_score: number; aggregate_score: number }>>([])
   const [loading, setLoading] = useState(true)
+  const [legalAgreements, setLegalAgreements] = useState<
+    Array<{
+      document_type: 'terms' | 'privacy'
+      document_version: number
+      agreed_at: string
+    }>
+  >([])
+  const [activeLegalVersions, setActiveLegalVersions] = useState<
+    Array<{
+      type: 'terms' | 'privacy'
+      version: number
+      effective_date: string
+    }>
+  >([])
   const router = useRouter()
   const supabase = createClient()
   const portfolioHelpers = createHumanPortfolioHelpers(supabase)
@@ -61,6 +75,48 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
         setTopInterests(interests)
       } catch (error) {
         console.error('Error loading top interests:', error)
+      }
+
+      // Fetch legal agreements and current versions
+      try {
+        const [{ data: agreementsData, error: agreementsError }, { data: docsData, error: docsError }] =
+          await Promise.all([
+            supabase
+              .from('user_legal_agreements')
+              .select('document_type, document_version, agreed_at')
+              .eq('user_id', user.id)
+              .order('agreed_at', { ascending: false }),
+            supabase
+              .from('legal_documents')
+              .select('type, version, effective_date')
+              .eq('is_active', true),
+          ])
+
+        if (agreementsError) {
+          console.error('Error loading user legal agreements:', agreementsError)
+        } else if (agreementsData) {
+          setLegalAgreements(
+            agreementsData as Array<{
+              document_type: 'terms' | 'privacy'
+              document_version: number
+              agreed_at: string
+            }>
+          )
+        }
+
+        if (docsError) {
+          console.error('Error loading active legal documents:', docsError)
+        } else if (docsData) {
+          setActiveLegalVersions(
+            docsData as Array<{
+              type: 'terms' | 'privacy'
+              version: number
+              effective_date: string
+            }>
+          )
+        }
+      } catch (error) {
+        console.error('Error loading legal information:', error)
       }
 
       setLoading(false)
@@ -199,6 +255,66 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                 </dl>
               </div>
             )}
+
+            <div>
+              <UIText as="h2" className="mb-4">Legal Agreements</UIText>
+              <div className="space-y-4">
+                {(['terms', 'privacy'] as const).map((type) => {
+                  const active = activeLegalVersions.find((doc) => doc.type === type)
+                  const latestAgreement = legalAgreements.find(
+                    (agreement) => agreement.document_type === type
+                  )
+
+                  const hasAgreedToCurrent =
+                    active && latestAgreement
+                      ? latestAgreement.document_version === active.version
+                      : false
+
+                  const label = type === 'terms' ? 'Terms & Conditions' : 'Privacy Policy'
+                  const href = type === 'terms' ? '/legal/terms' : '/legal/privacy'
+
+                  return (
+                    <div key={type}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <UIText as="dt" className="mb-1">
+                            {label}
+                          </UIText>
+                          <UIText as="dd">
+                            <Link href={href} className="text-blue-600 hover:text-blue-500">
+                              View {label}
+                            </Link>
+                          </UIText>
+                        </div>
+                        {active && latestAgreement ? (
+                          <div className="text-right">
+                            <UIText as="p">
+                              Agreed{' '}
+                              {new Date(latestAgreement.agreed_at).toLocaleDateString()}
+                            </UIText>
+                            <UIText as="p">
+                              Version {latestAgreement.document_version}
+                              {!hasAgreedToCurrent && (
+                                <> (current: {active.version})</>
+                              )}
+                            </UIText>
+                          </div>
+                        ) : active ? (
+                          <div className="text-right">
+                            <UIText as="p">Not yet agreed</UIText>
+                            <UIText as="p">Current version {active.version}</UIText>
+                          </div>
+                        ) : (
+                          <div className="text-right">
+                            <UIText as="p">No document available</UIText>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
 
             <div className="pt-6 border-t border-gray-200">
               <form action={signOut}>

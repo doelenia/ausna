@@ -43,6 +43,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [friends, setFriends] = useState<Array<{ id: string; avatar?: string; name?: string }>>([])
   const [friendsLoading, setFriendsLoading] = useState(false)
   const [totalMutualFriends, setTotalMutualFriends] = useState<number>(0)
+  const [communities, setCommunities] = useState<Array<{ id: string; name?: string; avatar?: string; emoji?: string }>>([])
+  const [communitiesLoading, setCommunitiesLoading] = useState(false)
+  const [totalMutualCommunities, setTotalMutualCommunities] = useState<number>(0)
   const involvementScrollRef = useRef<HTMLDivElement | null>(null)
   const router = useRouter()
   const supabase = createClient()
@@ -379,6 +382,93 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     fetchFriends()
   }, [portfolio, supabase, currentUserId, authChecked])
 
+  // Fetch communities for human portfolios
+  // For visitors: show mutual communities, for owner: show all joined communities
+  useEffect(() => {
+    const fetchCommunities = async () => {
+      if (!isHumanPortfolio(portfolio)) {
+        return
+      }
+
+      if (!authChecked) {
+        return
+      }
+
+      setCommunitiesLoading(true)
+      try {
+        const isVisitor = currentUserId && currentUserId !== portfolio.user_id
+
+        // Fetch recent communities
+        const { data: allCommunities } = await supabase
+          .from('portfolios')
+          .select('id, metadata')
+          .eq('type', 'community')
+          .order('created_at', { ascending: false })
+          .limit(200)
+
+        if (!allCommunities || allCommunities.length === 0) {
+          setCommunities([])
+          setTotalMutualCommunities(0)
+          return
+        }
+
+        const ownerId = portfolio.user_id
+        const viewerId = isVisitor ? currentUserId! : ownerId
+
+        const joinedCommunities = (allCommunities as any[]).filter((p: any) => {
+          const metadata = p.metadata as any
+          const managers: string[] = metadata?.managers || []
+          const members: string[] = metadata?.members || []
+          const allMemberIds = new Set<string>([
+            ...managers,
+            ...members,
+          ])
+
+          // Ensure owner is a member/manager
+          if (!allMemberIds.has(ownerId)) {
+            return false
+          }
+
+          // For visitors, community must also include the viewer
+          if (isVisitor) {
+            return allMemberIds.has(viewerId)
+          }
+
+          // For owner view, any community they are in is included
+          return true
+        })
+
+        if (joinedCommunities.length === 0) {
+          setCommunities([])
+          setTotalMutualCommunities(0)
+          return
+        }
+
+        const communityData = joinedCommunities.map((p: any) => {
+          const metadata = p.metadata as any
+          const basic = metadata?.basic || {}
+          return {
+            id: p.id as string,
+            name: basic.name as string | undefined,
+            avatar: basic.avatar as string | undefined,
+            emoji: basic.emoji as string | undefined,
+          }
+        })
+
+        setCommunities(communityData)
+        setTotalMutualCommunities(communityData.length)
+      } catch (error) {
+        console.error('Failed to fetch communities:', error)
+        setCommunities([])
+        setTotalMutualCommunities(0)
+      } finally {
+        setCommunitiesLoading(false)
+      }
+    }
+
+    fetchCommunities()
+  }, [portfolio, supabase, currentUserId, authChecked])
+
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this portfolio? This action cannot be undone.')) {
       return
@@ -420,7 +510,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     <>
     <div className="bg-transparent rounded-lg p-6">
           {/* Header with avatar, name, description, and buttons */}
-          <div className="mb-6">
+          <div className="mb-6 mt-12">
             {/* Avatar */}
             <div className="mb-4">
               {basic.avatar ? (
@@ -486,63 +576,125 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               <Content className="mb-4">{basic.description}</Content>
             )}
 
-            {/* Friends Section (for human portfolios only) - Under description, no title */}
-            {isHumanPortfolio(portfolio) && (() => {
-              if (friendsLoading) {
-                return (
-                  <div className="mb-4">
-                    <UIText className="text-gray-500">Loading friends...</UIText>
-                  </div>
-                )
-              }
-
-              if (friends.length === 0) {
-                return null
-              }
-
-              const isVisitor = currentUserId && currentUserId !== portfolio.user_id
-
-              const friendCountText =
-                totalMutualFriends > 0
-                  ? isVisitor
-                    ? `${totalMutualFriends} mutual ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
-                    : `${totalMutualFriends} ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
-                  : null
-
-              const displayFriends = friends.slice(0, 5)
-
-              return (
-                <Link
-                  href={`/portfolio/human/${portfolio.user_id}/friends`}
-                  className="mb-4 inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
-                  title={isVisitor ? 'View all mutual friends' : 'View all friends'}
-                >
-                  {/* Stacked avatars */}
-                  <div className="flex -space-x-2">
-                    {displayFriends.map((friend, index) => (
-                      <div
-                        key={friend.id}
-                        className="relative"
-                        style={{ zIndex: displayFriends.length - index }}
-                      >
-                        <UserAvatar
-                          userId={friend.id}
-                          name={friend.name}
-                          avatar={friend.avatar}
-                          size={32}
-                        />
+            {/* Friends & Communities Section (human portfolios only) - Under description, no title */}
+            {isHumanPortfolio(portfolio) && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {/* Friends pill */}
+                {(() => {
+                  if (friendsLoading) {
+                    return (
+                      <div className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 flex-shrink-0">
+                        <UIText className="text-gray-500">Loading friends...</UIText>
                       </div>
-                    ))}
-                  </div>
-                  {/* Text after avatars */}
-                  {friendCountText && (
-                    <UIText className="text-gray-600">
-                      {friendCountText}
-                    </UIText>
-                  )}
-                </Link>
-              )
-            })()}
+                    )
+                  }
+
+                  if (friends.length === 0) {
+                    return null
+                  }
+
+                  const isVisitor = currentUserId && currentUserId !== portfolio.user_id
+
+                  const friendCountText =
+                    totalMutualFriends > 0
+                      ? isVisitor
+                        ? `${totalMutualFriends} mutual ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
+                        : `${totalMutualFriends} ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
+                      : null
+
+                  const displayFriends = friends.slice(0, 5)
+
+                  return (
+                    <Link
+                      href={`/portfolio/human/${portfolio.user_id}/friends`}
+                      className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+                      title={isVisitor ? 'View all mutual friends' : 'View all friends'}
+                    >
+                      {/* Stacked avatars */}
+                      <div className="flex -space-x-2 flex-shrink-0">
+                        {displayFriends.map((friend, index) => (
+                          <div
+                            key={friend.id}
+                            className="relative"
+                            style={{ zIndex: displayFriends.length - index }}
+                          >
+                            <UserAvatar
+                              userId={friend.id}
+                              name={friend.name}
+                              avatar={friend.avatar}
+                              size={32}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {/* Text after avatars */}
+                      {friendCountText && (
+                        <UIText className="text-gray-600 whitespace-nowrap">
+                          {friendCountText}
+                        </UIText>
+                      )}
+                    </Link>
+                  )
+                })()}
+
+                {/* Communities pill */}
+                {(() => {
+                  if (communitiesLoading) {
+                    return (
+                      <div className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 flex-shrink-0">
+                        <UIText className="text-gray-500">Loading communities...</UIText>
+                      </div>
+                    )
+                  }
+
+                  if (communities.length === 0) {
+                    return null
+                  }
+
+                  const isVisitor = currentUserId && currentUserId !== portfolio.user_id
+
+                  const communityCountText =
+                    totalMutualCommunities > 0
+                      ? isVisitor
+                        ? `joined ${totalMutualCommunities} mutual ${totalMutualCommunities === 1 ? 'community' : 'communities'}`
+                        : `joined ${totalMutualCommunities} ${totalMutualCommunities === 1 ? 'community' : 'communities'}`
+                      : null
+
+                  const displayCommunities = communities.slice(0, 5)
+
+                  return (
+                    <Link
+                      href={`/portfolio/human/${portfolio.user_id}/communities`}
+                      className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+                      title={isVisitor ? 'View all mutual communities' : 'View all communities'}
+                    >
+                      {/* Community avatars (non-stacked) */}
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {displayCommunities.map((community) => (
+                          <StickerAvatar
+                            key={community.id}
+                            src={community.avatar}
+                            alt={community.name || 'Community'}
+                            type="community"
+                            size={34}
+                            emoji={community.emoji}
+                            name={community.name}
+                            normalizeScale={1.0}
+                            variant="mini"
+                          />
+                        ))}
+                      </div>
+                      {/* Text after avatars */}
+                      {communityCountText && (
+                        <UIText className="text-gray-600 whitespace-nowrap">
+                          {communityCountText}
+                        </UIText>
+                      )}
+                    </Link>
+                  )
+                })()}
+              </div>
+            )}
 
             {/* Members Section - Projects only */}
             {isProjectPortfolio(portfolio) && (() => {

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -20,8 +20,38 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [waitlistSuccess, setWaitlistSuccess] = useState(false)
   const [emailChecked, setEmailChecked] = useState(false)
   const [isApproved, setIsApproved] = useState(false)
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
+  const [termsVersion, setTermsVersion] = useState<number | null>(null)
+  const [privacyVersion, setPrivacyVersion] = useState<number | null>(null)
   const router = useRouter()
   const supabase = createClient()
+
+  useEffect(() => {
+    if (mode !== 'signup') return
+
+    const loadActiveDocuments = async () => {
+      const { data, error } = await supabase
+        .from('legal_documents')
+        .select('type, version')
+        .eq('is_active', true)
+
+      if (error || !data) {
+        console.error('Error loading legal documents:', error)
+        return
+      }
+
+      for (const doc of data as Array<{ type: 'terms' | 'privacy'; version: number }>) {
+        if (doc.type === 'terms') {
+          setTermsVersion(doc.version)
+        } else if (doc.type === 'privacy') {
+          setPrivacyVersion(doc.version)
+        }
+      }
+    }
+
+    loadActiveDocuments()
+  }, [mode, supabase])
 
   // Step 1: Check email against waitlist
   const handleEmailCheck = async (e: React.FormEvent) => {
@@ -144,6 +174,13 @@ export function AuthForm({ mode }: AuthFormProps) {
   // Step 2: Complete signup (only for approved users)
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    if (!agreedToTerms || !agreedToPrivacy) {
+      setError('You must agree to the Terms & Conditions and Privacy Policy to create an account.')
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -200,6 +237,27 @@ export function AuthForm({ mode }: AuthFormProps) {
       }
 
       if (data.user) {
+        // Record legal agreements using service-side API if versions are available
+        if (termsVersion && privacyVersion) {
+          try {
+            await fetch('/api/legal/agreement', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                userId: data.user.id,
+                agreements: [
+                  { documentType: 'terms', documentVersion: termsVersion },
+                  { documentType: 'privacy', documentVersion: privacyVersion },
+                ],
+              }),
+            })
+          } catch (agreementError) {
+            console.error('Failed to record legal agreements:', agreementError)
+          }
+        }
+
         console.log('User created:', data.user.id, 'Email confirmed:', data.user.email_confirmed_at)
         // Check if email confirmation is required
         if (data.user.email_confirmed_at) {
@@ -417,6 +475,46 @@ export function AuthForm({ mode }: AuthFormProps) {
                 placeholder="••••••••"
               />
             </div>
+
+            <div>
+              <Content as="p">
+                Before creating an account, please review and agree to the following:
+              </Content>
+              <div className="mt-2 space-y-2">
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={agreedToTerms}
+                    onChange={(event) => setAgreedToTerms(event.target.checked)}
+                    className="mt-1"
+                    required
+                  />
+                  <UIText as="span">
+                    I have read and agree to the{' '}
+                    <Link href="/legal/terms" className="text-blue-600 hover:text-blue-500">
+                      Terms &amp; Conditions
+                    </Link>
+                    .
+                  </UIText>
+                </label>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={agreedToPrivacy}
+                    onChange={(event) => setAgreedToPrivacy(event.target.checked)}
+                    className="mt-1"
+                    required
+                  />
+                  <UIText as="span">
+                    I have read and understand the{' '}
+                    <Link href="/legal/privacy" className="text-blue-600 hover:text-blue-500">
+                      Privacy Policy
+                    </Link>
+                    .
+                  </UIText>
+                </label>
+              </div>
+            </div>
           </>
         )}
 
@@ -449,7 +547,13 @@ export function AuthForm({ mode }: AuthFormProps) {
           type="submit"
           variant="primary"
           fullWidth
-          disabled={loading}
+          disabled={
+            loading ||
+            (mode === 'signup' &&
+              emailChecked &&
+              isApproved &&
+              (!agreedToTerms || !agreedToPrivacy))
+          }
         >
           <UIText>
           {loading
