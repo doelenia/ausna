@@ -8,7 +8,7 @@ import { NotesFeed } from './NotesFeed'
 import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
 import { Topic } from '@/types/indexing'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -43,6 +43,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [friends, setFriends] = useState<Array<{ id: string; avatar?: string; name?: string }>>([])
   const [friendsLoading, setFriendsLoading] = useState(false)
   const [totalMutualFriends, setTotalMutualFriends] = useState<number>(0)
+  const involvementScrollRef = useRef<HTMLDivElement | null>(null)
   const router = useRouter()
   const supabase = createClient()
   
@@ -501,36 +502,45 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
               const isVisitor = currentUserId && currentUserId !== portfolio.user_id
 
+              const friendCountText =
+                totalMutualFriends > 0
+                  ? isVisitor
+                    ? `${totalMutualFriends} mutual ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
+                    : `${totalMutualFriends} ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
+                  : null
+
+              const displayFriends = friends.slice(0, 5)
+
               return (
-                <div className="mb-4 flex items-center gap-2">
-                  {/* Show friends count */}
-                  {totalMutualFriends > 0 && (
+                <Link
+                  href={`/portfolio/human/${portfolio.user_id}/friends`}
+                  className="mb-4 inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
+                  title={isVisitor ? 'View all mutual friends' : 'View all friends'}
+                >
+                  {/* Stacked avatars */}
+                  <div className="flex -space-x-2">
+                    {displayFriends.map((friend, index) => (
+                      <div
+                        key={friend.id}
+                        className="relative"
+                        style={{ zIndex: displayFriends.length - index }}
+                      >
+                        <UserAvatar
+                          userId={friend.id}
+                          name={friend.name}
+                          avatar={friend.avatar}
+                          size={32}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {/* Text after avatars */}
+                  {friendCountText && (
                     <UIText className="text-gray-600">
-                      {isVisitor 
-                        ? `${totalMutualFriends} mutual ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
-                        : `${totalMutualFriends} ${totalMutualFriends === 1 ? 'friend' : 'friends'}`
-                      }
+                      {friendCountText}
                     </UIText>
                   )}
-                  {friends.map((friend) => (
-                    <UserAvatar
-                      key={friend.id}
-                      userId={friend.id}
-                      name={friend.name}
-                      avatar={friend.avatar}
-                      size={32}
-                      href={`/portfolio/human/${friend.id}`}
-                    />
-                  ))}
-                  {/* More button */}
-                  <Link
-                    href={`/portfolio/human/${portfolio.user_id}/friends`}
-                    className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
-                    title={isVisitor ? "View all mutual friends" : "View all friends"}
-                  >
-                    <ChevronRight className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                  </Link>
-                </div>
+                </Link>
               )
             })()}
 
@@ -561,12 +571,18 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 return null
               }
               
+              const totalMembers = allMemberIds.length
+              
               return (
-                <div className="mb-4 flex items-center gap-2">
+                <div className="mb-4">
                   {memberAvatarsLoading ? (
                     <UIText className="text-gray-500">Loading members...</UIText>
                   ) : (
-                    <>
+                    <Link
+                      href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
+                      className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
+                      title="View all members"
+                    >
                       {(() => {
                         // Create member info array with avatars
                         const memberInfo = allMemberIds.map((memberId: string) => {
@@ -589,29 +605,33 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         const displayMembers = sortedMembers.slice(0, 5)
                         
                         return (
-                          <>
-                            {displayMembers.map((member) => (
-                              <UserAvatar
-                                key={member.id}
-                                userId={member.id}
-                                name={member.name}
-                                avatar={member.avatar}
-                                size={32}
-                                href={`/portfolio/human/${member.id}`}
-                              />
-                            ))}
-                            {/* More button */}
-                            <Link
-                              href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
-                              className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
-                              title="View all members"
-                            >
-                              <ChevronRight className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                            </Link>
-                          </>
+                          <div className="flex items-center gap-2">
+                            {/* Stacked member avatars */}
+                            <div className="flex -space-x-2">
+                              {displayMembers.map((member, index) => (
+                                <div
+                                  key={member.id}
+                                  className="relative"
+                                  style={{ zIndex: displayMembers.length - index }}
+                                >
+                                  <UserAvatar
+                                    userId={member.id}
+                                    name={member.name}
+                                    avatar={member.avatar}
+                                    size={32}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            {/* Member count text */}
+                            <UIText className="text-gray-600">
+                              {totalMembers}{' '}
+                              {totalMembers === 1 ? 'member' : 'members'}
+                            </UIText>
+                          </div>
                         )
                       })()}
-                    </>
+                    </Link>
                   )}
                 </div>
               )
@@ -636,12 +656,39 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
           {/* Projects Row (for all visitors, human portfolios only) */}
           {isHumanPortfolio(portfolio) && (
-            <div className="mt-4 mb-8">
+            <div className="mt-4 mb-8 group">
               <div className="flex items-center gap-2 mb-4">
                 <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
                 <UIText>Involvement</UIText>
               </div>
-              <div className="flex items-start gap-8 overflow-x-auto pt-2 pb-2">
+              <div className="relative">
+                {/* Horizontal scroll buttons for mouse users */}
+                <button
+                  type="button"
+                  className="hidden group-hover:flex items-center justify-center absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
+                  onClick={() => {
+                    if (involvementScrollRef.current) {
+                      involvementScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' })
+                    }
+                  }}
+                >
+                  <ChevronRight className="w-5 h-5 rotate-180 text-gray-700" strokeWidth={1.5} />
+                </button>
+                <button
+                  type="button"
+                  className="hidden group-hover:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
+                  onClick={() => {
+                    if (involvementScrollRef.current) {
+                      involvementScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' })
+                    }
+                  }}
+                >
+                  <ChevronRight className="w-5 h-5 text-gray-700" strokeWidth={1.5} />
+                </button>
+                <div
+                  ref={involvementScrollRef}
+                  className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth"
+                >
                 {projectsLoading ? (
                   <UIText className="text-gray-500">Loading projects...</UIText>
                 ) : (
@@ -649,84 +696,103 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     {projects.map((project) => (
                       <div
                         key={project.id}
-                        className="flex flex-col items-center gap-4 flex-shrink-0 px-4"
+                        className="flex flex-col items-center flex-shrink-0 w-48"
                       >
-                        <StickerAvatar
-                          src={project.avatar}
-                          alt={project.name}
-                          type="projects"
-                          size={96}
+                        <Link
                           href={getPortfolioUrl('projects', project.id)}
-                          emoji={project.emoji}
-                          name={project.name}
-                        />
-                        <div className="flex flex-col items-center gap-1">
-                          <Content
-                            className="text-center max-w-[140px] line-clamp-2"
-                            title={project.name}
-                          >
-                            {project.name}
-                          </Content>
-                          {(project.projectType || project.role) && (
-                            <UIText className="text-center max-w-[140px] truncate text-gray-600">
-                              {project.projectType && project.role
-                                ? `${project.projectType} · ${project.role}`
-                                : project.projectType || project.role}
-                            </UIText>
-                          )}
-                        </div>
+                          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                        >
+                          <div className="flex flex-col items-center gap-3">
+                            <StickerAvatar
+                              src={project.avatar}
+                              alt={project.name}
+                              type="projects"
+                              size={96}
+                              emoji={project.emoji}
+                              name={project.name}
+                            />
+                            <div className="flex flex-col items-center gap-1 w-full">
+                              <Content
+                                className="text-center max-w-[140px] mx-auto line-clamp-2"
+                                title={project.name}
+                              >
+                                {project.name}
+                              </Content>
+                              {(project.projectType || project.role) && (
+                                <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
+                                  {project.projectType && project.role
+                                    ? `${project.projectType} · ${project.role}`
+                                    : project.projectType || project.role}
+                                </UIText>
+                              )}
+                            </div>
+                          </div>
+                        </Link>
                       </div>
                     ))}
                     {/* Create Project Button - Only visible to owner */}
                     {authChecked && isOwner && isAuthenticated && (
-                      <div className="flex flex-col items-center gap-4 flex-shrink-0">
-                        <Link
-                          href="/portfolio/create/projects"
-                          className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                        >
-                          <svg
-                            className="h-12 w-12 text-gray-600"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 4v16m8-8H4"
-                            />
-                          </svg>
-                        </Link>
-                        <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
+                      <div className="flex flex-col items-center flex-shrink-0 w-48">
+                        <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                          <div className="flex flex-col items-center gap-3">
+                            <Link
+                              href="/portfolio/create/projects"
+                              className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                            >
+                              <svg
+                                className="h-12 w-12 text-gray-600"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M12 4v16m8-8H4"
+                                />
+                              </svg>
+                            </Link>
+                            <UIText className="text-center max-w-[140px] mx-auto truncate">
+                              Create Project
+                            </UIText>
+                          </div>
+                        </div>
                       </div>
                     )}
                     {/* Create Community button - Admin only, owner only */}
                     {authChecked && isOwner && isAuthenticated && isAdmin === true && (
-                      <div className="flex flex-col items-center gap-4 flex-shrink-0">
-                        <Link
-                          href="/portfolio/create/community"
-                          className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                        >
-                          <svg
-                            className="h-12 w-12 text-gray-600"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                            />
-                          </svg>
-                        </Link>
-                        <UIText className="text-center max-w-[96px] truncate">Create Community</UIText>
+                      <div className="flex flex-col items-center flex-shrink-0 w-48">
+                        <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                          <div className="flex flex-col items-center gap-3">
+                            <Link
+                              href="/portfolio/create/community"
+                              className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                            >
+                              <svg
+                                className="h-12 w-12 text-gray-600"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                                />
+                              </svg>
+                            </Link>
+                            <UIText className="text-center max-w-[140px] mx-auto truncate">
+                              Create Community
+                            </UIText>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </>
                 )}
+                </div>
               </div>
             </div>
           )}

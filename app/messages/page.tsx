@@ -1325,7 +1325,7 @@ function ConversationView({
                       <div
                         className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                           isSent
-                            ? 'bg-blue-600 text-white'
+                            ? 'bg-white text-gray-900'
                             : 'bg-gray-200 text-gray-900'
                         } ${(message as any).isOptimistic ? 'opacity-75' : ''}`}
                       >
