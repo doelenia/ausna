@@ -107,6 +107,19 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
+    // Get user's human portfolio and add it to assigned portfolios
+    const { getHumanPortfolio } = await import('@/lib/portfolio/human')
+    const humanPortfolio = await getHumanPortfolio(user.id)
+    
+    // Combine project portfolio with human portfolio
+    const allAssignedPortfolios = [...portfolioIds]
+    if (humanPortfolio) {
+      // Only add if not already in the list (shouldn't happen, but safety check)
+      if (!allAssignedPortfolios.includes(humanPortfolio.id)) {
+        allAssignedPortfolios.push(humanPortfolio.id)
+      }
+    }
+
     // Process image uploads
     const imageFiles: File[] = []
     
@@ -124,7 +137,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       owner_account_id: user.id,
       text: text.trim(),
       references: [],
-      assigned_portfolios: portfolioIds,
+      assigned_portfolios: allAssignedPortfolios,
       mentioned_note_id: mentionedNoteId || null,
       deleted_at: null,
     }
@@ -151,6 +164,13 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
           console.log(`Uploading image ${i + 1}/${imageFiles.length} for note ${note.id}`)
           const uploadResult = await uploadNoteImage(note.id, imageFile)
           console.log('Image upload result:', uploadResult)
+          
+          // Validate upload result
+          if (!uploadResult || !uploadResult.url) {
+            console.error(`Invalid upload result for image ${i + 1}:`, uploadResult)
+            throw new Error('Upload result is missing URL')
+          }
+          
           uploadedImageReferences.push({
             type: 'image',
             url: uploadResult.url,
@@ -159,13 +179,14 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         } catch (error: any) {
           console.error(`Failed to upload image ${i + 1}:`, error)
           console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
+            message: error?.message || 'Unknown error',
+            stack: error?.stack,
             noteId: note.id,
             fileName: imageFile.name,
             fileSize: imageFile.size,
           })
           // Continue with other images even if one fails
+          // Don't fail the entire note creation if image upload fails
         }
       }
     }
@@ -250,8 +271,8 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
       const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
 
-      // Get all assigned portfolios
-      for (const portfolioId of portfolioIds) {
+      // Get all assigned portfolios (includes both project and human portfolio)
+      for (const portfolioId of allAssignedPortfolios) {
         try {
           // Check if user is owner
           const isOwner = await isPortfolioOwner(portfolioId, user.id)
@@ -323,15 +344,22 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       noteId: note.id,
     }
   } catch (error: any) {
+    console.error('Error in createNote:', error)
+    
     if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
       const digest = (error as any).digest || ''
       if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
         throw error
       }
     }
+    
+    // Always return a result object, never undefined
+    const errorMessage = error?.message || error?.toString() || 'An unexpected error occurred'
+    console.error('Returning error result:', errorMessage)
+    
     return {
       success: false,
-      error: error.message || 'An unexpected error occurred',
+      error: errorMessage,
     }
   }
 }

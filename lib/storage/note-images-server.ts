@@ -20,13 +20,25 @@ export async function uploadNoteImage(
 ): Promise<{ path: string; url: string }> {
   const supabase = await createClient()
   
-  // Compress image before upload (preserves PNG format for transparency)
-  const compressedBlob = await compressImageToBlob(file, {
-    maxWidth: 1920,
-    maxHeight: 1920,
-    quality: 85,
-    // Don't force format - let it auto-detect to preserve PNG transparency
-  })
+  let compressedBlob: Blob & { format?: 'jpeg' | 'png' | 'webp' }
+  
+  try {
+    // Compress image before upload (preserves PNG format for transparency)
+    compressedBlob = await compressImageToBlob(file, {
+      maxWidth: 1920,
+      maxHeight: 1920,
+      quality: 85,
+      // Don't force format - let it auto-detect to preserve PNG transparency
+    })
+    
+    // Validate compressed blob
+    if (!compressedBlob || compressedBlob.size === 0) {
+      throw new Error('Image compression resulted in empty blob')
+    }
+  } catch (error: any) {
+    console.error('Error compressing image:', error)
+    throw new Error(`Failed to compress image: ${error?.message || 'Unknown compression error'}`)
+  }
   
   // Generate filename with correct extension based on format
   const format = compressedBlob.format || 'jpg'
@@ -50,6 +62,10 @@ export async function uploadNoteImage(
   const { data: urlData } = supabase.storage
     .from(BUCKET_NAME)
     .getPublicUrl(filePath)
+
+  if (!urlData || !urlData.publicUrl) {
+    throw new Error('Failed to get public URL for uploaded image')
+  }
 
   return {
     path: filePath,

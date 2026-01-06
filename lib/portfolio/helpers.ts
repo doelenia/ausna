@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, PortfolioType, PinnedItem } from '@/types/portfolio'
+import { Portfolio, PortfolioType, PinnedItem, isHumanPortfolio } from '@/types/portfolio'
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // Re-export pure utility functions (can be used in client components)
@@ -210,11 +210,39 @@ export async function canAddToPinned(
     // This validation will be done in the calling code based on portfolio type
     // For now, allow it (validation happens at fetch time)
   } else if (itemType === 'note') {
-    const isAssigned = await isNoteAssignedToPortfolio(itemId, portfolio.id)
-    if (!isAssigned) {
-      return {
-        canAdd: false,
-        error: 'Note must be assigned to this portfolio',
+    // For human portfolios: check if note creator is the portfolio owner
+    // For project/community portfolios: check if note is assigned to portfolio
+    if (isHumanPortfolio(portfolio)) {
+      const supabase = await createClient()
+      const { data: note, error } = await supabase
+        .from('notes')
+        .select('owner_account_id')
+        .eq('id', itemId)
+        .is('deleted_at', null)
+        .single()
+
+      if (error || !note) {
+        return {
+          canAdd: false,
+          error: 'Note not found',
+        }
+      }
+
+      // For human portfolios, check if note creator matches portfolio owner
+      if (note.owner_account_id !== portfolio.user_id) {
+        return {
+          canAdd: false,
+          error: 'Note must be created by the portfolio owner',
+        }
+      }
+    } else {
+      // For project/community portfolios, check if note is assigned
+      const isAssigned = await isNoteAssignedToPortfolio(itemId, portfolio.id)
+      if (!isAssigned) {
+        return {
+          canAdd: false,
+          error: 'Note must be assigned to this portfolio',
+        }
       }
     }
   }

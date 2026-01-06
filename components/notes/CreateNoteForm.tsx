@@ -106,6 +106,13 @@ export function CreateNoteForm({
 
       const result = await createNote(formData)
 
+      // Guard against undefined result
+      if (!result) {
+        console.error('createNote returned undefined')
+        setError('An unexpected error occurred. Please try again.')
+        return
+      }
+
       if (result.success) {
         if (onSuccess) {
           onSuccess()
@@ -118,6 +125,7 @@ export function CreateNoteForm({
         setError(result.error || 'Failed to create note')
       }
     } catch (err: any) {
+      console.error('Error in handleSubmit:', err)
       setError(err.message || 'An unexpected error occurred')
     } finally {
       setIsSubmitting(false)

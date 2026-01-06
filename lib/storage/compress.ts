@@ -16,6 +16,7 @@ const DEFAULT_OPTIONS: Required<CompressionOptions> = {
 
 /**
  * Detect image format from buffer or file
+ * Handles iOS formats (HEIC/HEIF) and converts them to JPEG
  */
 async function detectImageFormat(file: File | Blob, buffer: Buffer): Promise<'jpeg' | 'png' | 'webp'> {
   // Check MIME type first
@@ -24,6 +25,8 @@ async function detectImageFormat(file: File | Blob, buffer: Buffer): Promise<'jp
     if (mimeType.includes('png')) return 'png'
     if (mimeType.includes('webp')) return 'webp'
     if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpeg'
+    // iOS HEIC/HEIF formats - will be converted to JPEG
+    if (mimeType.includes('heic') || mimeType.includes('heif')) return 'jpeg'
   }
   
   // Check file extension if available
@@ -32,14 +35,20 @@ async function detectImageFormat(file: File | Blob, buffer: Buffer): Promise<'jp
     if (ext === 'png') return 'png'
     if (ext === 'webp') return 'webp'
     if (ext === 'jpg' || ext === 'jpeg') return 'jpeg'
+    // iOS HEIC/HEIF formats - will be converted to JPEG
+    if (ext === 'heic' || ext === 'heif') return 'jpeg'
   }
   
   // Detect from buffer metadata using sharp
+  // Sharp can detect HEIC/HEIF and will handle conversion
   try {
     const metadata = await sharp(buffer).metadata()
-    if (metadata.format === 'png') return 'png'
-    if (metadata.format === 'webp') return 'webp'
-    if (metadata.format === 'jpeg' || metadata.format === 'jpg') return 'jpeg'
+    const fmt = (metadata.format || '').toLowerCase()
+    if (fmt === 'png') return 'png'
+    if (fmt === 'webp') return 'webp'
+    if (fmt === 'jpeg' || fmt === 'jpg') return 'jpeg'
+    // HEIC/HEIF formats detected by sharp - convert to JPEG
+    if (fmt === 'heic' || fmt === 'heif') return 'jpeg'
   } catch {
     // If detection fails, default to jpeg
   }
@@ -63,11 +72,26 @@ export async function compressImage(
   const arrayBuffer = await file.arrayBuffer()
   const buffer = Buffer.from(arrayBuffer)
 
+  // Log file info for debugging (especially useful for iOS HEIC detection)
+  if (file instanceof File) {
+    console.log('Processing image file:', {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+    })
+  }
+
   // Detect format if not explicitly specified, preserving PNG transparency
   let format = opts.format
   if (format === 'jpeg' || !format) {
     // Auto-detect format to preserve PNG transparency
     const detectedFormat = await detectImageFormat(file, buffer)
+    
+    // Log detected format for debugging
+    if (file instanceof File && (file.type.includes('heic') || file.type.includes('heif') || file.name?.toLowerCase().endsWith('.heic') || file.name?.toLowerCase().endsWith('.heif'))) {
+      console.log('iOS HEIC/HEIF image detected, converting to JPEG')
+    }
+    
     if (detectedFormat === 'png') {
       format = 'png' // Preserve PNG format to maintain transparency
     } else {
@@ -76,32 +100,51 @@ export async function compressImage(
   }
 
   // Use sharp to resize and compress
-  let pipeline = sharp(buffer)
-    .resize(opts.maxWidth, opts.maxHeight, {
-      fit: 'inside',
-      withoutEnlargement: true,
-    })
-
-  // Apply format-specific compression
-  switch (format) {
-    case 'jpeg':
-      pipeline = pipeline.jpeg({ quality: opts.quality })
-      break
-    case 'png':
-      // Preserve transparency for PNG
-      pipeline = pipeline.png({ 
-        quality: opts.quality, 
-        compressionLevel: 9,
-        palette: false, // Keep full color depth
+  // Sharp automatically handles HEIC/HEIF conversion when reading the buffer
+  // If HEIC support is not available, sharp will throw an error which we'll catch
+  try {
+    let pipeline = sharp(buffer)
+      .resize(opts.maxWidth, opts.maxHeight, {
+        fit: 'inside',
+        withoutEnlargement: true,
       })
-      break
-    case 'webp':
-      pipeline = pipeline.webp({ quality: opts.quality })
-      break
-  }
 
-  const compressedBuffer = await pipeline.toBuffer()
-  return { buffer: compressedBuffer, format }
+    // Apply format-specific compression
+    // Note: HEIC/HEIF images will be automatically converted to JPEG by sharp
+    switch (format) {
+      case 'jpeg':
+        pipeline = pipeline.jpeg({ quality: opts.quality })
+        break
+      case 'png':
+        // Preserve transparency for PNG
+        pipeline = pipeline.png({ 
+          quality: opts.quality, 
+          compressionLevel: 9,
+          palette: false, // Keep full color depth
+        })
+        break
+      case 'webp':
+        pipeline = pipeline.webp({ quality: opts.quality })
+        break
+    }
+
+    const compressedBuffer = await pipeline.toBuffer()
+    return { buffer: compressedBuffer, format }
+  } catch (error: any) {
+    // If sharp fails (e.g., HEIC not supported), try to get metadata to understand the issue
+    const errorMessage = error?.message || 'Unknown compression error'
+    
+    // Check if this is a HEIC/HEIF format issue
+    if (errorMessage.includes('heic') || errorMessage.includes('heif') || 
+        (file instanceof File && (file.type.includes('heic') || file.type.includes('heif')))) {
+      console.error('HEIC/HEIF format detected but Sharp cannot process it:', errorMessage)
+      console.error('This may require additional system libraries. Falling back to JPEG conversion attempt.')
+      throw new Error(`HEIC/HEIF format not supported. Please convert the image to JPEG or PNG before uploading. Original error: ${errorMessage}`)
+    }
+    
+    // Re-throw other errors
+    throw error
+  }
 }
 
 /**
