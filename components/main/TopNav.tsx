@@ -196,9 +196,9 @@ export function TopNav() {
 
   return (
     <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
-      <div className="w-full px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-evenly md:justify-between items-center h-16">
-          {/* Mobile: All items spread evenly, Desktop: Left side */}
+      <div className="w-full px-0 md:px-4 lg:px-8">
+        <div className="flex justify-between md:justify-between items-center h-16 px-2 md:px-0">
+          {/* Mobile: All items spread from end to end, Desktop: Left side */}
           <div className="flex items-center md:flex-none">
             <IconButton 
               icon={Home}
@@ -208,7 +208,7 @@ export function TopNav() {
             />
           </div>
 
-          {/* Mobile: All items spread evenly, Desktop: Right side grouped */}
+          {/* Mobile: All items spread from end to end, Desktop: Right side grouped */}
           {loading ? (
             <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
           ) : user ? (
