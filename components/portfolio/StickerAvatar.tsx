@@ -54,18 +54,26 @@ function getImageBoundingBox(image: HTMLImageElement, imageUrl: string): { x: nu
       let maxY = 0
 
       // Find bounding box of non-transparent pixels
-      // Optimize: sample every 4th pixel for large images to reduce computation
-      const sampleRate = canvas.width * canvas.height > 1000000 ? 4 : 1
+      // Use progressive sampling: only sample for very large images (>4MP) and use every 2nd pixel
+      // This balances performance with accuracy to prevent pixelated borders
+      const pixelCount = canvas.width * canvas.height
+      const sampleRate = pixelCount > 4000000 ? 2 : 1 // Only sample for images > 4MP, and use every 2nd pixel
       
       for (let y = 0; y < canvas.height; y += sampleRate) {
         for (let x = 0; x < canvas.width; x += sampleRate) {
           const alpha = data[(y * canvas.width + x) * 4 + 3]
           if (alpha > 0) {
             // Non-transparent pixel found
-            minX = Math.min(minX, x)
-            minY = Math.min(minY, y)
-            maxX = Math.max(maxX, x)
-            maxY = Math.max(maxY, y)
+            // When sampling, expand bounds to account for skipped pixels
+            const adjustedMinX = sampleRate > 1 ? Math.max(0, x - sampleRate) : x
+            const adjustedMinY = sampleRate > 1 ? Math.max(0, y - sampleRate) : y
+            const adjustedMaxX = sampleRate > 1 ? Math.min(canvas.width - 1, x + sampleRate) : x
+            const adjustedMaxY = sampleRate > 1 ? Math.min(canvas.height - 1, y + sampleRate) : y
+            
+            minX = Math.min(minX, adjustedMinX)
+            minY = Math.min(minY, adjustedMinY)
+            maxX = Math.max(maxX, adjustedMaxX)
+            maxY = Math.max(maxY, adjustedMaxY)
           }
         }
       }
