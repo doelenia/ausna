@@ -155,8 +155,7 @@ export async function approveWaitlist(waitlistId: string): Promise<ApproveWaitli
       // Get the site URL from environment or use a sensible default
       // In production, set NEXT_PUBLIC_SITE_URL to your domain (e.g., https://yourdomain.com)
       const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 
-                     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 
-                     'http://localhost:3000'
+                     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
       
       const { data: inviteData, error: inviteError } = await serviceClient.auth.admin.inviteUserByEmail(
         waitlistEntry.email,
