@@ -7,6 +7,7 @@ import { PortfolioEditor } from './PortfolioEditor'
 import { NotesFeed } from './NotesFeed'
 import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
+import { CommunityMembersGrid } from './CommunityMembersGrid'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect, useRef } from 'react'
 import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
@@ -182,10 +183,10 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     fetchProjects()
   }, [portfolio.id, portfolio.type, authChecked, supabase])
 
-  // Fetch member avatars for projects
+  // Fetch member avatars for projects and communities
   useEffect(() => {
     const fetchMemberAvatars = async () => {
-      if (!isProjectPortfolio(portfolio)) {
+      if (!isProjectPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
         return
       }
 
@@ -697,8 +698,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               </div>
             )}
 
-            {/* Members Section - Projects only */}
-            {isProjectPortfolio(portfolio) && (() => {
+            {/* Members Section - Projects and Communities */}
+            {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
               // Combine all members: creator, managers, members
               const allMemberIds: string[] = []
               
@@ -953,13 +954,24 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
 
 
-          {/* Notes Feed (combines pinned notes with regular notes) */}
-          <NotesFeed
-            portfolio={portfolio}
-            portfolioId={portfolio.id}
-            currentUserId={currentUserId}
-            canCreateNote={canCreateNote}
-          />
+          {/* Community Members Grid (for communities) or Notes Feed (for projects/humans) */}
+          {isCommunityPortfolio(portfolio) ? (
+            <CommunityMembersGrid
+              portfolioId={portfolio.id}
+              creatorId={portfolio.user_id}
+              managers={managers}
+              members={members}
+              memberRoles={metadata?.memberRoles || {}}
+              currentUserId={currentUserId}
+            />
+          ) : (
+            <NotesFeed
+              portfolio={portfolio}
+              portfolioId={portfolio.id}
+              currentUserId={currentUserId}
+              canCreateNote={canCreateNote}
+            />
+          )}
         </div>
     </>
   )

@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui'
+import { getAuthCallbackUrl } from '@/lib/utils/site-url'
 
 interface OAuthButtonProps {
   provider: 'google' | 'apple'
@@ -17,7 +18,7 @@ export function OAuthButton({ provider, children }: OAuthButtonProps) {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getAuthCallbackUrl(),
       },
     })
 

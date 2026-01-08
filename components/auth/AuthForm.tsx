@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Button, Title, Content, UIText } from '@/components/ui'
+import { getAuthCallbackUrl } from '@/lib/utils/site-url'
 
 interface AuthFormProps {
   mode: 'login' | 'signup'
@@ -224,7 +225,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: getAuthCallbackUrl(),
           data: {
             username: username.toLowerCase() || undefined,
           },
