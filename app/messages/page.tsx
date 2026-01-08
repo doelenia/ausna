@@ -186,21 +186,27 @@ function MessagesPageContent() {
       <Title as="h1" className="mb-6">Messages</Title>
 
           {/* Tabs */}
-          <div className="flex gap-2 mb-6 border-b border-gray-200">
-            <Button
-              variant="text"
+          <div className="flex gap-2 mb-6">
+            <button
               onClick={() => setActiveTab('active')}
-              className={activeTab === 'active' ? 'border-b-2 border-blue-600' : 'border-b-2 border-transparent'}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                activeTab === 'active'
+                  ? 'bg-gray-200 text-gray-700'
+                  : 'text-gray-700 hover:bg-gray-200'
+              }`}
             >
               <UIText>Active</UIText>
-            </Button>
-            <Button
-              variant="text"
+            </button>
+            <button
               onClick={() => setActiveTab('invitations')}
-              className={activeTab === 'invitations' ? 'border-b-2 border-blue-600' : 'border-b-2 border-transparent'}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                activeTab === 'invitations'
+                  ? 'bg-gray-200 text-gray-700'
+                  : 'text-gray-700 hover:bg-gray-200'
+              }`}
             >
               <UIText>Invitations</UIText>
-            </Button>
+            </button>
           </div>
 
           {conversations.length === 0 ? (

@@ -155,22 +155,28 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          <Button
-            variant="text"
+      <div className="mb-6">
+        <nav className="flex gap-2">
+          <button
             onClick={() => setActiveTab('notes')}
-            className={activeTab === 'notes' ? 'border-b-2 border-blue-500' : 'border-b-2 border-transparent'}
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+              activeTab === 'notes'
+                ? 'bg-gray-200 text-gray-700'
+                : 'text-gray-700 hover:bg-gray-200'
+            }`}
           >
             <UIText>Notes ({notes.length})</UIText>
-          </Button>
-          <Button
-            variant="text"
+          </button>
+          <button
             onClick={() => setActiveTab('portfolios')}
-            className={activeTab === 'portfolios' ? 'border-b-2 border-blue-500' : 'border-b-2 border-transparent'}
+            className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+              activeTab === 'portfolios'
+                ? 'bg-gray-200 text-gray-700'
+                : 'text-gray-700 hover:bg-gray-200'
+            }`}
           >
             <UIText>{tabLabel} ({portfolios.length})</UIText>
-          </Button>
+          </button>
         </nav>
       </div>
 

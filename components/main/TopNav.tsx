@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
-import { Home, MessageCircle, Pen } from 'lucide-react'
+import { Home, MessageCircle, Pen, Search } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
 export function TopNav() {
@@ -197,9 +197,9 @@ export function TopNav() {
   return (
     <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
       <div className="w-full px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Left side - Home link */}
-          <div className="flex items-center">
+        <div className="flex justify-evenly md:justify-between items-center h-16">
+          {/* Mobile: All items spread evenly, Desktop: Left side */}
+          <div className="flex items-center md:flex-none">
             <IconButton 
               icon={Home}
               href="/main" 
@@ -208,12 +208,50 @@ export function TopNav() {
             />
           </div>
 
-          {/* Right side - Avatar or Sign In */}
-          <div className="flex items-center gap-4">
-            {loading ? (
-              <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
-            ) : user ? (
-              <>
+          {/* Mobile: All items spread evenly, Desktop: Right side grouped */}
+          {loading ? (
+            <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
+          ) : user ? (
+            <>
+              <IconButton
+                icon={Search}
+                href="/search"
+                title="Search"
+                aria-label="Search"
+                className="md:hidden"
+              />
+              <IconButton
+                icon={Pen}
+                onClick={() => setShowProjectSelector(true)}
+                title="Create Note"
+                aria-label="Create Note"
+                className="md:hidden"
+              />
+              <IconButton
+                icon={MessageCircle}
+                href="/messages"
+                title="Messages"
+                aria-label="Messages"
+                className="md:hidden"
+                badge={
+                  unreadCount > 0 ? (
+                    <span className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
+                      <UIText className="text-xs">{unreadCount > 99 ? '99+' : unreadCount}</UIText>
+                  </span>
+                  ) : undefined
+                }
+              />
+              <div className="md:hidden">
+                <UserAvatarClient userId={user.id} />
+              </div>
+              {/* Desktop: Grouped right side */}
+              <div className="hidden md:flex items-center gap-4">
+                <IconButton
+                  icon={Search}
+                  href="/search"
+                  title="Search"
+                  aria-label="Search"
+                />
                 <IconButton
                   icon={Pen}
                   onClick={() => setShowProjectSelector(true)}
@@ -234,16 +272,40 @@ export function TopNav() {
                   }
                 />
                 <UserAvatarClient userId={user.id} />
-              </>
-            ) : (
+              </div>
+            </>
+          ) : (
+            <>
+              <IconButton
+                icon={Search}
+                href="/search"
+                title="Search"
+                aria-label="Search"
+                className="md:hidden"
+              />
               <Link
                 href="/login"
-                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
+                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors md:hidden"
               >
                 <UIText>Sign In</UIText>
               </Link>
-            )}
-          </div>
+              {/* Desktop: Grouped right side */}
+              <div className="hidden md:flex items-center gap-4">
+                <IconButton
+                  icon={Search}
+                  href="/search"
+                  title="Search"
+                  aria-label="Search"
+                />
+                <Link
+                  href="/login"
+                  className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
+                >
+                  <UIText>Sign In</UIText>
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

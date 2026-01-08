@@ -55,3 +55,29 @@ textarea::placeholder {
   color: #9ca3af; /* gray-400 */
 }
 
+/* Remove focus outlines and rings globally */
+*:focus,
+*:focus-visible,
+*:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove Tailwind ring utilities */
+button:focus,
+input:focus,
+textarea:focus,
+select:focus,
+a:focus,
+[tabindex]:focus,
+[role="button"]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Override Tailwind ring variables */
+:root {
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+

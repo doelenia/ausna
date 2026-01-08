@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createNote } from '@/app/notes/actions'
 import { Portfolio, isProjectPortfolio } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
@@ -37,9 +37,52 @@ export function CreateNoteForm({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([])
+  const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([])
+  const [newCollectionName, setNewCollectionName] = useState('')
+  const [isCreatingCollection, setIsCreatingCollection] = useState(false)
+  const [loadingCollections, setLoadingCollections] = useState(false)
 
   // Filter to only show project portfolios (exclude human and community)
   const displayablePortfolios = portfolios.filter((p) => isProjectPortfolio(p))
+
+  // Get the selected project portfolio ID
+  const selectedProjectId = selectedPortfolios.find((id) => {
+    const portfolio = portfolios.find((p) => p.id === id)
+    return portfolio && isProjectPortfolio(portfolio)
+  })
+
+  // Fetch collections for the selected project
+  useEffect(() => {
+    const fetchCollections = async () => {
+      if (!selectedProjectId) {
+        setCollections([])
+        return
+      }
+
+      setLoadingCollections(true)
+      try {
+        const response = await fetch(`/api/collections?portfolio_id=${selectedProjectId}`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            setCollections(data.collections || [])
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching collections:', error)
+      } finally {
+        setLoadingCollections(false)
+      }
+    }
+
+    fetchCollections()
+  }, [selectedProjectId])
+
+  // Reset selected collections when project changes
+  useEffect(() => {
+    setSelectedCollectionIds([])
+  }, [selectedProjectId])
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
@@ -62,6 +105,48 @@ export function CreateNoteForm({
   const getPortfolioName = (portfolio: Portfolio): string => {
     const basic = getPortfolioBasic(portfolio)
     return basic.name || portfolio.slug
+  }
+
+  const handleCreateCollection = async () => {
+    if (!newCollectionName.trim() || !selectedProjectId) return
+
+    setIsCreatingCollection(true)
+    try {
+      const response = await fetch('/api/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          portfolio_id: selectedProjectId,
+          name: newCollectionName.trim(),
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success && data.collection) {
+          setCollections((prev) => [...prev, data.collection])
+          setSelectedCollectionIds((prev) => [...prev, data.collection.id])
+          setNewCollectionName('')
+        } else {
+          setError(data.error || 'Failed to create collection')
+        }
+      } else {
+        const data = await response.json()
+        setError(data.error || 'Failed to create collection')
+      }
+    } catch (error: any) {
+      setError(error.message || 'Failed to create collection')
+    } finally {
+      setIsCreatingCollection(false)
+    }
+  }
+
+  const toggleCollection = (collectionId: string) => {
+    setSelectedCollectionIds((prev) =>
+      prev.includes(collectionId)
+        ? prev.filter((id) => id !== collectionId)
+        : [...prev, collectionId]
+    )
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -102,6 +187,10 @@ export function CreateNoteForm({
       
       if (mentionedNoteId) {
         formData.append('mentioned_note_id', mentionedNoteId)
+      }
+
+      if (selectedCollectionIds.length > 0) {
+        formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
       }
 
       const result = await createNote(formData)
@@ -290,6 +379,64 @@ export function CreateNoteForm({
           {selectedPortfolios.length === 0 && (
             <UIText as="p" className="text-red-600 mt-1">A project must be assigned to create a note</UIText>
           )}
+        </div>
+      )}
+
+      {/* Collection selection - only show if a project is selected */}
+      {selectedProjectId && (
+        <div>
+          <UIText as="label" className="block mb-2">
+            Collections (optional)
+          </UIText>
+          
+          {/* Existing collections */}
+          {loadingCollections ? (
+            <UIText className="text-gray-500">Loading collections...</UIText>
+          ) : collections.length > 0 ? (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {collections.map((collection) => (
+                <button
+                  key={collection.id}
+                  type="button"
+                  onClick={() => toggleCollection(collection.id)}
+                  className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                    selectedCollectionIds.includes(collection.id)
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  {collection.name}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <UIText className="text-gray-500 mb-3">No collections yet. Create one below.</UIText>
+          )}
+
+          {/* Create new collection */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newCollectionName}
+              onChange={(e) => setNewCollectionName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleCreateCollection()
+                }
+              }}
+              placeholder="New collection name"
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleCreateCollection}
+              disabled={!newCollectionName.trim() || isCreatingCollection}
+            >
+              <UIText>{isCreatingCollection ? 'Creating...' : 'Create'}</UIText>
+            </Button>
+          </div>
         </div>
       )}
 

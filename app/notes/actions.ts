@@ -48,6 +48,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     const assignedPortfolios = formData.get('assigned_portfolios') as string | null
     const mentionedNoteId = formData.get('mentioned_note_id') as string | null
     const url = formData.get('url') as string | null
+    const collectionIds = formData.get('collection_ids') as string | null
 
     if (!text || text.trim().length === 0) {
       return {
@@ -242,6 +243,38 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     } else {
       console.log('No references to save')
+    }
+
+    // Assign note to collections if provided
+    if (collectionIds) {
+      try {
+        let collectionIdArray: string[] = []
+        try {
+          collectionIdArray = JSON.parse(collectionIds)
+        } catch {
+          // If not JSON, try comma-separated
+          collectionIdArray = collectionIds.split(',').map((id) => id.trim()).filter(Boolean)
+        }
+
+        if (collectionIdArray.length > 0) {
+          const insertData = collectionIdArray.map((collectionId: string) => ({
+            note_id: note.id,
+            collection_id: collectionId,
+          }))
+
+          const { error: collectionError } = await supabase
+            .from('note_collections')
+            .insert(insertData)
+
+          if (collectionError) {
+            console.error('Failed to assign note to collections:', collectionError)
+            // Don't fail the entire operation, just log the error
+          }
+        }
+      } catch (error: any) {
+        console.error('Error assigning note to collections:', error)
+        // Don't fail the entire operation, just log the error
+      }
     }
 
     // Auto-add note to eligible portfolios' pinned lists

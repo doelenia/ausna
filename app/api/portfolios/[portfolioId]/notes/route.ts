@@ -17,6 +17,7 @@ export async function GET(
     const portfolioId = params.portfolioId
     const offset = parseInt(searchParams.get('offset') || '0', 10)
     const limit = parseInt(searchParams.get('limit') || '20', 10)
+    const collectionId = searchParams.get('collection_id')
 
     if (!portfolioId) {
       return NextResponse.json(
@@ -61,9 +62,25 @@ export async function GET(
       )
     }
 
+    // If collection_id is provided, filter notes by collection
+    let noteIdsInCollection: string[] | null = null
+    if (collectionId) {
+      const { data: noteCollections } = await supabase
+        .from('note_collections')
+        .select('note_id')
+        .eq('collection_id', collectionId)
+      
+      noteIdsInCollection = (noteCollections || []).map((nc: any) => nc.note_id)
+    }
+
     // For human portfolios: filter by owner_account_id (notes created by this user)
     // For other portfolios: filter by assigned_portfolios (notes assigned to this portfolio)
     const filteredNotes = (allNotes || []).filter((note: any) => {
+      // First apply collection filter if provided
+      if (noteIdsInCollection && !noteIdsInCollection.includes(note.id)) {
+        return false
+      }
+
       if (isHuman) {
         // Human portfolio: show all notes created by the portfolio owner
         return note.owner_account_id === portfolio.user_id

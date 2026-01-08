@@ -39,6 +39,10 @@ export function NoteActions({
   const [pinOptions, setPinOptions] = useState<PinOption[]>([])
   const [loadingPins, setLoadingPins] = useState(true)
   const [pinning, setPinning] = useState<string | null>(null)
+  const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([])
+  const [noteCollectionIds, setNoteCollectionIds] = useState<string[]>([])
+  const [loadingCollections, setLoadingCollections] = useState(true)
+  const [updatingCollections, setUpdatingCollections] = useState(false)
 
   // Fetch pin options (user's human portfolio and assigned projects)
   useEffect(() => {
@@ -117,6 +121,46 @@ export function NoteActions({
     fetchPinOptions()
   }, [note.id, note.assigned_portfolios, currentUserId])
 
+  // Fetch collections for the project portfolio
+  useEffect(() => {
+    const fetchCollections = async () => {
+      if (!portfolioId || !note.assigned_portfolios || note.assigned_portfolios.length === 0) {
+        setLoadingCollections(false)
+        return
+      }
+
+      // Get the project portfolio ID (should be the first one)
+      const projectPortfolioId = note.assigned_portfolios[0]
+
+      setLoadingCollections(true)
+      try {
+        // Fetch all collections for the project
+        const collectionsResponse = await fetch(`/api/collections?portfolio_id=${projectPortfolioId}`)
+        if (collectionsResponse.ok) {
+          const collectionsData = await collectionsResponse.json()
+          if (collectionsData.success) {
+            setCollections(collectionsData.collections || [])
+          }
+        }
+
+        // Fetch note's current collections
+        const noteCollectionsResponse = await fetch(`/api/notes/${note.id}/collections`)
+        if (noteCollectionsResponse.ok) {
+          const noteCollectionsData = await noteCollectionsResponse.json()
+          if (noteCollectionsData.success) {
+            setNoteCollectionIds((noteCollectionsData.collections || []).map((c: any) => c.id))
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching collections:', error)
+      } finally {
+        setLoadingCollections(false)
+      }
+    }
+
+    fetchCollections()
+  }, [note.id, portfolioId, note.assigned_portfolios])
+
   const handlePinToggle = async (option: PinOption) => {
     if (pinning) return
 
@@ -159,6 +203,35 @@ export function NoteActions({
       alert(error.message || 'An unexpected error occurred')
     } finally {
       setPinning(null)
+    }
+  }
+
+  const handleCollectionToggle = async (collectionId: string) => {
+    if (updatingCollections) return
+
+    setUpdatingCollections(true)
+    try {
+      const newCollectionIds = noteCollectionIds.includes(collectionId)
+        ? noteCollectionIds.filter((id) => id !== collectionId)
+        : [...noteCollectionIds, collectionId]
+
+      const response = await fetch(`/api/notes/${note.id}/collections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collection_ids: newCollectionIds }),
+      })
+
+      if (response.ok) {
+        setNoteCollectionIds(newCollectionIds)
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to update collections')
+      }
+    } catch (error: any) {
+      console.error('Error updating collections:', error)
+      alert(error.message || 'Failed to update collections')
+    } finally {
+      setUpdatingCollections(false)
     }
   }
 
@@ -242,6 +315,41 @@ export function NoteActions({
                 >
                   {isRemoving ? 'Removing...' : 'Remove from Portfolio'}
                 </button>
+              )}
+              
+              {/* Collection assignment - only show if there are collections or if we're still loading */}
+              {(loadingCollections || collections.length > 0) && (
+                <>
+                  <div className="border-t border-gray-200 my-1" />
+                  <div className="px-4 py-2">
+                    <UIText className="text-xs font-medium text-gray-500 mb-2">Collections</UIText>
+                    {loadingCollections ? (
+                      <UIText className="text-xs text-gray-500">Loading...</UIText>
+                    ) : collections.length === 0 ? (
+                      <UIText className="text-xs text-gray-500">No collections available</UIText>
+                    ) : (
+                      <div className="space-y-1">
+                        {collections.map((collection) => (
+                          <button
+                            key={collection.id}
+                            onClick={() => {
+                              handleCollectionToggle(collection.id)
+                            }}
+                            disabled={updatingCollections}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              noteCollectionIds.includes(collection.id)
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {noteCollectionIds.includes(collection.id) ? '✓ ' : ''}
+                            {collection.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>

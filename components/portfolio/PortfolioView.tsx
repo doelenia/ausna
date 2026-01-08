@@ -623,6 +623,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                               name={friend.name}
                               avatar={friend.avatar}
                               size={32}
+                              showLink={false}
                             />
                           </div>
                         ))}
@@ -771,6 +772,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                                     name={member.name}
                                     avatar={member.avatar}
                                     size={32}
+                                    showLink={false}
                                   />
                                 </div>
                               ))}
