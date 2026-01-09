@@ -49,6 +49,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     const mentionedNoteId = formData.get('mentioned_note_id') as string | null
     const url = formData.get('url') as string | null
     const collectionIds = formData.get('collection_ids') as string | null
+    const shouldPin = formData.get('should_pin') === 'true'
 
     if (!text || text.trim().length === 0) {
       return {
@@ -149,7 +150,14 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       const imageFile = imageFiles[i]
       if (imageFile.size > 0) {
         try {
-          console.log(`Uploading image ${i + 1}/${imageFiles.length} for note ${note.id}`)
+          // Validate file size before processing (max 50MB)
+          const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+          if (imageFile.size > MAX_FILE_SIZE) {
+            console.error(`Image ${i + 1} is too large: ${imageFile.name} (${(imageFile.size / 1024 / 1024).toFixed(2)}MB)`)
+            throw new Error(`Image "${imageFile.name}" is too large (max 50MB). Please compress it before uploading.`)
+          }
+
+          console.log(`Uploading image ${i + 1}/${imageFiles.length} for note ${note.id} (${(imageFile.size / 1024 / 1024).toFixed(2)}MB)`)
           const uploadResult = await uploadNoteImage(note.id, imageFile)
           console.log('Image upload result:', uploadResult)
           uploadedImageReferences.push({
@@ -165,8 +173,13 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
             noteId: note.id,
             fileName: imageFile.name,
             fileSize: imageFile.size,
+            fileSizeMB: (imageFile.size / 1024 / 1024).toFixed(2),
           })
-          // Continue with other images even if one fails
+          // If it's a size error, throw it so user sees the message
+          if (error.message?.includes('too large')) {
+            throw error
+          }
+          // Continue with other images for other errors
         }
       }
     }
@@ -277,21 +290,18 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // Auto-add note to eligible portfolios' pinned lists
-    // Only add to portfolios where user is owner and pinned list is not full
-    try {
-      const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
-      const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
+    // Pin note if user requested it (only if user is owner and there's space)
+    if (shouldPin) {
+      try {
+        const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
+        const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
 
-      // Get all assigned portfolios
-      for (const portfolioId of portfolioIds) {
-        try {
-          // Check if user is owner
-          const isOwner = await isPortfolioOwner(portfolioId, user.id)
-          if (!isOwner) {
-            continue
-          }
-
+        // Get the assigned portfolio (should be only one)
+        const portfolioId = portfolioIds[0]
+        
+        // Check if user is owner
+        const isOwner = await isPortfolioOwner(portfolioId, user.id)
+        if (isOwner) {
           // Get portfolio to check pinned count
           const { data: portfolio } = await supabase
             .from('portfolios')
@@ -299,35 +309,30 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
             .eq('id', portfolioId)
             .single()
 
-          if (!portfolio) {
-            continue
-          }
+          if (portfolio) {
+            const portfolioData = portfolio as Portfolio
+            const pinnedCount = getPinnedItemsCount(portfolioData)
 
-          const portfolioData = portfolio as Portfolio
-          const pinnedCount = getPinnedItemsCount(portfolioData)
+            // Only add if pinned list is not full (max 9 items)
+            if (pinnedCount < 9) {
+              // Check if note is already pinned
+              const metadata = portfolioData.metadata as any
+              const pinned = metadata?.pinned || []
+              const isAlreadyPinned = Array.isArray(pinned) && pinned.some(
+                (item: any) => item.type === 'note' && item.id === note.id
+              )
 
-          // Only add if pinned list is not full (max 9 items)
-          if (pinnedCount < 9) {
-            // Check if note is already pinned
-            const metadata = portfolioData.metadata as any
-            const pinned = metadata?.pinned || []
-            const isAlreadyPinned = Array.isArray(pinned) && pinned.some(
-              (item: any) => item.type === 'note' && item.id === note.id
-            )
-
-            if (!isAlreadyPinned) {
-              // Add to pinned list
-              await addToPinned(portfolioId, 'note', note.id)
+              if (!isAlreadyPinned) {
+                // Add to pinned list
+                await addToPinned(portfolioId, 'note', note.id)
+              }
             }
           }
-        } catch (err) {
-          // Continue with other portfolios even if one fails
-          console.error(`Failed to auto-pin note to portfolio ${portfolioId}:`, err)
         }
+      } catch (err) {
+        // Don't fail note creation if pinning fails
+        console.error('Failed to pin note:', err)
       }
-    } catch (err) {
-      // Don't fail note creation if auto-pinning fails
-      console.error('Failed to auto-pin note:', err)
     }
 
     // Trigger background indexing (fire-and-forget)

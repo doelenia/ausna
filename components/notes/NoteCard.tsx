@@ -38,20 +38,91 @@ export function NoteCard({
   const imageRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
-    const fetchPortfolios = async () => {
+    const fetchPortfolios = async (retryCount = 0) => {
+      const MAX_RETRIES = 2
+      const RETRY_DELAY = 1000 // 1 second
+      const AUTH_WAIT_MAX = 3000 // Max 3 seconds to wait for auth
+
       try {
         const supabase = createClient()
         
-        // Fetch owner's human portfolio
-        const { data: ownerPortfolios } = await supabase
+        // CRITICAL: Wait for auth session to be ready before fetching
+        // This fixes issues where portfolio queries fail due to stale/expired tokens
+        let sessionReady = false
+        let authWaitTime = 0
+        const authCheckInterval = 100 // Check every 100ms
+        
+        while (!sessionReady && authWaitTime < AUTH_WAIT_MAX) {
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+          
+          if (sessionError) {
+            console.warn('[NoteCard] Session error while waiting for auth:', sessionError.message)
+            // If session error, try to refresh
+            await supabase.auth.getUser()
+          }
+          
+          if (session?.user) {
+            sessionReady = true
+            break
+          }
+          
+          // Wait a bit before checking again
+          await new Promise(resolve => setTimeout(resolve, authCheckInterval))
+          authWaitTime += authCheckInterval
+        }
+        
+        if (!sessionReady && authWaitTime >= AUTH_WAIT_MAX) {
+          console.warn('[NoteCard] Auth session not ready after waiting, proceeding anyway (may fail)')
+        }
+        
+        // Fetch owner's human portfolio with error checking
+        // Note: maybeSingle() returns null for both "not found" and "blocked by RLS"
+        // We can't distinguish these cases client-side, but we can detect actual errors
+        const { data: ownerPortfolios, error: ownerError } = await supabase
           .from('portfolios')
           .select('*')
           .eq('type', 'human')
           .eq('user_id', note.owner_account_id)
           .maybeSingle()
 
-        if (ownerPortfolios) {
+        if (ownerError) {
+          // Real error occurred (network, auth, RLS blocking, etc.)
+          console.error('[NoteCard] Error fetching owner portfolio:', {
+            error: ownerError,
+            errorCode: ownerError.code,
+            errorMessage: ownerError.message,
+            ownerAccountId: note.owner_account_id,
+            noteId: note.id,
+            retryCount,
+            authReady: sessionReady,
+          })
+          
+          // Retry on network errors, rate limits, RLS errors, or auth errors
+          if (retryCount < MAX_RETRIES && (
+            ownerError.code === 'PGRST116' || // Network/connection error
+            ownerError.message?.includes('rate limit') ||
+            ownerError.message?.includes('timeout') ||
+            ownerError.code === '42501' || // Insufficient privilege (RLS)
+            ownerError.code === 'PGRST301' || // JWT expired
+            ownerError.message?.includes('JWT') || // Any JWT/auth related error
+            ownerError.message?.includes('token')
+          )) {
+            // If it's an auth error, try refreshing the session before retry
+            if (ownerError.code === 'PGRST301' || ownerError.message?.includes('JWT') || ownerError.message?.includes('token')) {
+              console.log('[NoteCard] Auth error detected, refreshing session before retry')
+              await supabase.auth.getUser() // This will refresh the token
+              await new Promise(resolve => setTimeout(resolve, 500)) // Give it a moment
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)))
+            return fetchPortfolios(retryCount + 1)
+          }
+        } else if (ownerPortfolios) {
+          // Portfolio found successfully
           setOwnerPortfolio(ownerPortfolios as Portfolio)
+        } else {
+          // No error, but no data - portfolio doesn't exist (expected for some users)
+          // This is normal and will use the fallback name
         }
 
         // Fetch assigned project portfolio (only projects, not communities)
@@ -66,48 +137,87 @@ export function NoteCard({
             .maybeSingle()
 
           if (projectError) {
-            console.error('Error fetching assigned project:', projectError)
-          }
-
-          if (assignedPortfolios) {
+            console.error('[NoteCard] Error fetching assigned project:', {
+              error: projectError,
+              errorCode: projectError.code,
+              assignedPortfolios: note.assigned_portfolios,
+              noteId: note.id,
+              authReady: sessionReady,
+            })
+            
+            // Retry on auth errors
+            if (retryCount < MAX_RETRIES && (
+              projectError.code === 'PGRST301' || // JWT expired
+              projectError.message?.includes('JWT') ||
+              projectError.message?.includes('token')
+            )) {
+              await supabase.auth.getUser() // Refresh token
+              await new Promise(resolve => setTimeout(resolve, 500))
+            }
+          } else if (assignedPortfolios) {
             setAssignedProject(assignedPortfolios as Portfolio)
           } else {
             // Fallback: if portfolioId is provided and it's a project, use it
             if (portfolioId) {
-              const { data: portfolioData } = await supabase
+              const { data: portfolioData, error: fallbackError } = await supabase
                 .from('portfolios')
                 .select('*')
                 .eq('id', portfolioId)
                 .eq('type', 'projects')
                 .maybeSingle()
               
-              if (portfolioData) {
+              if (fallbackError) {
+                console.error('[NoteCard] Error fetching fallback portfolio:', {
+                  error: fallbackError,
+                  errorCode: fallbackError.code,
+                  portfolioId,
+                  noteId: note.id,
+                })
+              } else if (portfolioData) {
                 setAssignedProject(portfolioData as Portfolio)
               }
             }
           }
         } else if (portfolioId) {
           // If note has no assigned_portfolios but portfolioId is provided, check if it's a project
-          const { data: portfolioData } = await supabase
+          const { data: portfolioData, error: portfolioError } = await supabase
             .from('portfolios')
             .select('*')
             .eq('id', portfolioId)
             .eq('type', 'projects')
             .maybeSingle()
           
-          if (portfolioData) {
+          if (portfolioError) {
+            console.error('[NoteCard] Error fetching portfolio by ID:', {
+              error: portfolioError,
+              errorCode: portfolioError.code,
+              portfolioId,
+              noteId: note.id,
+            })
+          } else if (portfolioData) {
             setAssignedProject(portfolioData as Portfolio)
           }
         }
       } catch (error) {
-        console.error('Error fetching portfolios:', error)
+        console.error('[NoteCard] Unexpected error fetching portfolios:', {
+          error,
+          noteId: note.id,
+          ownerAccountId: note.owner_account_id,
+          retryCount,
+        })
+        
+        // Retry on unexpected errors
+        if (retryCount < MAX_RETRIES) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (retryCount + 1)))
+          return fetchPortfolios(retryCount + 1)
+        }
       } finally {
         setLoadingPortfolios(false)
       }
     }
 
     fetchPortfolios()
-  }, [note.assigned_portfolios, note.owner_account_id, portfolioId])
+  }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id])
 
   const renderReference = (ref: NoteReference, index: number) => {
     if (ref.type === 'image') {

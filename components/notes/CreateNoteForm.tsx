@@ -34,6 +34,7 @@ export function CreateNoteForm({
   const [url, setUrl] = useState('')
   const [selectedPortfolios, setSelectedPortfolios] = useState<string[]>(defaultPortfolioIds)
   const [images, setImages] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]) // Thumbnail URLs for previews
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -42,6 +43,9 @@ export function CreateNoteForm({
   const [newCollectionName, setNewCollectionName] = useState('')
   const [isCreatingCollection, setIsCreatingCollection] = useState(false)
   const [loadingCollections, setLoadingCollections] = useState(false)
+  const [shouldPin, setShouldPin] = useState(false)
+  const [pinInfo, setPinInfo] = useState<{ count: number; max: number; canPin: boolean } | null>(null)
+  const [loadingPinInfo, setLoadingPinInfo] = useState(false)
 
   // Filter to only show project portfolios (exclude human and community)
   const displayablePortfolios = portfolios.filter((p) => isProjectPortfolio(p))
@@ -79,19 +83,173 @@ export function CreateNoteForm({
     fetchCollections()
   }, [selectedProjectId])
 
+  // Fetch pin info for the selected project
+  useEffect(() => {
+    const fetchPinInfo = async () => {
+      if (!selectedProjectId) {
+        setPinInfo(null)
+        setShouldPin(false)
+        return
+      }
+
+      setLoadingPinInfo(true)
+      try {
+        const response = await fetch(`/api/portfolios/${selectedProjectId}/pin-info`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            setPinInfo({
+              count: data.pinCount || 0,
+              max: 9,
+              canPin: data.canPin || false,
+            })
+            // Reset pin selection if can't pin
+            if (!data.canPin) {
+              setShouldPin(false)
+            }
+          } else {
+            setPinInfo(null)
+            setShouldPin(false)
+          }
+        } else {
+          setPinInfo(null)
+          setShouldPin(false)
+        }
+      } catch (error) {
+        console.error('Error fetching pin info:', error)
+        setPinInfo(null)
+        setShouldPin(false)
+      } finally {
+        setLoadingPinInfo(false)
+      }
+    }
+
+    fetchPinInfo()
+  }, [selectedProjectId])
+
   // Reset selected collections when project changes
   useEffect(() => {
     setSelectedCollectionIds([])
   }, [selectedProjectId])
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Create a small thumbnail for preview (max 200x200px) to avoid memory issues
+  const createThumbnail = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const img = new Image()
+        img.onload = () => {
+          // Create canvas for thumbnail
+          const canvas = document.createElement('canvas')
+          const ctx = canvas.getContext('2d')
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'))
+            return
+          }
+
+          // Calculate thumbnail size (max 200x200, maintain aspect ratio)
+          const maxSize = 200
+          let width = img.width
+          let height = img.height
+
+          if (width > height) {
+            if (width > maxSize) {
+              height = (height * maxSize) / width
+              width = maxSize
+            }
+          } else {
+            if (height > maxSize) {
+              width = (width * maxSize) / height
+              height = maxSize
+            }
+          }
+
+          canvas.width = width
+          canvas.height = height
+
+          // Draw resized image
+          ctx.drawImage(img, 0, 0, width, height)
+
+          // Convert to blob URL (much smaller than original)
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                const thumbnailUrl = URL.createObjectURL(blob)
+                resolve(thumbnailUrl)
+              } else {
+                reject(new Error('Failed to create thumbnail blob'))
+              }
+            },
+            'image/jpeg',
+            0.85 // Quality for thumbnail
+          )
+        }
+        img.onerror = () => reject(new Error('Failed to load image'))
+        img.src = e.target?.result as string
+      }
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
+    
+    // Validate file sizes (max 50MB per file - will be compressed server-side)
+    const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
+    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE)
+    
+    if (oversizedFiles.length > 0) {
+      const fileNames = oversizedFiles.map(f => f.name).join(', ')
+      setError(`The following images are too large (max 50MB): ${fileNames}. Please compress them before uploading.`)
+      // Clear the input
+      if (e.target) {
+        e.target.value = ''
+      }
+      return
+    }
+    
+    // Store original files
     setImages((prev) => [...prev, ...files])
+    
+    // Create thumbnails asynchronously to avoid blocking UI
+    // Use requestIdleCallback if available, otherwise setTimeout
+    const createThumbnails = async () => {
+      const thumbnailPromises = files.map((file) => createThumbnail(file))
+      try {
+        const thumbnails = await Promise.all(thumbnailPromises)
+        setImagePreviews((prev) => [...prev, ...thumbnails])
+      } catch (error) {
+        console.error('Error creating thumbnails:', error)
+        // Fallback: use object URLs if thumbnail creation fails
+        const fallbackUrls = files.map((file) => URL.createObjectURL(file))
+        setImagePreviews((prev) => [...prev, ...fallbackUrls])
+      }
+    }
+
+    // Defer thumbnail creation to avoid blocking typing
+    if ('requestIdleCallback' in window) {
+      ;(window as any).requestIdleCallback(createThumbnails, { timeout: 2000 })
+    } else {
+      setTimeout(createThumbnails, 0)
+    }
   }
 
   const removeImage = (index: number) => {
+    // Clean up thumbnail URL to free memory
+    if (imagePreviews[index]) {
+      URL.revokeObjectURL(imagePreviews[index])
+    }
     setImages((prev) => prev.filter((_, i) => i !== index))
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
+
+  // Clean up all object URLs on unmount
+  useEffect(() => {
+    return () => {
+      imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [imagePreviews])
 
   const removePortfolio = (portfolioId: string) => {
     // Don't allow removing the assigned project - notes must be assigned to exactly one project
@@ -191,6 +349,11 @@ export function CreateNoteForm({
 
       if (selectedCollectionIds.length > 0) {
         formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
+      }
+
+      // Add pin preference if user wants to pin
+      if (shouldPin && pinInfo?.canPin) {
+        formData.append('should_pin', 'true')
       }
 
       const result = await createNote(formData)
@@ -329,11 +492,18 @@ export function CreateNoteForm({
             <div className="mt-2 flex flex-wrap gap-2">
               {images.map((image, index) => (
                 <div key={index} className="relative">
-                  <img
-                    src={URL.createObjectURL(image)}
-                    alt={`Preview ${index + 1}`}
-                    className="w-20 h-20 object-cover rounded"
-                  />
+                  {imagePreviews[index] ? (
+                    <img
+                      src={imagePreviews[index]}
+                      alt={`Preview ${index + 1}`}
+                      className="w-20 h-20 object-cover rounded"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 bg-gray-200 rounded flex items-center justify-center">
+                      <UIText className="text-xs text-gray-500">Loading...</UIText>
+                    </div>
+                  )}
                   <Button
                     type="button"
                     variant="danger"
@@ -379,6 +549,23 @@ export function CreateNoteForm({
           {selectedPortfolios.length === 0 && (
             <UIText as="p" className="text-red-600 mt-1">A project must be assigned to create a note</UIText>
           )}
+        </div>
+      )}
+
+      {/* Pin option - only show if user is owner and there's space */}
+      {selectedProjectId && pinInfo?.canPin && (
+        <div>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={shouldPin}
+              onChange={(e) => setShouldPin(e.target.checked)}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <UIText as="span">
+              Pin to project ({pinInfo.count}/{pinInfo.max} pinned)
+            </UIText>
+          </label>
         </div>
       )}
 
