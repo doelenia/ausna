@@ -187,12 +187,13 @@ export function FeedView({ currentUserId }: FeedViewProps) {
             </div>
           ) : (
             <>
-              <div className="space-y-4">
+              <div className="divide-y divide-gray-200 md:divide-y-0 md:space-y-4">
                 {notes.map((note) => (
                   <div key={note.id} id={`note-${note.id}`}>
                     <NoteCard
                       note={note}
                       currentUserId={currentUserId}
+                      flatOnMobile={true}
                     />
                   </div>
                 ))}

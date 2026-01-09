@@ -1,14 +1,17 @@
 'use client'
 
-import { Note, NoteReference, ImageReference, UrlReference, NoteSource } from '@/types/note'
 import Link from 'next/link'
+import { Note, NoteReference, ImageReference, UrlReference, NoteSource } from '@/types/note'
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
-import { Title, Subtitle, Content, UIText, Card, UserAvatar } from '@/components/ui'
+import { Title, Subtitle, Content, UIText, UIButtonText, Card, UserAvatar, Button } from '@/components/ui'
+import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
+import { NoteActions } from './NoteActions'
+import { useRouter } from 'next/navigation'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -17,6 +20,16 @@ interface NoteCardProps {
   isPreview?: boolean
   isPinned?: boolean
   viewMode?: 'default' | 'collage'
+  isViewMode?: boolean
+  /**
+   * When true, the note uses a flat layout (no card) on mobile,
+   * but keeps the card layout on desktop.
+   *
+   * Used for:
+   * - Mobile feed (flat rows with separators)
+   * - Mobile note view (white background with extra vertical padding)
+   */
+  flatOnMobile?: boolean
   onDeleted?: () => void
   onRemovedFromPortfolio?: () => void
 }
@@ -28,14 +41,22 @@ export function NoteCard({
   isPreview = false,
   isPinned = false,
   viewMode = 'default',
+  isViewMode = false,
+  flatOnMobile = false,
   onDeleted,
   onRemovedFromPortfolio,
 }: NoteCardProps) {
+  const router = useRouter()
   const [ownerPortfolio, setOwnerPortfolio] = useState<Portfolio | null>(null)
-  const [assignedProject, setAssignedProject] = useState<Portfolio | null>(null)
+  const [assignedProjects, setAssignedProjects] = useState<Portfolio[]>([])
   const [loadingPortfolios, setLoadingPortfolios] = useState(true)
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null)
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+  const [touchStartX, setTouchStartX] = useState<number | null>(null)
+  const [touchStartY, setTouchStartY] = useState<number | null>(null)
+  const [isSendingToAuthor, setIsSendingToAuthor] = useState(false)
   const imageRef = useRef<HTMLImageElement | null>(null)
+  const carouselRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const fetchPortfolios = async (retryCount = 0) => {
@@ -124,7 +145,7 @@ export function NoteCard({
           // This is normal and will use the fallback name
         }
 
-        // Fetch assigned project portfolio (only projects, not communities)
+        // Fetch assigned project portfolios (only projects, not communities)
         // First try from note's assigned_portfolios
         if (note.assigned_portfolios && note.assigned_portfolios.length > 0) {
           const { data: assignedPortfolios, error: projectError } = await supabase
@@ -132,11 +153,9 @@ export function NoteCard({
             .select('*')
             .in('id', note.assigned_portfolios)
             .eq('type', 'projects')
-            .limit(1)
-            .maybeSingle()
 
           if (projectError) {
-            console.error('[NoteCard] Error fetching assigned project:', {
+            console.error('[NoteCard] Error fetching assigned projects:', {
               error: projectError,
               errorCode: projectError.code,
               assignedPortfolios: note.assigned_portfolios,
@@ -153,8 +172,8 @@ export function NoteCard({
               await supabase.auth.getUser() // Refresh token
               await new Promise(resolve => setTimeout(resolve, 500))
             }
-          } else if (assignedPortfolios) {
-            setAssignedProject(assignedPortfolios as Portfolio)
+          } else if (assignedPortfolios && assignedPortfolios.length > 0) {
+            setAssignedProjects(assignedPortfolios as Portfolio[])
           } else {
             // Fallback: if portfolioId is provided and it's a project, use it
             if (portfolioId) {
@@ -173,7 +192,7 @@ export function NoteCard({
                   noteId: note.id,
                 })
               } else if (portfolioData) {
-                setAssignedProject(portfolioData as Portfolio)
+                setAssignedProjects([portfolioData as Portfolio])
               }
             }
           }
@@ -194,7 +213,7 @@ export function NoteCard({
               noteId: note.id,
             })
           } else if (portfolioData) {
-            setAssignedProject(portfolioData as Portfolio)
+            setAssignedProjects([portfolioData as Portfolio])
           }
         }
       } catch (error) {
@@ -290,12 +309,142 @@ export function NoteCard({
     return null
   }
 
+  // Render references section (images as carousel, URLs as previews)
+  const renderReferencesSection = () => {
+    if (!references || references.length === 0 || isCollageView) return null
+
+    const urlReferences = references.filter(ref => ref && ref.type === 'url') as UrlReference[]
+
+    return (
+      <div className="mb-4">
+        {/* Image carousel */}
+        {imageReferences.length > 0 && (
+          <div 
+            ref={carouselRef}
+            className="relative mb-4 rounded-lg overflow-hidden bg-gray-100"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            <div
+              className="relative"
+              style={{
+                aspectRatio: getCarouselAspectRatio(),
+                minHeight: '100px',
+                maxHeight: '800px',
+              }}
+            >
+              <img
+                src={imageReferences[currentImageIndex]?.url}
+                alt={`Note image ${currentImageIndex + 1}`}
+                className="w-full h-full object-contain"
+                onLoad={handleImageLoad}
+              />
+              
+              {/* Arrow buttons (desktop) */}
+              {imageReferences.length > 1 && (
+                <>
+                  <button
+                    onClick={handlePreviousImage}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors hidden sm:flex items-center justify-center"
+                    aria-label="Previous image"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={handleNextImage}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors hidden sm:flex items-center justify-center"
+                    aria-label="Next image"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </>
+              )}
+
+              {/* Dot indicators */}
+              {imageReferences.length > 1 && (
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+                  {imageReferences.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setCurrentImageIndex(index)
+                      }}
+                      className={`w-2 h-2 rounded-full transition-colors ${
+                        index === currentImageIndex ? 'bg-white' : 'bg-white/50'
+                      }`}
+                      aria-label={`Go to image ${index + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* URL references */}
+        {urlReferences.length > 0 && (
+          <div className="space-y-3">
+            {urlReferences.map((urlRef, index) => {
+              const { hostName: displayHostName, hostIcon: displayHostIcon } = getUrlDisplayInfo(urlRef)
+              
+              return (
+                <a
+                  key={index}
+                  href={urlRef.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:bg-gray-100 transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {urlRef.headerImage && (
+                    <img
+                      src={urlRef.headerImage}
+                      alt={urlRef.title || 'URL preview'}
+                      className="w-full h-48 object-cover"
+                    />
+                  )}
+                  <div className="p-4">
+                    <div className="flex items-start gap-3">
+                      <img
+                        src={displayHostIcon}
+                        alt={displayHostName}
+                        className="w-6 h-6 rounded flex-shrink-0"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement
+                          target.src = `https://www.google.com/s2/favicons?domain=${displayHostName}&sz=64`
+                        }}
+                      />
+                      <div className="flex-1">
+                        {urlRef.title && (
+                          <Title as="h4" className="mb-1">{urlRef.title}</Title>
+                        )}
+                        {urlRef.description && (
+                          <Content as="p" className="mb-2">{urlRef.description}</Content>
+                        )}
+                        <UIText className="text-blue-600">{displayHostName}</UIText>
+                      </div>
+                    </div>
+                  </div>
+                </a>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
   const ownerName = ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`
 
-  const projectBasic = assignedProject ? getPortfolioBasic(assignedProject) : null
-  const projectAvatarUrl = projectBasic?.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(projectBasic?.name || 'Project')}&background=random`
-  const projectName = projectBasic?.name || 'Project'
+  const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
 
   const isCollageView = viewMode === 'collage'
   
@@ -359,11 +508,106 @@ export function NoteCard({
     return `${constrained} / 1`
   }
 
+  // Calculate aspect ratio for the inline carousel in default view.
+  // Allow wider images than 1:1, but still clamp to avoid extremes.
+  const getCarouselAspectRatio = () => {
+    if (!imageAspectRatio) {
+      return '1 / 1'
+    }
+    // Allow from 1:2 (vertical) up to 2:1 (horizontal)
+    const constrained = Math.max(0.5, Math.min(2.0, imageAspectRatio))
+    return `${constrained} / 1`
+  }
+
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget
     if (img.naturalWidth && img.naturalHeight) {
       const ratio = img.naturalWidth / img.naturalHeight
       setImageAspectRatio(ratio)
+    }
+  }
+
+  // Image carousel handlers
+  const imageReferences = references.filter(ref => {
+    if (!ref) return false
+    return ref.type === 'image' || (ref.url && !ref.title && !ref.hostName)
+  }) as ImageReference[]
+
+  const handlePreviousImage = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCurrentImageIndex(prev => (prev > 0 ? prev - 1 : imageReferences.length - 1))
+  }
+
+  const handleNextImage = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCurrentImageIndex(prev => (prev < imageReferences.length - 1 ? prev + 1 : 0))
+  }
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX)
+    setTouchStartY(e.touches[0].clientY)
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX === null || touchStartY === null) return
+    
+    const touchEndX = e.touches[0].clientX
+    const touchEndY = e.touches[0].clientY
+    const diffX = touchStartX - touchEndX
+    const diffY = touchStartY - touchEndY
+    
+    // Only handle horizontal swipes (more horizontal than vertical)
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+      if (diffX > 0) {
+        // Swipe left - next image
+        handleNextImage(e as any)
+      } else {
+        // Swipe right - previous image
+        handlePreviousImage(e as any)
+      }
+      setTouchStartX(null)
+      setTouchStartY(null)
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setTouchStartX(null)
+    setTouchStartY(null)
+  }
+
+  // Talk to author handler
+  const handleTalkToAuthor = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    if (!currentUserId || currentUserId === note.owner_account_id) return
+    
+    setIsSendingToAuthor(true)
+    try {
+      const response = await fetch('/api/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          receiver_id: note.owner_account_id,
+          text: '',
+          note_id: note.id,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to send note')
+      }
+
+      router.push(`/messages?userId=${note.owner_account_id}`)
+    } catch (error) {
+      console.error('Error sending note:', error)
+      alert('Failed to send note')
+    } finally {
+      setIsSendingToAuthor(false)
     }
   }
 
@@ -464,13 +708,75 @@ export function NoteCard({
     )
   }
 
-  return (
-    <Card 
-      variant="subtle" 
-      className="relative overflow-hidden"
-      padding={isTextOnly ? 'sm' : undefined}
-    >
-      <Link href={`/notes/${note.id}`} className="block">
+  // Project Assignment Banner - rendered at the end of the main card content,
+  // visually matching search result items (avatar + name/type + second line)
+  const projectBanner = assignedProjects.length > 0 ? (() => {
+    const project = assignedProjects[0]
+    const basic = getPortfolioBasic(project)
+    const metadata = project.metadata as any
+    const emoji = metadata?.basic?.emoji
+    // Match search result logic: use project_type_specific when available
+    const projectType: string | null = metadata?.project_type_specific || null
+    const description: string | undefined = basic.description
+
+    return (
+      <Link
+        href={getPortfolioUrl('projects', project.id)}
+        onClick={(e) => e.stopPropagation()}
+        className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-gray-100"
+      >
+        {/* Avatar (same size/feel as search results) */}
+        <div className="flex-shrink-0">
+          <StickerAvatar
+            src={basic.avatar}
+            alt={basic.name}
+            type="projects"
+            size={48}
+            emoji={emoji}
+            name={basic.name}
+          />
+        </div>
+
+        {/* Text content */}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          {/* First row: Name + Type label */}
+          <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+            <Content className="truncate min-w-0">
+              {basic.name}
+            </Content>
+            {projectType && (
+              <UIButtonText className="text-gray-500 flex-shrink-0">
+                {projectType}
+              </UIButtonText>
+            )}
+          </div>
+
+          {/* Second row: Description (if any) */}
+          {description && (
+            <div className="min-w-0 overflow-hidden">
+              <UIText className="text-gray-500 truncate block w-full">
+                {description}
+              </UIText>
+            </div>
+          )}
+        </div>
+      </Link>
+    )
+  })() : null
+
+  const hasMediaInDefaultView = !isCollageView && (hasImages || hasUrls)
+
+  const cardContent = (
+    <>
+      {/* Top media section (images + URL previews) with tighter padding */}
+      {!isCollageView && (
+        <div className="px-1 pt-1">
+          {renderReferencesSection()}
+        </div>
+      )}
+
+      {/* Main body with more generous padding (slightly reduced top padding when media is present) */}
+      <div className={`px-4 pb-4 ${hasMediaInDefaultView ? 'pt-0' : 'pt-4'}`}>
         {/* Header - Owner and Date (hidden in collage view) */}
         {!isCollageView && (
           <div className="flex items-start justify-between mb-4">
@@ -503,6 +809,48 @@ export function NoteCard({
                 </UIText>
               )}
             </div>
+            
+            {/* View Mode Actions */}
+            {isViewMode && (
+              <div className="flex items-center gap-2">
+                {/* Talk to Author Button */}
+                {currentUserId && currentUserId !== note.owner_account_id && (
+                  <Button
+                    variant="text"
+                    size="sm"
+                    onClick={handleTalkToAuthor}
+                    disabled={isSendingToAuthor}
+                    className="flex items-center gap-1.5"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                      />
+                    </svg>
+                    <UIText>{isSendingToAuthor ? 'Opening...' : 'Talk to Author'}</UIText>
+                  </Button>
+                )}
+                
+                {/* More Menu */}
+                {isOwner && (
+                  <NoteActions
+                    note={note}
+                    portfolioId={portfolioId}
+                    currentUserId={currentUserId}
+                    onDelete={onDeleted}
+                    onRemoveFromPortfolio={onRemovedFromPortfolio}
+                  />
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -524,13 +872,12 @@ export function NoteCard({
           </Content>
         </div>
 
-
-        {/* References preview - show all references (excluding first image in collage view) */}
-        {note.references && note.references.length > 0 && (
+        {/* References preview - show all references (excluding first image in collage view) - only for collage view */}
+        {isCollageView && note.references && note.references.length > 0 && (
           <div className="mb-4 space-y-3">
             {note.references.map((ref, index) => {
               // Skip first image in collage view since it's already displayed
-              if (isCollageView && ref.type === 'image' && index === 0 && hasImages) {
+              if (ref.type === 'image' && index === 0 && hasImages) {
                 return null
               }
               return renderReference(ref, index)
@@ -546,7 +893,57 @@ export function NoteCard({
             </UIText>
           </div>
         )}
-      </Link>
-    </Card>
+
+        {/* Project banner at the end of the main card (not in collage view) */}
+        {!isCollageView && projectBanner}
+      </div>
+    </>
+  )
+
+  const wrappedContent = isViewMode ? (
+    cardContent
+  ) : (
+    <Link href={`/notes/${note.id}`} className="block">
+      {cardContent}
+    </Link>
+  )
+
+  // Flat layout on mobile (no card), card layout on desktop
+  if (flatOnMobile) {
+    return (
+      <div className="w-full md:max-w-xl md:mx-auto">
+        {/* Mobile: flat layout
+            - Feed: white background only, rely on internal padding
+            - Note view: no extra padding (use original inner padding), background provided by page
+        */}
+        <div className={`md:hidden ${isViewMode ? '' : 'bg-white'}`}>
+          {wrappedContent}
+        </div>
+
+        {/* Desktop: keep subtle card */}
+        <div className="hidden md:block">
+          <Card
+            variant="subtle"
+            className="relative overflow-hidden"
+            padding="none"
+          >
+            {wrappedContent}
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  // Default behavior: card on all viewports
+  return (
+    <div className="w-full md:max-w-xl md:mx-auto">
+      <Card
+        variant="subtle"
+        className="relative overflow-hidden"
+        padding="none"
+      >
+        {wrappedContent}
+      </Card>
+    </div>
   )
 }

@@ -260,9 +260,18 @@ export function AuthForm({ mode }: AuthFormProps) {
         }
 
         console.log('User created:', data.user.id, 'Email confirmed:', data.user.email_confirmed_at)
-        // Check if email confirmation is required
+        // If Supabase returns a session on sign-up (email verification disabled),
+        // immediately sign the user in and redirect to main.
+        if (data.session) {
+          // Use full page reload to ensure auth cookies are properly set
+          window.location.href = '/main'
+          return
+        }
+
+        // Fallback: if email confirmation is still enabled, rely on confirmed email
+        // status to decide whether to redirect or show the "check your email" UI.
         if (data.user.email_confirmed_at) {
-          // Email already confirmed (e.g., OAuth), redirect to main
+          // Email already confirmed (e.g., OAuth or auto-confirm), redirect to main
           router.push('/main')
         } else {
           // Email confirmation required
@@ -346,12 +355,6 @@ export function AuthForm({ mode }: AuthFormProps) {
           <UIText className="mb-4">
             Your email <strong>{email}</strong> has been added to the waitlist. You will be notified when your account is approved.
           </UIText>
-          <Link
-            href="/login"
-            className="text-blue-600 hover:text-blue-500"
-          >
-            <UIText>Back to Sign In</UIText>
-          </Link>
         </div>
       </div>
     )
@@ -398,12 +401,6 @@ export function AuthForm({ mode }: AuthFormProps) {
               <UIText>try again</UIText>
             </Button>
           </UIText>
-          <Link
-            href="/login"
-            className="text-blue-600 hover:text-blue-500"
-          >
-            <UIText>Back to Sign In</UIText>
-          </Link>
         </div>
       </div>
     )

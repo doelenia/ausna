@@ -159,7 +159,6 @@ function MessagesPageContent() {
       <ConversationView
         userId={selectedUserId}
         partnerInfo={partnerInfos.get(selectedUserId)}
-        onBack={() => setSelectedUserId(null)}
         onMessageSent={() => {
           loadConversations()
         }}
@@ -313,12 +312,10 @@ function MessagesPageContent() {
 function ConversationView({
   userId,
   partnerInfo,
-  onBack,
   onMessageSent,
 }: {
   userId: string
   partnerInfo?: PartnerInfo
-  onBack: () => void
   onMessageSent: () => void
 }) {
   const [messages, setMessages] = useState<any[]>([])
@@ -1115,24 +1112,6 @@ function ConversationView({
     <div className="bg-transparent flex flex-col" style={{ height: 'calc(100dvh - 4rem)', maxHeight: 'calc(100dvh - 4rem)' }}>
           {/* Header */}
           <div className="flex items-center gap-4 p-4 border-b border-gray-200">
-            <Button
-              variant="text"
-              onClick={onBack}
-            >
-              <svg
-                className="w-6 h-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-            </Button>
             <Link
               href={`/portfolio/human/${userId}`}
               className="flex items-center gap-3 flex-1"

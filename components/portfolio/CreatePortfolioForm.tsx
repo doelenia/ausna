@@ -309,14 +309,6 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
         >
           <UIText>{loading ? 'Creating...' : 'Create Portfolio'}</UIText>
         </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => router.back()}
-          disabled={loading}
-        >
-          <UIText>Cancel</UIText>
-        </Button>
       </div>
     </form>
     </>

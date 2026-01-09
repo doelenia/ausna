@@ -3,7 +3,6 @@ import { getNoteById, getAnnotationsByNote } from '@/app/notes/actions'
 import { canCreateNoteInPortfolio } from '@/lib/notes/helpers'
 import { NoteView } from '@/components/notes/NoteView'
 import { notFound } from 'next/navigation'
-import Link from 'next/link'
 import { UIText } from '@/components/ui'
 
 interface NotePageProps {
@@ -96,17 +95,6 @@ export default async function NotePage({ params }: NotePageProps) {
 
   return (
     <>
-      <div className="mb-6">
-            {firstPortfolio && (
-              <Link
-                href={`/portfolio/${firstPortfolio.type}/${firstPortfolio.id}/all`}
-                className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
-              >
-                <UIText>← Back to Portfolio</UIText>
-              </Link>
-            )}
-          </div>
-
           <NoteView
             note={note}
             annotations={annotations}

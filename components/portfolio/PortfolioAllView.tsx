@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { Portfolio } from '@/types/portfolio'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
-import Link from 'next/link'
 import { SubPortfoliosTab } from './SubPortfoliosTab'
 import { NotesTab } from '@/components/notes/NotesTab'
 import { isHumanPortfolio } from '@/types/portfolio'
@@ -37,12 +35,6 @@ export function PortfolioAllView({
     <div className="bg-transparent rounded-lg p-6">
           {/* Header */}
           <div className="mb-6">
-            <Link
-              href={getPortfolioUrl(portfolio.type, portfolio.id)}
-              className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
-            >
-              <UIText>← Back to Portfolio</UIText>
-            </Link>
             <Title as="h1" className="mb-2">{basic.name}</Title>
           </div>
 

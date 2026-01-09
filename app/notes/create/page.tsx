@@ -5,7 +5,6 @@ import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { Title, Content, UIText } from '@/components/ui'
 
 interface CreateNotePageProps {
@@ -87,12 +86,6 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
   return (
     <div className="bg-white shadow rounded-lg p-6">
           <div className="mb-6">
-            <Link
-              href={sourcePortfolio ? `/portfolio/${sourcePortfolio.type}/${sourcePortfolio.id}/all` : '/portfolio'}
-              className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
-            >
-              <UIText>← Back</UIText>
-            </Link>
             <Title as="h1" className="mb-2">
               {annotatedNote ? 'Annotate Note' : 'Create Note'}
             </Title>

@@ -154,12 +154,6 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
     <div className="bg-white shadow rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <Title as="h1">Account Settings</Title>
-            <Link
-              href="/main"
-              className="text-blue-600 hover:text-blue-500"
-            >
-              <UIText>Back to Main</UIText>
-            </Link>
           </div>
 
           <div className="space-y-6">

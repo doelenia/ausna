@@ -235,9 +235,11 @@ function StickerAvatarComponent({
     if (isHuman) {
       return undefined
     }
-    // Mini variant: no white outline, only subtle shadow
+    // Mini variant: much narrower white outline (0.2px equivalent) + subtle shadow
     if (variant === 'mini') {
-      return `brightness(0.98) drop-shadow(${shadowValue})`
+      return 'brightness(0.98) ' +
+        'drop-shadow(-1px -1px 0 white) drop-shadow(1px -1px 0 white) drop-shadow(-1px 1px 0 white) drop-shadow(1px 1px 0 white) ' +
+        `drop-shadow(${shadowValue})`
     }
     // Default variant: full white outline + shadow
     return 'brightness(0.98) ' +
@@ -286,7 +288,7 @@ function StickerAvatarComponent({
           filter: isHuman
             ? undefined
             : variant === 'mini'
-            ? `brightness(0.98) drop-shadow(${shadowValue})`
+            ? `brightness(0.98) drop-shadow(-0.2px -0.2px 0 white) drop-shadow(0.2px -0.2px 0 white) drop-shadow(-0.2px 0.2px 0 white) drop-shadow(0.2px 0.2px 0 white) drop-shadow(${shadowValue})`
             : `brightness(0.98) drop-shadow(-2px -2px 0 white) drop-shadow(2px -2px 0 white) drop-shadow(-2px 2px 0 white) drop-shadow(2px 2px 0 white) drop-shadow(-1px 0 0 white) drop-shadow(1px 0 0 white) drop-shadow(0 -1px 0 white) drop-shadow(0 1px 0 white) drop-shadow(${shadowValue})`,
           display: 'flex',
           alignItems: 'center',

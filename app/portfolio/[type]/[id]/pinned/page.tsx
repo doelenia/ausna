@@ -4,7 +4,6 @@ import { Portfolio } from '@/types/portfolio'
 import { notFound } from 'next/navigation'
 import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { EditPinnedView } from '@/components/portfolio/EditPinnedView'
-import Link from 'next/link'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Title, UIText } from '@/components/ui'
 
@@ -91,12 +90,6 @@ export default async function EditPinnedPage({ params }: EditPinnedPageProps) {
     <div className="bg-white shadow rounded-lg p-6">
           {/* Header */}
           <div className="mb-6">
-            <Link
-              href={getPortfolioUrl(portfolio.type, portfolio.id)}
-              className="text-blue-600 hover:text-blue-700 mb-4 inline-block"
-            >
-              <UIText>← Back to Portfolio</UIText>
-            </Link>
             <Title as="h1" className="mb-2">Edit Pinned Items</Title>
             <UIText as="p">{basic.name}</UIText>
           </div>
