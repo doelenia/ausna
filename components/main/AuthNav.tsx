@@ -37,21 +37,8 @@ export function AuthNav() {
           console.log('[AuthNav] Found auth cookies:', authCookies.length)
         }
 
-        // Try getSession first (more reliable in Safari)
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-        
-        if (sessionError) {
-          console.error('[AuthNav] Session error:', sessionError.message)
-        }
-        
-        if (session?.user) {
-          console.log('[AuthNav] User from session:', session.user.id)
-          setUser(session.user)
-          setLoading(false)
-          return
-        }
-
-        // Fallback to getUser() which may refresh tokens
+        // Use getUser() for security - it authenticates with the server
+        // getSession() reads from storage and may not be authentic
         const {
           data: { user },
           error,

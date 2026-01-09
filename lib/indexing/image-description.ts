@@ -41,7 +41,7 @@ Be concise but comprehensive, prioritizing information that connects to the note
           ],
         },
       ],
-      max_tokens: 300,
+      max_completion_tokens: 300,
       temperature: 0.3,
     })
 

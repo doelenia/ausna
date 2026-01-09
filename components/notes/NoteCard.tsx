@@ -53,15 +53,14 @@ export function NoteCard({
         const authCheckInterval = 100 // Check every 100ms
         
         while (!sessionReady && authWaitTime < AUTH_WAIT_MAX) {
-          const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+          // Use getUser() for security - it authenticates with the server
+          const { data: { user }, error: userError } = await supabase.auth.getUser()
           
-          if (sessionError) {
-            console.warn('[NoteCard] Session error while waiting for auth:', sessionError.message)
-            // If session error, try to refresh
-            await supabase.auth.getUser()
+          if (userError) {
+            console.warn('[NoteCard] Auth error while waiting:', userError.message)
           }
           
-          if (session?.user) {
+          if (user) {
             sessionReady = true
             break
           }

@@ -148,9 +148,9 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
         return
       }
 
-      // Ensure session is fresh - refresh if needed
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session) {
+      // Ensure user is authenticated - use getUser() for security
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError || !user) {
         setError('No active session. Please sign in again.')
         setLoading(false)
         setTimeout(() => {

@@ -22,37 +22,20 @@ export async function requireAuth() {
   
   const supabase = await createClient()
   
-  // CRITICAL: Server actions bypass middleware, so we must handle session refresh here
-  // Try getSession first - this reads from cookies directly
+  // CRITICAL: Use getUser() instead of getSession() for security
+  // getUser() authenticates with the server, while getSession() reads from storage (may not be authentic)
   const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession()
-  
-  // If we have a session, use it to get the user
-  // Otherwise, try getUser which might refresh the session
-  let user = null
-  let userError = null
-  
-  if (session?.user) {
-    // We have a valid session, use the user from it
-    user = session.user
-  } else {
-    // No session, try getUser which will attempt to refresh
-    const result = await supabase.auth.getUser()
-    user = result.data.user
-    userError = result.error
-  }
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
 
-  // If there's an error or no user after refresh attempt, redirect to login
+  // If there's an error or no user, redirect to login
   if (userError || !user) {
     // Log for debugging (remove in production if needed)
     console.error('Authentication failed in requireAuth:', {
       userError: userError?.message,
       errorCode: userError?.status,
       hasUser: !!user,
-      hasSession: !!session,
-      sessionError: sessionError?.message,
       authCookieCount: authCookies.length,
       authCookieNames: authCookies.map(c => c.name).join(', '),
       allCookieNames: allCookies.map(c => c.name).join(', ') || 'NONE',

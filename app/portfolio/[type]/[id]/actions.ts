@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth/requireAuth'
 import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PinnedItem } from '@/types/portfolio'
 import { getPortfolioBasic, canEditPortfolio, canDeletePortfolio, canManagePinned, canAddToPinned, getPinnedItemsCount, isNoteAssignedToPortfolio } from '@/lib/portfolio/helpers'
 import { Note } from '@/types/note'
+import { revalidatePath } from 'next/cache'
 
 interface UpdatePortfolioResult {
   success: boolean
@@ -372,8 +373,23 @@ export async function updatePortfolio(
     // Handle avatar upload if provided
     if (avatarFile && avatarFile.size > 0) {
       try {
-        const { uploadAvatar } = await import('@/lib/storage/avatars-server')
+        const { uploadAvatar, deleteAvatar } = await import('@/lib/storage/avatars-server')
+        
+        // Delete old avatar if it exists (to clear cache)
+        const oldAvatarUrl = basicMetadata.avatar
+        if (oldAvatarUrl && typeof oldAvatarUrl === 'string' && oldAvatarUrl.trim().length > 0) {
+          try {
+            await deleteAvatar(oldAvatarUrl)
+          } catch (deleteError) {
+            // Log but don't fail - old avatar might not exist or already deleted
+            console.warn('Failed to delete old avatar (non-critical):', deleteError)
+          }
+        }
+        
         const avatarResult = await uploadAvatar(portfolioId, avatarFile)
+        
+        // Add cache-busting query parameter to force browser/CDN to fetch new image
+        const cacheBustUrl = `${avatarResult.url}?t=${Date.now()}`
 
         // Update portfolio with avatar URL and clear emoji when image is uploaded
         await supabase
@@ -383,12 +399,18 @@ export async function updatePortfolio(
               ...updatedMetadata,
               basic: {
                 ...updatedMetadata.basic,
-                avatar: avatarResult.url,
+                avatar: cacheBustUrl,
                 emoji: '', // Clear emoji when image is uploaded
               },
             },
           })
           .eq('id', portfolioId)
+        
+        // Revalidate Next.js cache for this portfolio page
+        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
+        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/all`)
+        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
+        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/pinned`)
       } catch (avatarError: any) {
         // Avatar upload failed, but portfolio was updated
         console.error('Failed to upload avatar:', avatarError)
@@ -408,6 +430,12 @@ export async function updatePortfolio(
         })
         .eq('id', portfolioId)
     }
+
+    // Revalidate Next.js cache for portfolio pages after any update
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/all`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/pinned`)
 
     return {
       success: true,

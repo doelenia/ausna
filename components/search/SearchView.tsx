@@ -30,17 +30,7 @@ export function SearchView() {
   useEffect(() => {
     const getUser = async () => {
       try {
-        // Use getSession first (reads from cookies, doesn't refresh tokens)
-        const {
-          data: { session },
-        } = await supabase.auth.getSession()
-        
-        if (session?.user) {
-          setCurrentUserId(session.user.id)
-          return
-        }
-        
-        // Fallback to getUser only if session is null (user might be logged in but session expired)
+        // Use getUser() for security - it authenticates with the server
         const {
           data: { user },
         } = await supabase.auth.getUser()
