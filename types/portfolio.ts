@@ -51,6 +51,7 @@ export interface HumanPortfolioMetadata extends PortfolioMetadata {
   }>
   location?: string
   availability?: string
+  owned_projects?: string[] // Array of project portfolio IDs, ordered by most recent activity (most recent first)
   [key: string]: any
 }
 

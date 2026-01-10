@@ -144,6 +144,68 @@ export async function getUsername(userId: string): Promise<string | null> {
   return metadata.username || null
 }
 
+/**
+ * Add a project to the user's owned_projects list (moves to top if already exists)
+ * This should be called when:
+ * - A project is created by the user
+ * - A note is posted to a project owned by the user
+ */
+export async function addProjectToOwnedList(
+  userId: string,
+  projectId: string
+): Promise<void> {
+  const supabase = await createClient()
+  
+  // Get human portfolio
+  const portfolio = await getHumanPortfolio(userId)
+  if (!portfolio) {
+    throw new Error('Human portfolio not found')
+  }
+  
+  const metadata = portfolio.metadata as HumanPortfolioMetadata
+  const ownedProjects = metadata.owned_projects || []
+  
+  // Remove project if it already exists (to move it to top)
+  const filteredProjects = ownedProjects.filter((id) => id !== projectId)
+  
+  // Add project to the beginning (most recent first)
+  const updatedProjects = [projectId, ...filteredProjects]
+  
+  // Update metadata
+  await updateHumanPortfolioMetadata(userId, {
+    owned_projects: updatedProjects,
+  })
+}
+
+/**
+ * Remove a project from the user's owned_projects list
+ * This should be called when a project is deleted
+ */
+export async function removeProjectFromOwnedList(
+  userId: string,
+  projectId: string
+): Promise<void> {
+  const supabase = await createClient()
+  
+  // Get human portfolio
+  const portfolio = await getHumanPortfolio(userId)
+  if (!portfolio) {
+    // If portfolio doesn't exist, nothing to remove
+    return
+  }
+  
+  const metadata = portfolio.metadata as HumanPortfolioMetadata
+  const ownedProjects = metadata.owned_projects || []
+  
+  // Remove project from list
+  const updatedProjects = ownedProjects.filter((id) => id !== projectId)
+  
+  // Update metadata
+  await updateHumanPortfolioMetadata(userId, {
+    owned_projects: updatedProjects,
+  })
+}
+
 // Client-side helpers have been moved to human-client.ts
 // Import from '@/lib/portfolio/human-client' in client components
 

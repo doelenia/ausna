@@ -770,10 +770,10 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
     await requireAdmin()
     const serviceClient = createServiceClient()
 
-    // Check portfolio type - don't allow deleting human portfolios
+    // Check portfolio type and get user_id - don't allow deleting human portfolios
     const { data: portfolio, error: fetchError } = await serviceClient
       .from('portfolios')
-      .select('type')
+      .select('type, user_id')
       .eq('id', portfolioId)
       .single()
 
@@ -803,6 +803,17 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
       return {
         success: false,
         error: deleteError.message || 'Failed to delete portfolio',
+      }
+    }
+
+    // If this was a project, remove it from owner's owned_projects list
+    if (portfolio.type === 'projects') {
+      try {
+        const { removeProjectFromOwnedList } = await import('@/lib/portfolio/human')
+        await removeProjectFromOwnedList(portfolio.user_id, portfolioId)
+      } catch (error) {
+        // Log error but don't fail deletion (portfolio is already deleted)
+        console.error('Failed to remove project from owned list:', error)
       }
     }
 

@@ -4,7 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Note } from '@/types/note'
 import { NoteCard } from '@/components/notes/NoteCard'
 import { FeedTabs, FeedType } from './FeedTabs'
-import { Button, Content, UIText } from '@/components/ui'
+import { Button, Title, Content, UIText } from '@/components/ui'
+import Link from 'next/link'
 
 interface FeedViewProps {
   currentUserId?: string
@@ -73,8 +74,8 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           loadedNoteIdsRef.current.add(note.id)
         })
 
-        // Mark notes as seen
-        if (newNotes.length > 0) {
+        // Mark notes as seen (only for logged-in users)
+        if (currentUserId && newNotes.length > 0) {
           const noteIds = newNotes.map((n) => n.id)
           try {
             await fetch('/api/feed/seen', {
@@ -100,7 +101,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
         setLoadingMore(false)
       }
     },
-    [activeFeed, activeCommunityId]
+    [activeFeed, activeCommunityId, currentUserId]
   )
 
   // Keep loadNotes ref up to date
@@ -113,9 +114,9 @@ export function FeedView({ currentUserId }: FeedViewProps) {
     loadNotes(true)
   }, [activeFeed, activeCommunityId, loadNotes])
 
-  // Infinite scroll observer
+  // Infinite scroll observer (only for logged-in users)
   useEffect(() => {
-    if (!hasMore || loadingMore || loading) {
+    if (!currentUserId || !hasMore || loadingMore || loading) {
       return
     }
 
@@ -140,7 +141,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
         observer.unobserve(currentTarget)
       }
     }
-  }, [hasMore, loadingMore, loading])
+  }, [currentUserId, hasMore, loadingMore, loading])
 
   const handleFeedChange = (feedType: FeedType, communityId?: string | null) => {
     setActiveFeed(feedType)
@@ -150,11 +151,13 @@ export function FeedView({ currentUserId }: FeedViewProps) {
   if (loading && notes.length === 0) {
     return (
       <>
-        <FeedTabs
-          activeFeed={activeFeed}
-          activeCommunityId={activeCommunityId}
-          onFeedChange={handleFeedChange}
-        />
+        {currentUserId && (
+          <FeedTabs
+            activeFeed={activeFeed}
+            activeCommunityId={activeCommunityId}
+            onFeedChange={handleFeedChange}
+          />
+        )}
         <div className="text-center py-12">
           <UIText>Loading feed...</UIText>
         </div>
@@ -162,13 +165,17 @@ export function FeedView({ currentUserId }: FeedViewProps) {
     )
   }
 
+  const isLoggedOut = !currentUserId
+
   return (
     <>
-      <FeedTabs
-        activeFeed={activeFeed}
-        activeCommunityId={activeCommunityId}
-        onFeedChange={handleFeedChange}
-      />
+      {currentUserId && (
+        <FeedTabs
+          activeFeed={activeFeed}
+          activeCommunityId={activeCommunityId}
+          onFeedChange={handleFeedChange}
+        />
+      )}
       <div>
           {error ? (
             <div className="text-center py-12">
@@ -199,18 +206,42 @@ export function FeedView({ currentUserId }: FeedViewProps) {
                 ))}
               </div>
 
-              {/* Infinite scroll trigger */}
-              <div ref={observerTarget} className="h-10" />
+              {/* Login/Signup prompt for logged-out users */}
+              {isLoggedOut && (
+                <div className="mt-8">
+                  <div className="text-center py-8">
+                    <Title className="mb-2">Join Ausna</Title>
+                    <Content className="mb-6">
+                      Sign in or create an account to see more posts and connect with others.
+                    </Content>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                      <Link href="/login">
+                        <Button variant="primary">
+                          <UIText>Log In</UIText>
+                        </Button>
+                      </Link>
+                      <Link href="/signup">
+                        <Button variant="secondary">
+                          <UIText>Sign Up</UIText>
+                        </Button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Infinite scroll trigger (only for logged-in users) */}
+              {currentUserId && <div ref={observerTarget} className="h-10" />}
 
               {/* Loading more indicator */}
-              {loadingMore && (
+              {currentUserId && loadingMore && (
                 <div className="text-center py-8">
                   <UIText>Loading more posts...</UIText>
                 </div>
               )}
 
               {/* No more posts indicator */}
-              {!hasMore && notes.length > 0 && (
+              {currentUserId && !hasMore && notes.length > 0 && (
                 <div className="text-center py-8">
                   <UIText>No more posts to load.</UIText>
                 </div>

@@ -303,7 +303,41 @@ export async function getFeedNotes(
   limit: number = 10
 ): Promise<GetFeedNotesResult> {
   try {
-    const { user, supabase } = await requireAuth()
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    // For logged-out users, return 5 most recent notes
+    if (!user) {
+      const publicLimit = 5
+      const { data: notes, error } = await supabase
+        .from('notes')
+        .select('*')
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(publicLimit)
+
+      if (error) {
+        return {
+          success: false,
+          error: error.message || 'Failed to fetch notes',
+        }
+      }
+
+      const notesWithReferences: Note[] = (notes || []).map((note: any) => ({
+        ...note,
+        references: Array.isArray(note.references) ? note.references : [],
+      }))
+
+      return {
+        success: true,
+        notes: notesWithReferences,
+        hasMore: false, // No more notes for logged-out users
+      }
+    }
+
+    // For logged-in users, use existing logic
 
     // Query more than limit to have buffer for bloom filter filtering
     const queryLimit = limit * 2

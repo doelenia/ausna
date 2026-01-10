@@ -335,6 +335,19 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
+    // If user is the owner of the project, move it to top of owned_projects list
+    try {
+      const { isPortfolioOwner } = await import('@/lib/portfolio/helpers')
+      const isOwner = await isPortfolioOwner(portfolioId, user.id)
+      if (isOwner) {
+        const { addProjectToOwnedList } = await import('@/lib/portfolio/human')
+        await addProjectToOwnedList(user.id, portfolioId)
+      }
+    } catch (error) {
+      // Log error but don't fail note creation
+      console.error('Failed to update owned_projects list:', error)
+    }
+
     // Trigger background indexing (fire-and-forget)
     try {
       // Use absolute URL - in server actions, we need the full URL

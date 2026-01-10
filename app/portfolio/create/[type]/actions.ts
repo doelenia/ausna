@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth/requireAuth'
 import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { uploadAvatar } from '@/lib/storage/avatars-server'
 import { generateSlug } from '@/lib/portfolio/helpers'
+import { addProjectToOwnedList } from '@/lib/portfolio/human'
 
 interface CreatePortfolioResult {
   success: boolean
@@ -214,6 +215,16 @@ export async function createPortfolio(
       } catch (error) {
         // Don't fail portfolio creation if interest processing trigger fails
         console.error('Error triggering background interest processing:', error)
+      }
+    }
+
+    // If this is a project (not community), add it to user's owned_projects list
+    if (type === 'projects') {
+      try {
+        await addProjectToOwnedList(user.id, portfolio.id)
+      } catch (error) {
+        // Log error but don't fail portfolio creation
+        console.error('Failed to add project to owned list:', error)
       }
     }
 

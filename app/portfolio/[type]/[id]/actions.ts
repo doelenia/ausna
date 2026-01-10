@@ -130,12 +130,36 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
     if (isHumanPortfolio(portfolioData)) {
       // For human portfolios: fetch projects and communities where user is a manager OR member
       const userId = portfolioData.user_id
+      const humanMetadata = portfolioData.metadata as any
+      const ownedProjectsList = humanMetadata?.owned_projects || []
 
-      // Fetch all projects and communities, then filter by manager/member status
+      // Fetch owned projects using the owned_projects list (ordered by most recent activity)
+      let ownedProjects: any[] = []
+      if (ownedProjectsList.length > 0) {
+        const { data: ownedProjectsData, error: ownedError } = await supabase
+          .from('portfolios')
+          .select('id, type, slug, metadata')
+          .eq('type', 'projects')
+          .in('id', ownedProjectsList)
+
+        if (!ownedError && ownedProjectsData) {
+          // Create a map to preserve order from owned_projects list
+          const projectMap = new Map(
+            ownedProjectsData.map((p: any) => [p.id, p])
+          )
+          
+          // Reorder according to owned_projects list
+          ownedProjects = ownedProjectsList
+            .map((id: string) => projectMap.get(id))
+            .filter((p: any) => p !== undefined)
+        }
+      }
+
+      // Fetch all other projects where user is a member or manager (but not owner)
       // Note: PostgREST doesn't have great support for JSONB array contains, so we fetch and filter
       const { data: allProjects, error: projectsError } = await supabase
         .from('portfolios')
-        .select('id, type, slug, metadata')
+        .select('id, type, slug, metadata, user_id')
         .eq('type', 'projects')
         .order('created_at', { ascending: false })
         .limit(100)
@@ -154,34 +178,49 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         }
       }
 
-      // Filter projects where user is a manager or member, and determine role
-      const projects = (allProjects || [])
+      // Filter projects where user is a member or manager (but not owner)
+      // Exclude projects that are already in ownedProjectsList
+      const memberProjects = (allProjects || [])
         .filter((p: any) => {
+          // Skip if user is owner (already in ownedProjects)
+          if (p.user_id === userId) {
+            return false
+          }
+          // Skip if already in owned list
+          if (ownedProjectsList.includes(p.id)) {
+            return false
+          }
           const metadata = p.metadata as any
           const managers = metadata?.managers || []
           const members = metadata?.members || []
           return (Array.isArray(managers) && managers.includes(userId)) ||
                  (Array.isArray(members) && members.includes(userId))
         })
-        .map((p: any) => {
-          const metadata = p.metadata as any
-          const managers = metadata?.managers || []
-          const members = metadata?.members || []
-          const isManager = Array.isArray(managers) && managers.includes(userId)
-          const memberRoles = metadata?.memberRoles || {}
-          const userRole = memberRoles[userId] || (isManager ? 'Manager' : 'Member')
-          const projectTypeSpecific = metadata?.project_type_specific || null
-          const basic = getPortfolioBasic(p as Portfolio)
-          return {
-            id: p.id,
-            type: 'projects' as const,
-            name: basic.name,
-            avatar: basic.avatar,
-            slug: p.slug,
-            role: userRole,
-            projectType: projectTypeSpecific,
-          }
-        })
+
+      // Combine owned projects (first, in order) with member projects
+      const allUserProjects = [...ownedProjects, ...memberProjects]
+
+      // Map to result format
+      const projects = allUserProjects.map((p: any) => {
+        const metadata = p.metadata as any
+        const managers = metadata?.managers || []
+        const members = metadata?.members || []
+        const isOwner = p.user_id === userId
+        const isManager = Array.isArray(managers) && managers.includes(userId)
+        const memberRoles = metadata?.memberRoles || {}
+        const userRole = memberRoles[userId] || (isOwner ? 'Creator' : isManager ? 'Manager' : 'Member')
+        const projectTypeSpecific = metadata?.project_type_specific || null
+        const basic = getPortfolioBasic(p as Portfolio)
+        return {
+          id: p.id,
+          type: 'projects' as const,
+          name: basic.name,
+          avatar: basic.avatar,
+          slug: p.slug,
+          role: userRole,
+          projectType: projectTypeSpecific,
+        }
+      })
 
       // Filter communities where user is a manager or member, and determine role
       const communities = (allCommunities || [])
@@ -469,10 +508,10 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
       }
     }
 
-    // Check portfolio type
+    // Check portfolio type and get user_id
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('type')
+      .select('type, user_id')
       .eq('id', portfolioId)
       .single()
 
@@ -501,6 +540,17 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
       return {
         success: false,
         error: deleteError.message || 'Failed to delete portfolio',
+      }
+    }
+
+    // If this was a project, remove it from owner's owned_projects list
+    if (portfolio.type === 'projects') {
+      try {
+        const { removeProjectFromOwnedList } = await import('@/lib/portfolio/human')
+        await removeProjectFromOwnedList(portfolio.user_id, portfolioId)
+      } catch (error) {
+        // Log error but don't fail deletion (portfolio is already deleted)
+        console.error('Failed to remove project from owned list:', error)
       }
     }
 
