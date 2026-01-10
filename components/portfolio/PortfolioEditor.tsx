@@ -9,7 +9,7 @@ import { updatePortfolio } from '@/app/portfolio/[type]/[id]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
-import { isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
+import { isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
 import { Title, UIText, Button } from '@/components/ui'
 
 interface PortfolioEditorProps {
@@ -166,11 +166,14 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       if (avatarFile) {
         formData.append('avatar', avatarFile)
       }
-      if (selectedEmoji) {
-        formData.append('emoji', selectedEmoji)
-      } else if (!avatarFile && !basic.avatar) {
-        // If removing both image and emoji, send empty string to clear emoji
-        formData.append('emoji', '')
+      // Only allow emoji for non-human portfolios
+      if (!isHumanPortfolio(portfolio)) {
+        if (selectedEmoji) {
+          formData.append('emoji', selectedEmoji)
+        } else if (!avatarFile && !basic.avatar) {
+          // If removing both image and emoji, send empty string to clear emoji
+          formData.append('emoji', '')
+        }
       }
       if (projectTypeGeneral && projectTypeSpecific) {
         formData.append('project_type_general', projectTypeGeneral)
@@ -225,7 +228,7 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
                         alt="Avatar preview"
                         className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
                       />
-                    ) : selectedEmoji ? (
+                    ) : selectedEmoji && !isHumanPortfolio(portfolio) ? (
                       <StickerAvatar
                         alt={name || 'Preview'}
                         type={portfolio.type}
@@ -266,22 +269,26 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
                       >
                         <UIText>{avatarPreview ? 'Change Image' : 'Upload Image'}</UIText>
                       </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setShowEmojiPicker(true)}
-                      >
-                        <UIText>{selectedEmoji ? 'Change Emoji' : 'Select Emoji'}</UIText>
-                      </Button>
+                      {!isHumanPortfolio(portfolio) && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => setShowEmojiPicker(true)}
+                        >
+                          <UIText>{selectedEmoji ? 'Change Emoji' : 'Select Emoji'}</UIText>
+                        </Button>
+                      )}
                     </div>
-                    {(avatarFile || selectedEmoji || basic.avatar || metadata?.basic?.emoji) && (
+                    {(avatarFile || (!isHumanPortfolio(portfolio) && selectedEmoji) || basic.avatar || (!isHumanPortfolio(portfolio) && metadata?.basic?.emoji)) && (
                       <Button
                         type="button"
                         variant="text"
                         onClick={() => {
                           setAvatarFile(null)
                           setAvatarPreview(basic.avatar || null)
-                          setSelectedEmoji(metadata?.basic?.emoji || null)
+                          if (!isHumanPortfolio(portfolio)) {
+                            setSelectedEmoji(metadata?.basic?.emoji || null)
+                          }
                           if (fileInputRef.current) {
                             fileInputRef.current.value = ''
                           }

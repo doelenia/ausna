@@ -55,8 +55,12 @@ export function NoteCard({
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
   const [touchStartY, setTouchStartY] = useState<number | null>(null)
   const [isSendingToAuthor, setIsSendingToAuthor] = useState(false)
+  const [isTextExpanded, setIsTextExpanded] = useState(false)
+  const [isTextTruncated, setIsTextTruncated] = useState(false)
+  const [wasTruncated, setWasTruncated] = useState(false)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const carouselRef = useRef<HTMLDivElement | null>(null)
+  const textRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const fetchPortfolios = async (retryCount = 0) => {
@@ -470,6 +474,114 @@ export function NoteCard({
   }) || false
   const hasUrls = references.some(ref => ref && ref.type === 'url') || false
   const isTextOnly = isCollageView && !hasImages && !hasUrls
+
+  // Reset expansion state when note changes (separate effect)
+  useEffect(() => {
+    setIsTextExpanded(false)
+    setWasTruncated(false)
+  }, [note.id, note.text])
+
+  // Check if text is truncated (only for feed/collage views, not in view mode)
+  useEffect(() => {
+    if (isViewMode || isTextOnly) {
+      setIsTextTruncated(false)
+      return
+    }
+
+    const checkTruncation = () => {
+      const element = textRef.current
+      if (!element) {
+        // Retry after a short delay if element isn't ready
+        setTimeout(checkTruncation, 100)
+        return
+      }
+
+      // Only check if we're in collapsed state (has line-clamp)
+      if (isTextExpanded) {
+        setIsTextTruncated(false)
+        return
+      }
+
+      // Check if line-clamp is actually applied
+      const hasLineClamp = element.classList.contains('line-clamp-3')
+      
+      if (!hasLineClamp) {
+        // If line-clamp isn't applied yet, wait a bit and retry
+        setTimeout(checkTruncation, 100)
+        return
+      }
+
+      // Method 1: Try using offsetHeight comparison
+      // When line-clamp is applied, the element's offsetHeight should be constrained
+      // We'll create a temporary element without line-clamp to measure full height
+      const tempDiv = document.createElement('div')
+      tempDiv.style.position = 'absolute'
+      tempDiv.style.visibility = 'hidden'
+      tempDiv.style.width = element.offsetWidth + 'px'
+      tempDiv.style.whiteSpace = 'pre-wrap'
+      tempDiv.style.fontSize = window.getComputedStyle(element).fontSize
+      tempDiv.style.fontFamily = window.getComputedStyle(element).fontFamily
+      tempDiv.style.lineHeight = window.getComputedStyle(element).lineHeight
+      tempDiv.style.padding = window.getComputedStyle(element).padding
+      tempDiv.style.margin = window.getComputedStyle(element).margin
+      tempDiv.textContent = note.text
+      
+      document.body.appendChild(tempDiv)
+      const fullHeight = tempDiv.offsetHeight
+      document.body.removeChild(tempDiv)
+      
+      // Get the actual rendered height with line-clamp
+      const clampedHeight = element.offsetHeight
+      
+      // Calculate expected height for 3 lines
+      const computedStyle = window.getComputedStyle(element)
+      const lineHeight = parseFloat(computedStyle.lineHeight) || parseFloat(computedStyle.fontSize) * 1.5
+      const expectedHeight = lineHeight * 3
+      
+      // Text is truncated if:
+      // 1. Full height is significantly larger than clamped height, OR
+      // 2. Clamped height is close to expected 3-line height but full height is much larger
+      const isTruncated = fullHeight > clampedHeight + 10 || 
+                         (clampedHeight <= expectedHeight + 15 && fullHeight > expectedHeight + 20)
+      
+      setIsTextTruncated(isTruncated)
+      // Remember if text was truncated (so we can show "less" button when expanded)
+      if (isTruncated) {
+        setWasTruncated(true)
+      }
+    }
+
+    // Check after delays to ensure layout is complete (including images)
+    const timeoutId1 = setTimeout(checkTruncation, 300)
+    const timeoutId2 = setTimeout(checkTruncation, 800) // Check again after images might have loaded
+    
+    // Also check on window resize
+    window.addEventListener('resize', checkTruncation)
+    
+    // Check when images in the note finish loading
+    const images = document.querySelectorAll(`#note-${note.id} img`)
+    const imageLoadPromises = Array.from(images).map((img) => {
+      return new Promise<void>((resolve) => {
+        const imgElement = img as HTMLImageElement
+        if (imgElement.complete) {
+          resolve()
+        } else {
+          imgElement.addEventListener('load', () => resolve(), { once: true })
+          imgElement.addEventListener('error', () => resolve(), { once: true })
+        }
+      })
+    })
+    
+    Promise.all(imageLoadPromises).then(() => {
+      setTimeout(checkTruncation, 100)
+    })
+    
+    return () => {
+      clearTimeout(timeoutId1)
+      clearTimeout(timeoutId2)
+      window.removeEventListener('resize', checkTruncation)
+    }
+  }, [note.text, isViewMode, isTextOnly, note.id])
   
   // Get first image for image notes in collage view
   const firstImageRef = hasImages && references.length > 0
@@ -768,18 +880,10 @@ export function NoteCard({
 
   const cardContent = (
     <>
-      {/* Top media section (images + URL previews) with tighter padding */}
+      {/* Header - Owner and Date (hidden in collage view) - moved to top */}
       {!isCollageView && (
-        <div className="px-1 pt-1">
-          {renderReferencesSection()}
-        </div>
-      )}
-
-      {/* Main body with more generous padding (slightly reduced top padding when media is present) */}
-      <div className={`px-4 pb-4 ${hasMediaInDefaultView ? 'pt-0' : 'pt-4'}`}>
-        {/* Header - Owner and Date (hidden in collage view) */}
-        {!isCollageView && (
-          <div className="flex items-start justify-between mb-4">
+        <div className="px-3 pt-3">
+          <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-3 flex-wrap">
               <Link
                 href={`/portfolio/human/${note.owner_account_id}`}
@@ -852,8 +956,18 @@ export function NoteCard({
               </div>
             )}
           </div>
-        )}
+        </div>
+      )}
 
+      {/* Top media section (images + URL previews) with tighter padding - after user row */}
+      {!isCollageView && (
+        <div className="px-1">
+          {renderReferencesSection()}
+        </div>
+      )}
+
+      {/* Main body with more generous padding */}
+      <div className={`px-4 pb-4 ${hasMediaInDefaultView ? 'pt-0' : 'pt-4'}`}>
         {/* Text content */}
         <div 
           className={isTextOnly ? 'mb-2' : 'mb-4'}
@@ -864,12 +978,43 @@ export function NoteCard({
             overflow: 'hidden',
           } : undefined}
         >
-          <Content 
-            as="p" 
-            className={`whitespace-pre-wrap ${isTextOnly ? '' : 'line-clamp-3'}`}
+          <div
+            ref={textRef}
+            className={`whitespace-pre-wrap ${
+              isViewMode 
+                ? '' 
+                : isTextOnly 
+                  ? '' 
+                  : !isTextExpanded 
+                    ? 'line-clamp-3' 
+                    : ''
+            }`}
           >
-            {note.text}
-          </Content>
+            <Content as="p">
+              {note.text}
+            </Content>
+          </div>
+          {/* Show "more"/"less" button in feed/collage views when text is truncated or was truncated */}
+          {!isViewMode && !isTextOnly && (isTextTruncated || (isTextExpanded && wasTruncated)) && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setIsTextExpanded(!isTextExpanded)
+              }}
+              className="mt-1 text-gray-600 hover:text-gray-900 text-sm font-normal"
+              style={{ 
+                cursor: 'pointer', 
+                background: 'none', 
+                border: 'none', 
+                padding: 0,
+                display: 'inline-block'
+              }}
+            >
+              {isTextExpanded ? 'less' : 'more'}
+            </button>
+          )}
         </div>
 
         {/* References preview - show all references (excluding first image in collage view) - only for collage view */}

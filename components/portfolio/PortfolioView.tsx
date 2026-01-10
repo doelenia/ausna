@@ -492,9 +492,15 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       <PortfolioEditor
         portfolio={portfolio}
         onCancel={() => setIsEditing(false)}
-        onSave={() => {
+        onSave={async () => {
           setIsEditing(false)
-          router.refresh()
+          // Force a full page reload to ensure fresh data is loaded
+          // This ensures the server action completes and cache is cleared
+          const portfolioUrl = isHumanPortfolio(portfolio) 
+            ? `/portfolio/human/${portfolio.user_id}`
+            : getPortfolioUrl(portfolio.type, portfolio.id)
+          // Use window.location to force a full page reload with fresh data
+          window.location.href = portfolioUrl
         }}
       />
     )
