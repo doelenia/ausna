@@ -511,38 +511,66 @@ export function NoteCard({
         return
       }
 
-      // Method 1: Try using offsetHeight comparison
-      // When line-clamp is applied, the element's offsetHeight should be constrained
-      // We'll create a temporary element without line-clamp to measure full height
+      // Create a temporary element without line-clamp to measure full height
+      // Copy all computed styles to ensure accurate measurement
+      const computedStyle = window.getComputedStyle(element)
       const tempDiv = document.createElement('div')
+      
+      // Copy all relevant styles
       tempDiv.style.position = 'absolute'
       tempDiv.style.visibility = 'hidden'
       tempDiv.style.width = element.offsetWidth + 'px'
-      tempDiv.style.whiteSpace = 'pre-wrap'
-      tempDiv.style.fontSize = window.getComputedStyle(element).fontSize
-      tempDiv.style.fontFamily = window.getComputedStyle(element).fontFamily
-      tempDiv.style.lineHeight = window.getComputedStyle(element).lineHeight
-      tempDiv.style.padding = window.getComputedStyle(element).padding
-      tempDiv.style.margin = window.getComputedStyle(element).margin
-      tempDiv.textContent = note.text
+      tempDiv.style.whiteSpace = computedStyle.whiteSpace
+      tempDiv.style.fontSize = computedStyle.fontSize
+      tempDiv.style.fontFamily = computedStyle.fontFamily
+      tempDiv.style.lineHeight = computedStyle.lineHeight
+      tempDiv.style.fontWeight = computedStyle.fontWeight
+      tempDiv.style.fontStyle = computedStyle.fontStyle
+      tempDiv.style.letterSpacing = computedStyle.letterSpacing
+      tempDiv.style.wordSpacing = computedStyle.wordSpacing
+      tempDiv.style.padding = computedStyle.padding
+      tempDiv.style.margin = computedStyle.margin
+      tempDiv.style.boxSizing = computedStyle.boxSizing
+      tempDiv.style.maxHeight = 'none'
+      tempDiv.style.overflow = 'visible'
+      tempDiv.style.display = computedStyle.display
+      
+      // Use the same content structure
+      const contentElement = element.querySelector('p')
+      if (contentElement) {
+        const contentStyle = window.getComputedStyle(contentElement)
+        const p = document.createElement('p')
+        p.style.margin = contentStyle.margin
+        p.style.padding = contentStyle.padding
+        p.textContent = note.text
+        tempDiv.appendChild(p)
+      } else {
+        tempDiv.textContent = note.text
+      }
       
       document.body.appendChild(tempDiv)
-      const fullHeight = tempDiv.offsetHeight
+      const fullHeight = tempDiv.scrollHeight
       document.body.removeChild(tempDiv)
       
       // Get the actual rendered height with line-clamp
-      const clampedHeight = element.offsetHeight
+      const clampedHeight = element.scrollHeight
       
-      // Calculate expected height for 3 lines
-      const computedStyle = window.getComputedStyle(element)
-      const lineHeight = parseFloat(computedStyle.lineHeight) || parseFloat(computedStyle.fontSize) * 1.5
-      const expectedHeight = lineHeight * 3
+      // Calculate expected height for 3 lines more accurately
+      const lineHeight = parseFloat(computedStyle.lineHeight)
+      const fontSize = parseFloat(computedStyle.fontSize)
+      const actualLineHeight = isNaN(lineHeight) ? fontSize * 1.5 : lineHeight
+      const expectedMaxHeight = actualLineHeight * 3
       
-      // Text is truncated if:
-      // 1. Full height is significantly larger than clamped height, OR
-      // 2. Clamped height is close to expected 3-line height but full height is much larger
-      const isTruncated = fullHeight > clampedHeight + 10 || 
-                         (clampedHeight <= expectedHeight + 15 && fullHeight > expectedHeight + 20)
+      // Text is truncated only if:
+      // 1. Full height is significantly larger than clamped height (with larger tolerance), AND
+      // 2. Clamped height is at or near the expected 3-line height
+      // This prevents false positives when text naturally fits in 3 lines
+      const heightDifference = fullHeight - clampedHeight
+      const isNearMaxHeight = clampedHeight >= expectedMaxHeight * 0.9 && clampedHeight <= expectedMaxHeight * 1.1
+      
+      // Only consider truncated if there's a meaningful difference (at least 20px) 
+      // and the clamped height is near the 3-line limit
+      const isTruncated = heightDifference > 20 && isNearMaxHeight
       
       setIsTextTruncated(isTruncated)
       // Remember if text was truncated (so we can show "less" button when expanded)
@@ -877,6 +905,7 @@ export function NoteCard({
   })() : null
 
   const hasMediaInDefaultView = !isCollageView && (hasImages || hasUrls)
+  const hasReferences = !isCollageView && references && references.length > 0
 
   const cardContent = (
     <>
@@ -967,7 +996,13 @@ export function NoteCard({
       )}
 
       {/* Main body with more generous padding */}
-      <div className={`px-4 pb-4 ${hasMediaInDefaultView ? 'pt-0' : 'pt-4'}`}>
+      <div className={`px-4 pb-4 ${
+        hasMediaInDefaultView 
+          ? 'pt-0' 
+          : hasReferences 
+            ? 'pt-4' 
+            : 'pt-2'
+      }`}>
         {/* Text content */}
         <div 
           className={isTextOnly ? 'mb-2' : 'mb-4'}
