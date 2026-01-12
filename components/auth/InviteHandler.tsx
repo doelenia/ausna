@@ -39,6 +39,38 @@ export function InviteHandler() {
 
       console.log('Processing auth hash fragment, type:', type)
 
+      // Special handling for password recovery: redirect to reset password page
+      if (type === 'recovery') {
+        try {
+          // Set the session using the access token so user can reset password
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: params.get('refresh_token') || '',
+          })
+
+          if (error) {
+            console.error('Error setting session from recovery token:', error)
+            router.push('/reset-password?error=invalid_token')
+            return
+          }
+
+          if (data.session) {
+            console.log('Recovery session set successfully, redirecting to reset password page')
+            // Clear hash and redirect to reset password page
+            window.history.replaceState(null, '', '/reset-password')
+            router.push('/reset-password')
+          } else {
+            console.warn('No session returned after setting recovery token')
+            router.push('/reset-password?error=invalid_token')
+          }
+        } catch (err) {
+          console.error('Exception handling recovery token:', err)
+          router.push('/reset-password?error=invalid_token')
+        }
+        return
+      }
+
+      // For other types (invite, signup, email_change), set session and continue
       try {
         // Set the session using the access token
         const { data, error } = await supabase.auth.setSession({

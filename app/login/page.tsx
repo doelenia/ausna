@@ -2,7 +2,16 @@ import { AuthForm } from '@/components/auth/AuthForm'
 import Link from 'next/link'
 import { Title, Content, UIText } from '@/components/ui'
 
-export default function LoginPage() {
+interface LoginPageProps {
+  searchParams: {
+    password_reset?: string
+    error?: string
+  }
+}
+
+export default function LoginPage({ searchParams }: LoginPageProps) {
+  const passwordResetSuccess = searchParams?.password_reset === 'success'
+
   return (
     <div className="flex items-center justify-center min-h-full">
       <div className="max-w-md w-full space-y-8">
@@ -17,7 +26,17 @@ export default function LoginPage() {
             </Link>
           </UIText>
         </div>
+        {passwordResetSuccess && (
+          <div className="p-3 bg-green-50 border border-green-200 rounded-md text-green-700 text-sm text-center">
+            <UIText>Password reset successfully! You can now sign in with your new password.</UIText>
+          </div>
+        )}
         <AuthForm mode="login" />
+        <div className="text-center">
+          <Link href="/forgot-password" className="text-blue-600 hover:text-blue-500">
+            <UIText>Forgot your password?</UIText>
+          </Link>
+        </div>
       </div>
     </div>
   )

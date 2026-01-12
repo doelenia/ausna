@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { signOut } from './actions'
 import { UsernameEditor } from '@/components/account/UsernameEditor'
+import { PasswordChanger } from '@/components/account/PasswordChanger'
 import { HumanPortfolio } from '@/types/portfolio'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { InterestTags } from '@/components/portfolio/InterestTags'
@@ -308,6 +309,10 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                   )
                 })}
               </div>
+            </div>
+
+            <div className="pt-6 border-t border-gray-200">
+              <PasswordChanger />
             </div>
 
             <div className="pt-6 border-t border-gray-200">
