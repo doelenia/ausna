@@ -37,7 +37,21 @@ export async function uploadNoteImage(
     }
   } catch (error: any) {
     console.error('Error compressing image:', error)
-    throw new Error(`Failed to compress image: ${error?.message || 'Unknown compression error'}`)
+    const errorMessage = error?.message || 'Unknown compression error'
+    
+    // Preserve the original error message if it's user-friendly
+    // Otherwise wrap it with context
+    if (errorMessage.includes('not supported') || 
+        errorMessage.includes('too large') ||
+        errorMessage.includes('library error') ||
+        errorMessage.includes('processing library') ||
+        errorMessage.includes('Failed to process')) {
+      // These are already user-friendly error messages, pass them through
+      throw error
+    }
+    
+    // For other errors, provide context but preserve the original message
+    throw new Error(`Failed to compress image: ${errorMessage}`)
   }
   
   // Generate filename with correct extension based on format

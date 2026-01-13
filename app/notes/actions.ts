@@ -146,6 +146,8 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
 
     // Upload images and update references
     const uploadedImageReferences: NoteReference[] = []
+    const uploadErrors: Array<{ fileName: string; error: string }> = []
+    
     for (let i = 0; i < imageFiles.length; i++) {
       const imageFile = imageFiles[i]
       if (imageFile.size > 0) {
@@ -154,7 +156,9 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
           const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
           if (imageFile.size > MAX_FILE_SIZE) {
             console.error(`Image ${i + 1} is too large: ${imageFile.name} (${(imageFile.size / 1024 / 1024).toFixed(2)}MB)`)
-            throw new Error(`Image "${imageFile.name}" is too large (max 50MB). Please compress it before uploading.`)
+            const errorMsg = `Image "${imageFile.name}" is too large (max 50MB). Please compress it before uploading.`
+            uploadErrors.push({ fileName: imageFile.name, error: errorMsg })
+            throw new Error(errorMsg)
           }
 
           console.log(`Uploading image ${i + 1}/${imageFiles.length} for note ${note.id} (${(imageFile.size / 1024 / 1024).toFixed(2)}MB)`)
@@ -172,19 +176,52 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
             stack: error.stack,
             noteId: note.id,
             fileName: imageFile.name,
+            fileType: imageFile.type,
             fileSize: imageFile.size,
             fileSizeMB: (imageFile.size / 1024 / 1024).toFixed(2),
           })
-          // If it's a size error, throw it so user sees the message
-          if (error.message?.includes('too large')) {
+          
+          const errorMessage = error?.message || 'Unknown upload error'
+          uploadErrors.push({ fileName: imageFile.name, error: errorMessage })
+          
+          // If it's a size error, throw it immediately so user sees the message
+          if (errorMessage.includes('too large')) {
             throw error
           }
-          // Continue with other images for other errors
+          
+          // For other errors, continue with other images but track the error
+          // We'll check if all images failed after the loop
         }
       }
     }
     
     console.log(`Successfully uploaded ${uploadedImageReferences.length} out of ${imageFiles.length} images`)
+    
+    // If user tried to upload images but ALL failed, return an error
+    if (imageFiles.length > 0 && uploadedImageReferences.length === 0 && uploadErrors.length > 0) {
+      // Clean up the note since image uploads failed
+      await supabase.from('notes').delete().eq('id', note.id)
+      
+      // Return the first error message (or a summary if multiple)
+      const firstError = uploadErrors[0]
+      if (uploadErrors.length === 1) {
+        return {
+          success: false,
+          error: firstError.error,
+        }
+      } else {
+        // Multiple images failed - provide a summary
+        return {
+          success: false,
+          error: `Failed to upload all ${uploadErrors.length} images. First error: ${firstError.error}`,
+        }
+      }
+    }
+    
+    // If some images failed but at least one succeeded, log a warning but continue
+    if (uploadErrors.length > 0 && uploadedImageReferences.length > 0) {
+      console.warn(`Warning: ${uploadErrors.length} out of ${imageFiles.length} images failed to upload, but ${uploadedImageReferences.length} succeeded. Continuing with successful uploads.`)
+    }
 
     // Process URL reference if provided
     let urlReference: UrlReference | null = null

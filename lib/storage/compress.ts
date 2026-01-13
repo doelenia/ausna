@@ -14,6 +14,7 @@ const DEFAULT_OPTIONS: Required<CompressionOptions> = {
   format: 'jpeg',
 }
 
+
 /**
  * Detect image format from buffer or file
  * Handles iOS formats (HEIC/HEIF) and converts them to JPEG
@@ -131,19 +132,39 @@ export async function compressImage(
     const compressedBuffer = await pipeline.toBuffer()
     return { buffer: compressedBuffer, format }
   } catch (error: any) {
-    // If sharp fails (e.g., HEIC not supported), try to get metadata to understand the issue
+    // If sharp fails, try to get metadata to understand the issue
     const errorMessage = error?.message || 'Unknown compression error'
+    
+    console.error('Image compression error:', {
+      errorMessage,
+      fileName: file instanceof File ? file.name : 'unknown',
+      fileType: file instanceof File ? file.type : 'unknown',
+      fileSize: file.size,
+    })
     
     // Check if this is a HEIC/HEIF format issue
     if (errorMessage.includes('heic') || errorMessage.includes('heif') || 
         (file instanceof File && (file.type.includes('heic') || file.type.includes('heif')))) {
       console.error('HEIC/HEIF format detected but Sharp cannot process it:', errorMessage)
-      console.error('This may require additional system libraries. Falling back to JPEG conversion attempt.')
       throw new Error(`HEIC/HEIF format not supported. Please convert the image to JPEG or PNG before uploading. Original error: ${errorMessage}`)
     }
     
-    // Re-throw other errors
-    throw error
+    // Check for sharp initialization/library errors
+    if (errorMessage.includes('Vips') || 
+        errorMessage.includes('libvips') ||
+        errorMessage.includes('sharp') && (errorMessage.includes('module') || errorMessage.includes('require'))) {
+      throw new Error(`Image processing library error. Please try again or contact support. Technical details: ${errorMessage}`)
+    }
+    
+    // Check for unsupported format
+    if (errorMessage.includes('unsupported') || errorMessage.includes('format') || errorMessage.includes('input')) {
+      const fileType = file instanceof File ? file.type : 'unknown'
+      const fileName = file instanceof File ? file.name : 'unknown'
+      throw new Error(`Unsupported image format. Please use JPEG, PNG, or WebP. File: ${fileName}, Type: ${fileType}. Original error: ${errorMessage}`)
+    }
+    
+    // Re-throw with more context for other errors
+    throw new Error(`Failed to process image: ${errorMessage}`)
   }
 }
 
