@@ -39,7 +39,80 @@ export function Dropdown({
   align = 'right',
 }: DropdownProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left?: number; right?: number } | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Calculate position when dropdown opens
+  useEffect(() => {
+    if (isOpen && dropdownRef.current) {
+      // First, set initial position (right-aligned by default)
+      const buttonRect = dropdownRef.current.getBoundingClientRect()
+      setMenuPosition({
+        top: buttonRect.bottom + 8, // mt-2 = 8px
+        left: buttonRect.left,
+      })
+
+      // Then measure and adjust after render
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!dropdownRef.current || !menuRef.current) return
+
+          const buttonRect = dropdownRef.current.getBoundingClientRect()
+          const menuRect = menuRef.current.getBoundingClientRect()
+          const edgeMargin = 16 // Minimum distance from edge in pixels
+
+          // Find the content container (the one with max-width constraint)
+          let containerElement: HTMLElement | null = dropdownRef.current
+          while (containerElement) {
+            const style = window.getComputedStyle(containerElement)
+            const maxWidth = style.maxWidth
+            // Check if this element has a max-width constraint (like --max-content-width)
+            if (maxWidth && maxWidth !== 'none' && maxWidth !== '100%') {
+              break
+            }
+            containerElement = containerElement.parentElement
+          }
+
+          // If we found a container, measure against it; otherwise use viewport
+          let containerRight: number
+          if (containerElement) {
+            const containerRect = containerElement.getBoundingClientRect()
+            containerRight = containerRect.right
+          } else {
+            containerRight = window.innerWidth
+          }
+
+          // Check if menu would overflow on the right
+          // For right alignment: button left + menu width should not exceed container right - margin
+          const wouldOverflowRight = buttonRect.left + menuRect.width > containerRight - edgeMargin
+
+          // Update position based on alignment preference and overflow detection
+          if (align === 'right' && wouldOverflowRight) {
+            // Switch to left alignment
+            setMenuPosition({
+              top: buttonRect.bottom + 8,
+              right: window.innerWidth - buttonRect.right,
+            })
+          } else if (align === 'right') {
+            // Keep right alignment
+            setMenuPosition({
+              top: buttonRect.bottom + 8,
+              left: buttonRect.left,
+            })
+          } else {
+            // Left alignment (explicit)
+            setMenuPosition({
+              top: buttonRect.bottom + 8,
+              right: window.innerWidth - buttonRect.right,
+            })
+          }
+        })
+      })
+    } else {
+      setMenuPosition(null)
+    }
+  }, [isOpen, align])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -61,10 +134,9 @@ export function Dropdown({
   // Match the style of members/friends more button
   const buttonClasses = `flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors ${className}`
 
-  // Dropdown menu extends to the right from the button
+  // Dropdown menu positioning - use fixed to escape container overflow
   const dropdownMenuClasses = [
-    'absolute mt-2 z-20 bg-white rounded-lg shadow-lg border border-gray-200 min-w-[160px]',
-    'left-0',
+    'fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 min-w-[160px]',
   ]
     .filter(Boolean)
     .join(' ')
@@ -93,7 +165,15 @@ export function Dropdown({
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className={dropdownMenuClasses}>
+          <div 
+            ref={menuRef} 
+            className={dropdownMenuClasses}
+            style={menuPosition ? {
+              top: `${menuPosition.top}px`,
+              left: menuPosition.left !== undefined ? `${menuPosition.left}px` : undefined,
+              right: menuPosition.right !== undefined ? `${menuPosition.right}px` : undefined,
+            } : undefined}
+          >
             <div className="py-1">
               {items.map((item, index) => {
                 const Icon = item.icon

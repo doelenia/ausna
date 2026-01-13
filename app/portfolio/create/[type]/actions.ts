@@ -56,11 +56,11 @@ export async function createPortfolio(
       }
     }
 
-    // Validate project type
+    // Validate type
     if (!projectTypeGeneral || !projectTypeSpecific) {
       return {
         success: false,
-        error: 'Project type is required',
+        error: `${type === 'projects' ? 'Project' : 'Community'} type is required`,
       }
     }
 

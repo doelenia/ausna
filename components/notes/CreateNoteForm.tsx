@@ -476,7 +476,7 @@ export function CreateNoteForm({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
             multiple
             onChange={handleImageSelect}
             className="hidden"

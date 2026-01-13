@@ -10,6 +10,7 @@ import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
+import { CommunityTypeSelector } from './CommunityTypeSelector'
 import { UIText, Button } from '@/components/ui'
 
 interface CreatePortfolioFormProps {
@@ -84,9 +85,9 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       return
     }
 
-    // Require project type
+    // Require type
     if (!projectTypeGeneral || !projectTypeSpecific) {
-      setError('Please select a project type')
+      setError(`Please select a ${type === 'projects' ? 'project' : 'community'} type`)
       return
     }
 
@@ -259,17 +260,29 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
         />
       </div>
 
-      {/* Project Type Selection */}
+      {/* Type Selection */}
       <div>
-        <ProjectTypeSelector
-          generalCategory={projectTypeGeneral}
-          specificType={projectTypeSpecific}
-          onSelect={(general, specific) => {
-            setProjectTypeGeneral(general)
-            setProjectTypeSpecific(specific)
-          }}
-          disabled={loading}
-        />
+        {type === 'projects' ? (
+          <ProjectTypeSelector
+            generalCategory={projectTypeGeneral}
+            specificType={projectTypeSpecific}
+            onSelect={(general, specific) => {
+              setProjectTypeGeneral(general)
+              setProjectTypeSpecific(specific)
+            }}
+            disabled={loading}
+          />
+        ) : (
+          <CommunityTypeSelector
+            generalCategory={projectTypeGeneral}
+            specificType={projectTypeSpecific}
+            onSelect={(general, specific) => {
+              setProjectTypeGeneral(general)
+              setProjectTypeSpecific(specific)
+            }}
+            disabled={loading}
+          />
+        )}
       </div>
 
       {/* Creator Role Input */}

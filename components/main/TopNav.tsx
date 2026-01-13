@@ -118,10 +118,19 @@ export function TopNav() {
 
     fetchUnreadCount()
 
+    // Listen for custom event to refresh count immediately when messages are marked as read
+    const handleMessagesRead = () => {
+      fetchUnreadCount()
+    }
+    window.addEventListener('messagesMarkedAsRead', handleMessagesRead)
+
     // Poll for updates every 30 seconds
     const interval = setInterval(fetchUnreadCount, 30000)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('messagesMarkedAsRead', handleMessagesRead)
+    }
   }, [user])
 
   // Fetch all projects user is a member of (for project selector popup)
@@ -306,6 +315,9 @@ export function TopNav() {
             onClick={(e) => e.stopPropagation()}
           >
             <Card variant="default" padding="sm">
+              <div className="mb-6">
+                <UIText>Choose a project to post note with</UIText>
+              </div>
               
               {userProjectsLoading ? (
                 <div className="py-8 text-center">

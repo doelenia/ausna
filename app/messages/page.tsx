@@ -8,7 +8,8 @@ import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
-import { Title, Content, UIText, Button } from '@/components/ui'
+import { Title, Content, UIText, Button, Dropdown } from '@/components/ui'
+import { Archive, ArrowLeft } from 'lucide-react'
 
 interface Conversation {
   partner_id: string
@@ -260,7 +261,7 @@ function MessagesPageContent() {
                             )}
                             {conv.status_message === 'partner_completed' && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
-                                Completed
+                                Archived
                               </span>
                             )}
                           </div>
@@ -276,7 +277,7 @@ function MessagesPageContent() {
                           </UIText>
                         ) : conv.status_message === 'partner_completed' ? (
                           <UIText as="p" className="italic mt-1">
-                            Chat is marked completed by {conv.partner_name || displayName}
+                            Chat is archived by {conv.partner_name || displayName}
                           </UIText>
                         ) : (
                           <UIText as="p" className="truncate mt-1">
@@ -291,14 +292,18 @@ function MessagesPageContent() {
                       )}
                     </button>
                     {activeTab === 'active' && conv.my_side_active && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={(e) => handleCompleteConversation(conv.partner_id, e)}
-                        title="Mark conversation as complete"
-                      >
-                        <UIText>Complete</UIText>
-                      </Button>
+                      <Dropdown
+                        items={[
+                          {
+                            label: 'Archive',
+                            onClick: () => {
+                              const syntheticEvent = { stopPropagation: () => {} } as React.MouseEvent
+                              handleCompleteConversation(conv.partner_id, syntheticEvent)
+                            },
+                            icon: Archive,
+                          },
+                        ]}
+                      />
                     )}
                   </div>
                 )
@@ -721,6 +726,12 @@ function ConversationView({
         if (isInitialLoad && newMessages.length > 0) {
           shouldScrollToBottomRef.current = true
         }
+        
+        // Notify TopNav to refresh unread count immediately when entering conversation
+        // Messages are marked as read by the API route when fetched
+        if (isInitialLoad) {
+          window.dispatchEvent(new CustomEvent('messagesMarkedAsRead'))
+        }
       }
     } catch (error) {
       console.error('Error loading messages:', error)
@@ -1113,6 +1124,14 @@ function ConversationView({
           {/* Header */}
           <div className="flex items-center gap-4 p-4 border-b border-gray-200">
             <Link
+              href="/messages"
+              className="flex items-center justify-center w-8 h-8 rounded-full hover:bg-gray-100 transition-colors"
+              aria-label="Back to messages"
+              title="Back to messages"
+            >
+              <ArrowLeft className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+            </Link>
+            <Link
               href={`/portfolio/human/${userId}`}
               className="flex items-center gap-3 flex-1"
             >
@@ -1124,13 +1143,16 @@ function ConversationView({
               <UIText as="h2">{displayName}</UIText>
             </Link>
             {conversationStatus?.my_side_active && (
-              <Button
-                variant="secondary"
-                onClick={handleCompleteConversation}
-                disabled={isCompleting}
-              >
-                <UIText>{isCompleting ? 'Completing...' : 'Complete'}</UIText>
-              </Button>
+              <Dropdown
+                items={[
+                  {
+                    label: isCompleting ? 'Archiving...' : 'Archive',
+                    onClick: handleCompleteConversation,
+                    disabled: isCompleting,
+                    icon: Archive,
+                  },
+                ]}
+              />
             )}
           </div>
 
@@ -1156,7 +1178,7 @@ function ConversationView({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <UIText as="p" className="italic">
-                    Chat is marked completed by {conversationStatus.partner_name || displayName}
+                    Chat is archived by {conversationStatus.partner_name || displayName}
                   </UIText>
                 </>
               )}

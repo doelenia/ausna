@@ -9,7 +9,7 @@ import { Crown, Shield } from 'lucide-react'
 
 interface CommunityMember {
   id: string
-  portfolioId: string | null // Human portfolio ID for fetching mutual info
+  portfolioId: string | null
   name: string | null
   avatar: string | null
   username: string | null
@@ -17,10 +17,6 @@ interface CommunityMember {
   isManager: boolean
   role: string | null
   description?: string | null
-  mutualInfo?: {
-    mutualFriends: number
-    mutualCommunities: number
-  }
 }
 
 interface CommunityMembersGridProps {
@@ -154,49 +150,6 @@ export function CommunityMembersGrid({
     fetchMembers()
   }, [portfolioId, creatorId, managers, members, supabase, currentUserId])
 
-  // Fetch mutual info for displayed members (lazy load)
-  useEffect(() => {
-    if (!currentUserId || displayedMembers.length === 0) return
-
-    const fetchMutualInfo = async () => {
-      const membersWithPortfolio = displayedMembers
-        .filter(m => m.id !== currentUserId && m.portfolioId)
-        .slice(0, 10) // Limit concurrent requests
-
-      const mutualPromises = membersWithPortfolio.map(async (member) => {
-        try {
-          const response = await fetch(`/api/portfolios/search/mutual?portfolioId=${member.portfolioId}`)
-          if (response.ok) {
-            const data = await response.json()
-            return {
-              memberId: member.id,
-              mutualInfo: {
-                mutualFriends: data.mutualFriends?.length || 0,
-                mutualCommunities: data.mutualCommunities?.length || 0,
-              },
-            }
-          }
-        } catch (error) {
-          console.error(`Failed to fetch mutual info for ${member.id}:`, error)
-        }
-        return null
-      })
-
-      const results = await Promise.all(mutualPromises)
-      
-      setDisplayedMembers((prev) =>
-        prev.map((member) => {
-          const result = results.find((r) => r?.memberId === member.id)
-          return result ? { ...member, mutualInfo: result.mutualInfo } : member
-        })
-      )
-    }
-
-    // Delay to prioritize initial render
-    const timer = setTimeout(fetchMutualInfo, 500)
-    return () => clearTimeout(timer)
-  }, [displayedMembers, currentUserId])
-
   // Intersection observer for infinite scroll
   const loadMore = useCallback(() => {
     if (loadingMore || !hasMore) return
@@ -249,16 +202,8 @@ export function CommunityMembersGrid({
     return 'Member'
   }
 
-  // Get second line text (description or mutual involvement)
+  // Get description text
   const getDescriptionText = (member: CommunityMember): string | null => {
-    if (member.mutualInfo) {
-      if (member.mutualInfo.mutualCommunities > 0) {
-        return `${member.mutualInfo.mutualCommunities} mutual ${member.mutualInfo.mutualCommunities === 1 ? 'community' : 'communities'}`
-      }
-      if (member.mutualInfo.mutualFriends > 0) {
-        return `${member.mutualInfo.mutualFriends} mutual ${member.mutualInfo.mutualFriends === 1 ? 'friend' : 'friends'}`
-      }
-    }
     return member.description || null
   }
 
@@ -329,7 +274,7 @@ export function CommunityMembersGrid({
                   </span>
                 )}
                 
-                {/* Third line: Description or mutual involvement */}
+                {/* Third line: Description */}
                 {getDescriptionText(member) && (
                   <UIText className="text-center w-full line-clamp-2 text-gray-500 text-xs">
                     {getDescriptionText(member)}

@@ -58,14 +58,25 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   // This ensures ownership is detected even if server-side check had issues
   // CRITICAL: Don't show buttons until auth is verified
   useEffect(() => {
+    let isMounted = true
+    
     const checkOwnership = async () => {
       try {
+        // Add timeout to prevent hanging (5 seconds)
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Auth check timeout')), 5000)
+        })
+        
         // getUser() automatically refreshes expired tokens
         // This is critical for long-term sessions
+        const getUserPromise = supabase.auth.getUser()
+        
         const {
           data: { user },
           error,
-        } = await supabase.auth.getUser()
+        } = await Promise.race([getUserPromise, timeoutPromise]) as any
+        
+        if (!isMounted) return
         
         // If there's an error or no user, user is not authenticated
         if (error || !user) {
@@ -95,13 +106,16 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           setIsMember(false)
         }
       } catch (err) {
+        if (!isMounted) return
         console.error('Error checking authentication:', err)
         setIsAuthenticated(false)
         setIsOwner(false)
         setIsManager(false)
         setIsMember(false)
       } finally {
-        setAuthChecked(true)
+        if (isMounted) {
+          setAuthChecked(true)
+        }
       }
     }
 
@@ -125,19 +139,17 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     })
 
     return () => {
+      isMounted = false
       subscription.unsubscribe()
     }
   }, [portfolio.user_id, supabase, serverIsOwner])
 
   // Fetch projects for human portfolios (for all visitors)
+  // Note: Projects should be visible to all visitors, not just authenticated users
+  // Auth check is only needed for the "Create Project" button, not for fetching projects
   useEffect(() => {
     const fetchProjects = async () => {
       if (!isHumanPortfolio(portfolio)) {
-        return
-      }
-
-      // Wait for auth check to complete before fetching
-      if (!authChecked) {
         return
       }
 
@@ -172,16 +184,23 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           } else {
             setProjects([])
           }
+        } else {
+          // Log error if result was not successful
+          if (result.error) {
+            console.error('Failed to fetch projects:', result.error)
+          }
+          setProjects([])
         }
       } catch (error) {
         console.error('Failed to fetch projects:', error)
+        setProjects([])
       } finally {
         setProjectsLoading(false)
       }
     }
 
     fetchProjects()
-  }, [portfolio.id, portfolio.type, authChecked, supabase])
+  }, [portfolio.id, portfolio.type, supabase])
 
   // Fetch member avatars for projects and communities
   useEffect(() => {

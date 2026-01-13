@@ -9,6 +9,7 @@ import { updatePortfolio } from '@/app/portfolio/[type]/[id]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
+import { CommunityTypeSelector } from './CommunityTypeSelector'
 import { isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
 import { Title, UIText, Button } from '@/components/ui'
 
@@ -335,18 +336,30 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
               />
             </div>
 
-            {/* Project Type Selection (for projects and communities only) */}
+            {/* Type Selection (for projects and communities only) */}
             {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
               <div>
-                <ProjectTypeSelector
-                  generalCategory={projectTypeGeneral}
-                  specificType={projectTypeSpecific}
-                  onSelect={(general, specific) => {
-                    setProjectTypeGeneral(general)
-                    setProjectTypeSpecific(specific)
-                  }}
-                  disabled={loading}
-                />
+                {isProjectPortfolio(portfolio) ? (
+                  <ProjectTypeSelector
+                    generalCategory={projectTypeGeneral}
+                    specificType={projectTypeSpecific}
+                    onSelect={(general, specific) => {
+                      setProjectTypeGeneral(general)
+                      setProjectTypeSpecific(specific)
+                    }}
+                    disabled={loading}
+                  />
+                ) : (
+                  <CommunityTypeSelector
+                    generalCategory={projectTypeGeneral}
+                    specificType={projectTypeSpecific}
+                    onSelect={(general, specific) => {
+                      setProjectTypeGeneral(general)
+                      setProjectTypeSpecific(specific)
+                    }}
+                    disabled={loading}
+                  />
+                )}
               </div>
             )}
 

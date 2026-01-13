@@ -489,7 +489,12 @@ export function AuthForm({ mode }: AuthFormProps) {
                   />
                   <UIText as="span">
                     I have read and agree to the{' '}
-                    <Link href="/legal/terms" className="text-blue-600 hover:text-blue-500">
+                    <Link 
+                      href="/legal/terms" 
+                      className="text-blue-600 hover:text-blue-500"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       Terms &amp; Conditions
                     </Link>
                     .
@@ -505,7 +510,12 @@ export function AuthForm({ mode }: AuthFormProps) {
                   />
                   <UIText as="span">
                     I have read and understand the{' '}
-                    <Link href="/legal/privacy" className="text-blue-600 hover:text-blue-500">
+                    <Link 
+                      href="/legal/privacy" 
+                      className="text-blue-600 hover:text-blue-500"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       Privacy Policy
                     </Link>
                     .
