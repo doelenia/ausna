@@ -36,6 +36,8 @@ export function CreateNoteForm({
   const [images, setImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([]) // Thumbnail URLs for previews
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCompressing, setIsCompressing] = useState(false)
+  const [compressionProgress, setCompressionProgress] = useState<number>(0)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([])
@@ -132,6 +134,342 @@ export function CreateNoteForm({
     setSelectedCollectionIds([])
   }, [selectedProjectId])
 
+  /**
+   * Read EXIF orientation from image file
+   * Returns orientation value (1-8) or null if not found
+   */
+  const getExifOrientation = (file: File): Promise<number | null> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const view = new DataView(e.target?.result as ArrayBuffer)
+        
+        // Check for JPEG markers
+        if (view.getUint16(0, false) !== 0xFFD8) {
+          resolve(null)
+          return
+        }
+        
+        const length = view.byteLength
+        let offset = 2
+        
+        while (offset < length) {
+          if (view.getUint16(offset, false) !== 0xFFE1) {
+            offset += 2
+            if (offset >= length) break
+            const markerLength = view.getUint16(offset, false)
+            offset += 2 + markerLength
+            continue
+          }
+          
+          // Found EXIF marker
+          offset += 2
+          if (view.getUint32(offset, false) !== 0x45786966) { // "Exif"
+            resolve(null)
+            return
+          }
+          
+          offset += 6
+          const tiffOffset = offset
+          const isLittleEndian = view.getUint16(tiffOffset, false) === 0x4949
+          
+          if (view.getUint16(tiffOffset + 2, !isLittleEndian) !== 0x002A) {
+            resolve(null)
+            return
+          }
+          
+          const ifdOffset = view.getUint32(tiffOffset + 4, !isLittleEndian)
+          const ifdStart = tiffOffset + ifdOffset
+          const entryCount = view.getUint16(ifdStart, !isLittleEndian)
+          
+          for (let i = 0; i < entryCount; i++) {
+            const entryOffset = ifdStart + 2 + (i * 12)
+            const tag = view.getUint16(entryOffset, !isLittleEndian)
+            
+            if (tag === 0x0112) { // Orientation tag
+              const type = view.getUint16(entryOffset + 2, !isLittleEndian)
+              if (type === 3) {
+                resolve(view.getUint16(entryOffset + 8, !isLittleEndian))
+                return
+              }
+            }
+          }
+          
+          resolve(null)
+          return
+        }
+        
+        resolve(null)
+      }
+      reader.onerror = () => resolve(null)
+      reader.readAsArrayBuffer(file)
+    })
+  }
+
+  /**
+   * Apply EXIF orientation transformation to canvas context
+   * This function should be called BEFORE drawing the image
+   * Returns the final dimensions after transformation (may be swapped for rotations)
+   */
+  const applyExifOrientation = (
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    orientation: number,
+    imgWidth: number,
+    imgHeight: number
+  ): { width: number; height: number } => {
+    switch (orientation) {
+      case 2:
+        // Horizontal flip
+        ctx.translate(canvas.width, 0)
+        ctx.scale(-1, 1)
+        return { width: canvas.width, height: canvas.height }
+      case 3:
+        // 180° rotation
+        ctx.translate(canvas.width, canvas.height)
+        ctx.rotate(Math.PI)
+        return { width: canvas.width, height: canvas.height }
+      case 4:
+        // Vertical flip
+        ctx.translate(0, canvas.height)
+        ctx.scale(1, -1)
+        return { width: canvas.width, height: canvas.height }
+      case 5:
+        // 90° counter-clockwise + horizontal flip
+        canvas.width = imgHeight
+        canvas.height = imgWidth
+        ctx.translate(imgHeight, 0)
+        ctx.rotate(Math.PI / 2)
+        ctx.scale(-1, 1)
+        return { width: imgHeight, height: imgWidth }
+      case 6:
+        // 90° clockwise (most common for portrait photos)
+        canvas.width = imgHeight
+        canvas.height = imgWidth
+        ctx.translate(imgHeight, 0)
+        ctx.rotate(Math.PI / 2)
+        return { width: imgHeight, height: imgWidth }
+      case 7:
+        // 90° clockwise + horizontal flip
+        canvas.width = imgHeight
+        canvas.height = imgWidth
+        ctx.translate(imgHeight, 0)
+        ctx.rotate(Math.PI / 2)
+        ctx.scale(-1, 1)
+        return { width: imgHeight, height: imgWidth }
+      case 8:
+        // 90° counter-clockwise
+        canvas.width = imgHeight
+        canvas.height = imgWidth
+        ctx.translate(0, imgWidth)
+        ctx.rotate(-Math.PI / 2)
+        return { width: imgHeight, height: imgWidth }
+      default:
+        // Orientation 1 or unknown - no transformation needed
+        return { width: canvas.width, height: canvas.height }
+    }
+  }
+
+  /**
+   * Compress an image file on the client side before upload
+   * Uses Canvas API to resize and compress images
+   * Handles EXIF orientation to prevent rotation issues
+   * Skips compression if image is already small enough
+   */
+  const compressImage = async (
+    file: File,
+    maxWidth: number = 1920,
+    maxHeight: number = 1920,
+    quality: number = 0.85,
+    maxFileSizeMB: number = 2 // Skip compression if file is already smaller than this
+  ): Promise<File> => {
+    // Skip compression if file is already small enough
+    const maxFileSizeBytes = maxFileSizeMB * 1024 * 1024
+    if (file.size <= maxFileSizeBytes) {
+      // Still check dimensions - if image is very large, we should resize even if file size is small
+      return new Promise(async (resolve, reject) => {
+        // Read EXIF orientation
+        const orientation = await getExifOrientation(file)
+        
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          const img = new Image()
+          img.onload = () => {
+            // If dimensions are within limits, return original file
+            if (img.width <= maxWidth && img.height <= maxHeight) {
+              resolve(file)
+              return
+            }
+            
+            // Otherwise, resize but keep original quality if file is small
+            // This handles cases where image dimensions are large but file is compressed
+            const aspectRatio = img.width / img.height
+            let width = img.width
+            let height = img.height
+
+            if (width > maxWidth || height > maxHeight) {
+              if (width > height) {
+                width = Math.min(width, maxWidth)
+                height = width / aspectRatio
+              } else {
+                height = Math.min(height, maxHeight)
+                width = height * aspectRatio
+              }
+            }
+
+            const canvas = document.createElement('canvas')
+            canvas.width = width
+            canvas.height = height
+            const ctx = canvas.getContext('2d')
+
+            if (!ctx) {
+              reject(new Error('Could not get canvas context'))
+              return
+            }
+
+            // Apply EXIF orientation if needed (before drawing)
+            if (orientation && orientation > 1) {
+              // For rotated images (5-8), we need to use the calculated dimensions
+              const { width: finalWidth, height: finalHeight } = applyExifOrientation(ctx, canvas, orientation, width, height)
+              // Draw with the calculated dimensions
+              ctx.drawImage(img, 0, 0, width, height)
+              width = finalWidth
+              height = finalHeight
+            } else {
+              ctx.drawImage(img, 0, 0, width, height)
+            }
+
+            const isPng = file.type === 'image/png'
+            const outputFormat = isPng ? 'image/png' : 'image/jpeg'
+
+            canvas.toBlob(
+              (blob) => {
+                if (!blob) {
+                  reject(new Error('Failed to resize image'))
+                  return
+                }
+
+                const resizedFile = new File(
+                  [blob],
+                  file.name.replace(/\.[^.]+$/, isPng ? '.png' : '.jpg'),
+                  {
+                    type: outputFormat,
+                    lastModified: Date.now(),
+                  }
+                )
+
+                resolve(resizedFile)
+              },
+              outputFormat,
+              isPng ? undefined : 0.95 // Higher quality since file is already small
+            )
+          }
+          img.onerror = () => reject(new Error('Failed to load image'))
+          img.src = e.target?.result as string
+        }
+        reader.onerror = () => reject(new Error('Failed to read file'))
+        reader.readAsDataURL(file)
+      })
+    }
+
+    // Full compression for larger files
+    return new Promise(async (resolve, reject) => {
+      // Read EXIF orientation
+      const orientation = await getExifOrientation(file)
+      
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const img = new Image()
+        img.onload = () => {
+          // Calculate new dimensions while maintaining aspect ratio
+          // Note: We need to account for orientation - if image is rotated 90/270,
+          // we need to swap width/height for dimension calculations
+          let width = img.width
+          let height = img.height
+          
+          // For 90/270 degree rotations, swap dimensions for calculation
+          const isRotated = orientation === 5 || orientation === 6 || orientation === 7 || orientation === 8
+          if (isRotated) {
+            [width, height] = [height, width]
+          }
+
+          if (width > maxWidth || height > maxHeight) {
+            const aspectRatio = width / height
+            if (width > height) {
+              width = Math.min(width, maxWidth)
+              height = width / aspectRatio
+            } else {
+              height = Math.min(height, maxHeight)
+              width = height * aspectRatio
+            }
+          }
+          
+          // Swap back for canvas dimensions if rotated
+          if (isRotated) {
+            [width, height] = [height, width]
+          }
+
+          // Create canvas
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'))
+            return
+          }
+
+          // Apply EXIF orientation transformation before drawing
+          if (orientation && orientation > 1) {
+            // Apply transformation - this may swap canvas dimensions for rotations
+            const { width: finalWidth, height: finalHeight } = applyExifOrientation(ctx, canvas, orientation, width, height)
+            // Draw with the calculated dimensions
+            ctx.drawImage(img, 0, 0, width, height)
+            width = finalWidth
+            height = finalHeight
+          } else {
+            // Draw resized image normally
+            ctx.drawImage(img, 0, 0, width, height)
+          }
+
+          // Determine output format - preserve PNG for transparency, convert others to JPEG
+          const isPng = file.type === 'image/png'
+          const outputFormat = isPng ? 'image/png' : 'image/jpeg'
+
+          // Convert to blob
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) {
+                reject(new Error('Failed to compress image'))
+                return
+              }
+
+              // Create a new File object with the compressed blob
+              const compressedFile = new File(
+                [blob],
+                file.name.replace(/\.[^.]+$/, isPng ? '.png' : '.jpg'),
+                {
+                  type: outputFormat,
+                  lastModified: Date.now(),
+                }
+              )
+
+              console.log(`Compressed ${file.name}: ${(file.size / 1024 / 1024).toFixed(2)}MB -> ${(compressedFile.size / 1024 / 1024).toFixed(2)}MB`)
+              resolve(compressedFile)
+            },
+            outputFormat,
+            isPng ? undefined : quality
+          )
+        }
+        img.onerror = () => reject(new Error('Failed to load image'))
+        img.src = e.target?.result as string
+      }
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsDataURL(file)
+    })
+  }
+
   // Create a small thumbnail for preview (max 200x200px) to avoid memory issues
   const createThumbnail = async (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -195,7 +533,7 @@ export function CreateNoteForm({
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     
-    // Validate file sizes (max 50MB per file - will be compressed server-side)
+    // Validate file sizes (max 50MB per file before compression)
     const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
     const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE)
     
@@ -209,29 +547,64 @@ export function CreateNoteForm({
       return
     }
     
-    // Store original files
-    setImages((prev) => [...prev, ...files])
+    // Compress images on client side before storing
+    setIsCompressing(true)
+    setCompressionProgress(0)
+    setError(null)
     
-    // Create thumbnails asynchronously to avoid blocking UI
-    // Use requestIdleCallback if available, otherwise setTimeout
-    const createThumbnails = async () => {
-      const thumbnailPromises = files.map((file) => createThumbnail(file))
-      try {
-        const thumbnails = await Promise.all(thumbnailPromises)
-        setImagePreviews((prev) => [...prev, ...thumbnails])
-      } catch (error) {
-        console.error('Error creating thumbnails:', error)
-        // Fallback: use object URLs if thumbnail creation fails
-        const fallbackUrls = files.map((file) => URL.createObjectURL(file))
-        setImagePreviews((prev) => [...prev, ...fallbackUrls])
+    try {
+      const compressedFiles: File[] = []
+      const totalFiles = files.length
+      
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        setCompressionProgress(((i + 1) / totalFiles) * 100)
+        
+        try {
+          // Compress image: max 1920x1920, quality 0.85
+          const compressedFile = await compressImage(file, 1920, 1920, 0.85)
+          compressedFiles.push(compressedFile)
+        } catch (error) {
+          console.error(`Failed to compress ${file.name}:`, error)
+          // If compression fails, use original file (server will compress it)
+          compressedFiles.push(file)
+        }
       }
-    }
+      
+      // Store compressed files
+      setImages((prev) => [...prev, ...compressedFiles])
+      
+      // Create thumbnails asynchronously to avoid blocking UI
+      // Use requestIdleCallback if available, otherwise setTimeout
+      const createThumbnails = async () => {
+        const thumbnailPromises = compressedFiles.map((file) => createThumbnail(file))
+        try {
+          const thumbnails = await Promise.all(thumbnailPromises)
+          setImagePreviews((prev) => [...prev, ...thumbnails])
+        } catch (error) {
+          console.error('Error creating thumbnails:', error)
+          // Fallback: use object URLs if thumbnail creation fails
+          const fallbackUrls = compressedFiles.map((file) => URL.createObjectURL(file))
+          setImagePreviews((prev) => [...prev, ...fallbackUrls])
+        }
+      }
 
-    // Defer thumbnail creation to avoid blocking typing
-    if ('requestIdleCallback' in window) {
-      ;(window as any).requestIdleCallback(createThumbnails, { timeout: 2000 })
-    } else {
-      setTimeout(createThumbnails, 0)
+      // Defer thumbnail creation to avoid blocking typing
+      if ('requestIdleCallback' in window) {
+        ;(window as any).requestIdleCallback(createThumbnails, { timeout: 2000 })
+      } else {
+        setTimeout(createThumbnails, 0)
+      }
+    } catch (error: any) {
+      console.error('Error compressing images:', error)
+      setError(`Failed to compress images: ${error.message || 'Unknown error'}`)
+      // Clear the input on error
+      if (e.target) {
+        e.target.value = ''
+      }
+    } finally {
+      setIsCompressing(false)
+      setCompressionProgress(0)
     }
   }
 
@@ -479,15 +852,27 @@ export function CreateNoteForm({
             accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
             multiple
             onChange={handleImageSelect}
+            disabled={isCompressing}
             className="hidden"
           />
           <Button
             type="button"
             variant="secondary"
             onClick={() => fileInputRef.current?.click()}
+            disabled={isCompressing}
           >
-            <UIText>Add Images</UIText>
+            <UIText>{isCompressing ? `Compressing... ${Math.round(compressionProgress)}%` : 'Add Images'}</UIText>
           </Button>
+          {isCompressing && (
+            <div className="mt-2">
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${compressionProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
           {images.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
               {images.map((image, index) => (

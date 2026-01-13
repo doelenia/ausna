@@ -172,8 +172,8 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         } catch (error: any) {
           console.error(`Failed to upload image ${i + 1}:`, error)
           console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
+            message: error?.message,
+            stack: error?.stack,
             noteId: note.id,
             fileName: imageFile.name,
             fileType: imageFile.type,
@@ -184,9 +184,19 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
           const errorMessage = error?.message || 'Unknown upload error'
           uploadErrors.push({ fileName: imageFile.name, error: errorMessage })
           
-          // If it's a size error, throw it immediately so user sees the message
+          // If it's a size error, we need to clean up the note and return an error
           if (errorMessage.includes('too large')) {
-            throw error
+            // Clean up the note since we're failing
+            try {
+              await supabase.from('notes').delete().eq('id', note.id)
+            } catch (deleteError) {
+              console.error('Failed to delete note after image upload error:', deleteError)
+            }
+            // Return error immediately
+            return {
+              success: false,
+              error: errorMessage,
+            }
           }
           
           // For other errors, continue with other images but track the error
@@ -411,15 +421,27 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       noteId: note.id,
     }
   } catch (error: any) {
+    // Handle Next.js redirects
     if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
       const digest = (error as any).digest || ''
       if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
         throw error
       }
     }
+    
+    // Ensure we always return a valid result object
+    const errorMessage = error?.message || (typeof error === 'string' ? error : 'An unexpected error occurred')
+    
+    console.error('Error in createNote:', {
+      error,
+      errorMessage,
+      errorType: typeof error,
+      hasMessage: error?.message !== undefined,
+    })
+    
     return {
       success: false,
-      error: error.message || 'An unexpected error occurred',
+      error: errorMessage,
     }
   }
 }

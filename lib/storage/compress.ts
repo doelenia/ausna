@@ -105,6 +105,9 @@ export async function compressImage(
   // If HEIC support is not available, sharp will throw an error which we'll catch
   try {
     let pipeline = sharp(buffer)
+      // Auto-rotate based on EXIF orientation data
+      // This ensures images taken in portrait mode display correctly
+      .rotate()
       .resize(opts.maxWidth, opts.maxHeight, {
         fit: 'inside',
         withoutEnlargement: true,
