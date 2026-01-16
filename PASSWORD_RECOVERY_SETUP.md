@@ -122,6 +122,49 @@ The `/reset-password` page:
 2. Add both production and development URLs to Supabase allowed list
 3. Check Supabase logs for redirect URL validation errors
 
+### Issue: Password recovery emails not being sent in production (only works locally)
+
+**Possible causes:**
+1. **`NEXT_PUBLIC_SITE_URL` not set in production environment**: The code falls back to `window.location.origin`, which may not match Supabase configuration
+2. **Redirect URL not in Supabase allowed list**: Supabase silently rejects requests with invalid redirect URLs
+3. **Site URL mismatch**: The redirect URL doesn't match the Site URL configured in Supabase Dashboard
+4. **HTTP vs HTTPS mismatch**: Using HTTP in production when Supabase expects HTTPS (or vice versa)
+
+**Solution:**
+1. **Set `NEXT_PUBLIC_SITE_URL` in your deployment environment:**
+   - For Vercel: Go to Project Settings → Environment Variables → Add `NEXT_PUBLIC_SITE_URL` with your production domain (e.g., `https://yourdomain.com`)
+   - For other platforms: Set the environment variable in your deployment configuration
+   - **Important**: The value must match your actual production domain exactly (including protocol: `https://`)
+
+2. **Configure Supabase Dashboard:**
+   - Go to Authentication → URL Configuration
+   - Set **Site URL** to your production domain (e.g., `https://yourdomain.com`)
+   - Add your production reset password URL to **Redirect URLs**: `https://yourdomain.com/reset-password`
+   - Ensure both URLs use the same protocol (HTTPS for production)
+
+3. **Verify the configuration:**
+   - Enable debug logging by setting `NEXT_PUBLIC_DEBUG_URLS=true` in your environment (temporary, for debugging)
+   - Check browser console when submitting forgot password form
+   - Look for `[Password Recovery]` log messages showing the URLs being used
+   - Verify the redirect URL matches what's configured in Supabase Dashboard
+
+4. **Check Supabase logs:**
+   - Go to Supabase Dashboard → Logs → Auth
+   - Look for errors related to password reset requests
+   - Check for redirect URL validation errors
+
+5. **Test the flow:**
+   - Submit a password reset request in production
+   - Check browser console for any errors
+   - Verify the redirect URL in logs matches your Supabase configuration
+   - Check Supabase Auth logs for any rejection messages
+
+**Common mistakes:**
+- Forgetting to set `NEXT_PUBLIC_SITE_URL` in production (most common)
+- Using `http://` instead of `https://` in production
+- Adding redirect URL without the `/reset-password` path
+- Site URL in Supabase Dashboard doesn't match `NEXT_PUBLIC_SITE_URL`
+
 ## Testing
 
 1. **Test forgot password flow:**

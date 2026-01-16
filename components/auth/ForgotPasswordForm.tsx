@@ -23,15 +23,52 @@ export function ForgotPasswordForm() {
       // Supabase will include this in the .ConfirmationURL in the email template
       const redirectUrl = `${siteUrl}/reset-password`
       
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      // Validate the redirect URL
+      try {
+        new URL(redirectUrl)
+      } catch (urlError) {
+        throw new Error(`Invalid redirect URL: ${redirectUrl}. Please check your NEXT_PUBLIC_SITE_URL configuration.`)
+      }
+      
+      // Warn if using HTTP in production (should use HTTPS)
+      if (process.env.NODE_ENV === 'production' && redirectUrl.startsWith('http://')) {
+        console.warn('[Password Recovery] WARNING: Using HTTP instead of HTTPS in production. This may cause issues.')
+      }
+      
+      // Log the redirect URL for debugging (only in development or if explicitly enabled)
+      if (process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_DEBUG_URLS === 'true') {
+        console.log('[Password Recovery] Site URL:', siteUrl)
+        console.log('[Password Recovery] Redirect URL:', redirectUrl)
+        console.log('[Password Recovery] NEXT_PUBLIC_SITE_URL:', process.env.NEXT_PUBLIC_SITE_URL)
+        console.log('[Password Recovery] Window origin:', typeof window !== 'undefined' ? window.location.origin : 'N/A (server)')
+      }
+      
+      const { error: resetError, data } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: redirectUrl,
       })
 
-      if (resetError) throw resetError
+      if (resetError) {
+        // Log the error for debugging
+        console.error('[Password Recovery] Error:', resetError)
+        throw resetError
+      }
+
+      // Log success for debugging
+      if (process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_DEBUG_URLS === 'true') {
+        console.log('[Password Recovery] Email sent successfully:', data)
+      }
 
       setSuccess(true)
     } catch (err: any) {
-      setError(err.message || 'An error occurred. Please try again.')
+      // Provide more helpful error messages
+      let errorMessage = err.message || 'An error occurred. Please try again.'
+      
+      // Check for common Supabase redirect URL errors
+      if (err.message?.includes('redirect') || err.message?.includes('URL')) {
+        errorMessage = 'Invalid redirect URL configuration. Please contact support if this issue persists.'
+      }
+      
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }
