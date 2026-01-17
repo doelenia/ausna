@@ -40,3 +40,4 @@ WHERE type IN ('projects', 'community')
 -- Step 4: Update comment explaining the new structure
 COMMENT ON COLUMN portfolios.metadata IS 'Portfolio metadata with structure: {basic: {name, description, avatar}, pinned: [{type: "portfolio"|"note", id: string}], settings: {}, members?: [], managers?: [], project_type_general?: string, project_type_specific?: string, memberRoles?: {[userId]: role}}. For projects/communities: members (user IDs), managers (user IDs), project_type_general (general category), project_type_specific (specific type, max 2 words), memberRoles (object mapping userId to role, max 2 words). Creator is portfolio.user_id.';
 
+

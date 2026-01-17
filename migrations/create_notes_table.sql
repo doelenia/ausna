@@ -62,3 +62,4 @@ COMMENT ON COLUMN notes.references IS 'Array of reference objects (images or URL
 COMMENT ON COLUMN notes.assigned_portfolios IS 'Array of portfolio IDs where this note is assigned';
 
 
+

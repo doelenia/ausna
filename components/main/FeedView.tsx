@@ -5,6 +5,9 @@ import { Note } from '@/types/note'
 import { NoteCard } from '@/components/notes/NoteCard'
 import { FeedTabs, FeedType } from './FeedTabs'
 import { Button, Title, Content, UIText } from '@/components/ui'
+import { LazyLoad } from '@/components/ui/LazyLoad'
+import { SkeletonCard } from '@/components/ui/Skeleton'
+import { useDataCache } from '@/lib/cache/useDataCache'
 import Link from 'next/link'
 
 interface FeedViewProps {
@@ -12,6 +15,7 @@ interface FeedViewProps {
 }
 
 export function FeedView({ currentUserId }: FeedViewProps) {
+  const { setCachedNote } = useDataCache()
   const [activeFeed, setActiveFeed] = useState<FeedType>('all')
   const [activeCommunityId, setActiveCommunityId] = useState<string | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
@@ -69,9 +73,10 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           })
         }
 
-        // Track loaded note IDs
+        // Track loaded note IDs and cache notes
         newNotes.forEach((note) => {
           loadedNoteIdsRef.current.add(note.id)
+          setCachedNote(note.id, note)
         })
 
         // Mark notes as seen (only for logged-in users)
@@ -144,8 +149,10 @@ export function FeedView({ currentUserId }: FeedViewProps) {
   }, [currentUserId, hasMore, loadingMore, loading])
 
   const handleFeedChange = (feedType: FeedType, communityId?: string | null) => {
+    // Optimistic update - update state immediately for instant UI feedback
     setActiveFeed(feedType)
     setActiveCommunityId(communityId || null)
+    // Data will load via useEffect, but UI updates instantly
   }
 
   if (loading && notes.length === 0) {
@@ -195,13 +202,19 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           ) : (
             <>
               <div className="divide-y divide-gray-200 md:divide-y-0 md:space-y-4">
-                {notes.map((note) => (
+                {notes.map((note, index) => (
                   <div key={note.id} id={`note-${note.id}`}>
-                    <NoteCard
-                      note={note}
-                      currentUserId={currentUserId}
-                      flatOnMobile={true}
-                    />
+                    <LazyLoad
+                      rootMargin="200px"
+                      fallback={<SkeletonCard showAvatar={true} showBanner={true} />}
+                      eager={index < 3} // Load first 3 cards immediately
+                    >
+                      <NoteCard
+                        note={note}
+                        currentUserId={currentUserId}
+                        flatOnMobile={true}
+                      />
+                    </LazyLoad>
                   </div>
                 ))}
               </div>

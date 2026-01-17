@@ -7,3 +7,4 @@ ADD COLUMN invitation_type TEXT DEFAULT 'member' CHECK (invitation_type IN ('mem
 COMMENT ON COLUMN portfolio_invitations.invitation_type IS 'Type of invitation: member (default) or manager';
 
 
+

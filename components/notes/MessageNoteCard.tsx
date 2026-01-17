@@ -153,7 +153,8 @@ export function MessageNoteCard({ noteId, isSent }: MessageNoteCardProps) {
     }`}>
       <Link 
         href={`/notes/${note.id}`}
-        className="block p-3 hover:opacity-90 transition-opacity"
+        className="block p-3 hover:opacity-90 transition-opacity cursor-pointer"
+        prefetch={true}
       >
         {/* Header */}
         <div className="flex items-center gap-2 mb-2">
@@ -190,5 +191,6 @@ export function MessageNoteCard({ noteId, isSent }: MessageNoteCardProps) {
     </div>
   )
 }
+
 
 

@@ -108,8 +108,9 @@ function getImageBoundingBox(image: HTMLImageElement, imageUrl: string): { x: nu
 /**
  * StickerAvatar component - A special avatar with sticker-like styling
  * - Human: Circular shape with thin gray outline, no shadow, no dimming
- * - Projects/Community: Preserves the shape of the uploaded PNG (transparency) with white outline and shadow
+ * - Projects/Community: Preserves the shape of the uploaded PNG (transparency) with shadow
  *   Automatically scales PNGs to appear similarly sized by detecting non-transparent bounding box
+ *   White edge removed for performance
  * 
  * Optimized with React.memo and caching to prevent unnecessary re-renders and expensive recalculations
  */
@@ -226,27 +227,18 @@ function StickerAvatarComponent({
   }, [size])
 
   // Shadow values for project/community avatars
-  const shadowValue = '0px 0px 2px rgba(0, 0, 0, 0.2)'
+  const shadowValue = '0px 0px 5px rgba(0, 0, 0, 0.1)'
 
   // For PNG shape detection, we use filter: drop-shadow which respects transparency
-  // This creates a crisp white outline and shadow that follows the image's actual shape
-  // Using multiple drop-shadows with 0 blur at small offsets to create a solid outline that follows the PNG's alpha channel
+  // This creates a shadow that follows the image's actual shape
+  // White edge removed to improve performance
   const imageFilter = useMemo(() => {
     if (isHuman) {
       return undefined
     }
-    // Mini variant: much narrower white outline (0.2px equivalent) + subtle shadow
-    if (variant === 'mini') {
-      return 'brightness(0.98) ' +
-        'drop-shadow(-1px -1px 0 white) drop-shadow(1px -1px 0 white) drop-shadow(-1px 1px 0 white) drop-shadow(1px 1px 0 white) ' +
-        `drop-shadow(${shadowValue})`
-    }
-    // Default variant: full white outline + shadow
-    return 'brightness(0.98) ' +
-      'drop-shadow(-2px -2px 0 white) drop-shadow(2px -2px 0 white) drop-shadow(-2px 2px 0 white) drop-shadow(2px 2px 0 white) ' +
-      'drop-shadow(-1px 0 0 white) drop-shadow(1px 0 0 white) drop-shadow(0 -1px 0 white) drop-shadow(0 1px 0 white) ' +
-      `drop-shadow(${shadowValue})`
-  }, [isHuman, shadowValue, variant])
+    // Just shadow, no white outline
+    return `drop-shadow(${shadowValue})`
+  }, [isHuman, shadowValue])
 
   const containerStyle = useMemo(() => {
     if (isHuman) {
@@ -258,8 +250,8 @@ function StickerAvatarComponent({
       }
     }
     return {
-      // For PNGs, add padding to ensure outline and shadow are visible (1px outline + 2px shadow)
-      padding: variant === 'mini' ? '2px' : '4px',
+      // For PNGs, add minimal padding for shadow visibility (white outline removed)
+      padding: '2px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -279,17 +271,15 @@ function StickerAvatarComponent({
       `.trim()}
       onClick={onClick}
     >
-      {/* Emoji with same white outline and shadow as image avatars */}
+      {/* Emoji with shadow (white edge removed for performance) */}
       <div
         style={{
           fontSize: typeof size === 'number' ? `${size - 8}px` : `calc(${size} - 8px)`,
           lineHeight: 1,
-          // Match the same styling as image avatars (variant-aware)
+          // Match the same styling as image avatars (no white outline)
           filter: isHuman
             ? undefined
-            : variant === 'mini'
-            ? `brightness(0.98) drop-shadow(-0.2px -0.2px 0 white) drop-shadow(0.2px -0.2px 0 white) drop-shadow(-0.2px 0.2px 0 white) drop-shadow(0.2px 0.2px 0 white) drop-shadow(${shadowValue})`
-            : `brightness(0.98) drop-shadow(-2px -2px 0 white) drop-shadow(2px -2px 0 white) drop-shadow(-2px 2px 0 white) drop-shadow(2px 2px 0 white) drop-shadow(-1px 0 0 white) drop-shadow(1px 0 0 white) drop-shadow(0 -1px 0 white) drop-shadow(0 1px 0 white) drop-shadow(${shadowValue})`,
+            : `drop-shadow(${shadowValue})`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',

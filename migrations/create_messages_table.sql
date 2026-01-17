@@ -60,3 +60,4 @@ COMMENT ON TABLE messages IS 'Private messages between two users';
 COMMENT ON COLUMN messages.read_at IS 'Timestamp when receiver read the message, NULL if unread';
 
 
+

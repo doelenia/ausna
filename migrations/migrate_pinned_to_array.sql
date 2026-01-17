@@ -26,3 +26,4 @@ WHERE metadata->'pinned' IS NOT NULL
 COMMENT ON COLUMN portfolios.metadata IS 'Portfolio metadata with structure: {basic: {name, description, avatar}, pinned: [{type: "portfolio"|"note", id: string}], settings: {}, members?: [], hosts?: []}';
 
 
+

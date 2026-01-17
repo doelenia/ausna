@@ -274,3 +274,4 @@ import { Card, Button } from '@/components/ui'
 - **Type Safety**: TypeScript ensures correct prop usage
 - **Maintainability**: Easier to update and maintain
 
+

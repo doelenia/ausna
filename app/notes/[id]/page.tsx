@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { getNoteById, getAnnotationsByNote } from '@/app/notes/actions'
 import { canCreateNoteInPortfolio } from '@/lib/notes/helpers'
-import { NoteView } from '@/components/notes/NoteView'
+import { NotePageClient } from './NotePageClient'
 import { notFound } from 'next/navigation'
 import { UIText } from '@/components/ui'
 
@@ -32,27 +32,38 @@ export default async function NotePage({ params }: NotePageProps) {
     notFound()
   }
 
-  // If this is an annotation, check if the referenced note is deleted
-  let referencedNoteDeleted = false
-  if (note.mentioned_note_id) {
-    const referencedNoteResult = await getNoteById(note.mentioned_note_id, true)
-    if (referencedNoteResult.success && referencedNoteResult.notes && referencedNoteResult.notes.length > 0) {
-      referencedNoteDeleted = referencedNoteResult.notes[0].deleted_at !== null
-    }
-  }
-
-  // Get annotations
-  const annotationsResult = await getAnnotationsByNote(note.id)
-  const annotations = annotationsResult.success ? annotationsResult.notes || [] : []
-
   // Get all portfolios assigned to this note
   const portfolioIds = note.assigned_portfolios || []
   
-  // Fetch portfolios
-  const { data: portfolios } = await supabase
-    .from('portfolios')
-    .select('*')
-    .in('id', portfolioIds)
+  // Fetch data in parallel for better performance
+  const [
+    referencedNoteResult,
+    annotationsResult,
+    portfoliosData
+  ] = await Promise.all([
+    // Check if referenced note is deleted (only if this is an annotation)
+    note.mentioned_note_id 
+      ? getNoteById(note.mentioned_note_id, true)
+      : Promise.resolve({ success: false, notes: [] }),
+    // Get annotations
+    getAnnotationsByNote(note.id),
+    // Fetch portfolios
+    portfolioIds.length > 0
+      ? supabase.from('portfolios').select('*').in('id', portfolioIds)
+      : Promise.resolve({ data: null, error: null })
+  ])
+
+  // Process referenced note result
+  let referencedNoteDeleted = false
+  if (note.mentioned_note_id && referencedNoteResult.success && referencedNoteResult.notes && referencedNoteResult.notes.length > 0) {
+    referencedNoteDeleted = referencedNoteResult.notes[0].deleted_at !== null
+  }
+
+  // Process annotations
+  const annotations = annotationsResult.success ? annotationsResult.notes || [] : []
+
+  // Process portfolios
+  const portfolios = portfoliosData.data
 
   // Get all human portfolios for creators (owners of assigned portfolios + note owner)
   const creatorUserIds = new Set<string>()
@@ -70,42 +81,52 @@ export default async function NotePage({ params }: NotePageProps) {
     })
   }
 
-  // Fetch all human portfolios for creators
-  const { data: humanPortfolios } = await supabase
-    .from('portfolios')
-    .select('*')
-    .eq('type', 'human')
-    .in('user_id', Array.from(creatorUserIds))
+  // Fetch human portfolios and check annotation permissions in parallel
+  const [
+    humanPortfoliosResult,
+    canAnnotateResult
+  ] = await Promise.all([
+    // Fetch all human portfolios for creators
+    creatorUserIds.size > 0
+      ? supabase
+          .from('portfolios')
+          .select('*')
+          .eq('type', 'human')
+          .in('user_id', Array.from(creatorUserIds))
+      : Promise.resolve({ data: null, error: null }),
+    // Check if user can annotate (must be member of at least one portfolio)
+    // Only check if user is authenticated
+    user && portfolios && portfolios.length > 0
+      ? (async () => {
+          for (const portfolio of portfolios) {
+            const canCreate = await canCreateNoteInPortfolio(portfolio.id, user.id)
+            if (canCreate) {
+              return true
+            }
+          }
+          return false
+        })()
+      : Promise.resolve(false)
+  ])
 
-  // Check if user can annotate (must be member of at least one portfolio)
-  // Only check if user is authenticated
-  let canAnnotate = false
-  if (user && portfolios && portfolios.length > 0) {
-    for (const portfolio of portfolios) {
-      const canCreate = await canCreateNoteInPortfolio(portfolio.id, user.id)
-      if (canCreate) {
-        canAnnotate = true
-        break
-      }
-    }
-  }
+  const humanPortfolios = humanPortfoliosResult.data
+  const canAnnotate = canAnnotateResult
 
   // Get the first portfolio for annotate link (or use the first one)
   const firstPortfolio = portfolios && portfolios.length > 0 ? portfolios[0] : null
 
   return (
-    <>
-          <NoteView
-            note={note}
-            annotations={annotations}
-            portfolios={portfolios || []}
-            humanPortfolios={humanPortfolios || []}
-            currentUserId={user?.id}
-            canAnnotate={canAnnotate}
-            annotatePortfolioId={firstPortfolio?.id}
-          referencedNoteDeleted={referencedNoteDeleted}
-        />
-    </>
+    <NotePageClient
+      noteId={params.id}
+      serverNote={note}
+      annotations={annotations}
+      portfolios={portfolios || []}
+      humanPortfolios={humanPortfolios || []}
+      currentUserId={user?.id}
+      canAnnotate={canAnnotate}
+      annotatePortfolioId={firstPortfolio?.id}
+      referencedNoteDeleted={referencedNoteDeleted}
+    />
   )
 }
 

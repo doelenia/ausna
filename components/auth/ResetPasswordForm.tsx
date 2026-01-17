@@ -108,7 +108,8 @@ export function ResetPasswordForm() {
           </UIText>
           <Button
             variant="primary"
-            onClick={() => router.push('/forgot-password')}
+            asLink
+            href="/forgot-password"
           >
             <UIText>Request new reset link</UIText>
           </Button>

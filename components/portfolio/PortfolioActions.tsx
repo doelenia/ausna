@@ -217,7 +217,6 @@ export function PortfolioActions({
     
     dropdownItems.push({
       label: 'Account',
-      onClick: () => router.push(`/account/${portfolio.user_id}`),
       asLink: true,
       href: `/account/${portfolio.user_id}`,
       icon: User,
@@ -388,13 +387,13 @@ export function PortfolioActions({
       }
     }
 
-    const handleCreateNote = () => {
-      router.push(`/notes/create?portfolio=${portfolio.id}`)
-    }
-
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" onClick={handleCreateNote}>
+        <Button 
+          variant="primary" 
+          asLink
+          href={`/notes/create?portfolio=${portfolio.id}`}
+        >
           <Pen className="w-4 h-4 mr-2" strokeWidth={1.5} />
           <UIText>Create Note</UIText>
         </Button>

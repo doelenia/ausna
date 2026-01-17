@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { TopNav } from '@/components/main/TopNav'
 import { InviteHandler } from '@/components/auth/InviteHandler'
+import { DataCacheProvider } from '@/lib/cache/DataCacheContext'
 
 export const metadata: Metadata = {
   title: 'Ausna - Creative Community',
@@ -19,18 +20,19 @@ export default function RootLayout({
         <meta name="color-scheme" content="light" />
       </head>
       <body className="light bg-white text-gray-900">
-        <InviteHandler />
-        <div className="h-[100dvh] bg-gray-50">
-          <div className="mx-auto h-full relative" style={{ maxWidth: 'var(--max-content-width)' }}>
-            <div className="h-full overflow-auto w-full">
-              <div className="hidden md:block">
-                <div className="h-16"></div>
+        <DataCacheProvider>
+          <InviteHandler />
+          <div className="h-[100dvh] bg-gray-50">
+            <div className="mx-auto h-full relative" style={{ maxWidth: 'var(--max-content-width)' }}>
+              <div className="h-full overflow-auto w-full">
+                <div className="hidden md:block">
+                  <div className="h-16"></div>
+                </div>
+                {children}
+                <div className="block md:hidden">
+                  <div className="h-16"></div>
+                </div>
               </div>
-              {children}
-              <div className="block md:hidden">
-                <div className="h-16"></div>
-              </div>
-            </div>
             <div className="hidden md:block absolute top-0 left-0 right-0 pointer-events-none">
               <div className="pointer-events-auto">
                 <TopNav />
@@ -45,8 +47,9 @@ export default function RootLayout({
                 <TopNav />
               </div>
             </div>
+            </div>
           </div>
-        </div>
+        </DataCacheProvider>
       </body>
     </html>
   )

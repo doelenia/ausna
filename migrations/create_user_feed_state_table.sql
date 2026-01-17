@@ -41,3 +41,4 @@ COMMENT ON COLUMN user_feed_state.bloom_filter_data IS 'Serialized bloom filter 
 COMMENT ON COLUMN user_feed_state.last_updated IS 'Timestamp of last update to the bloom filter';
 
 
+

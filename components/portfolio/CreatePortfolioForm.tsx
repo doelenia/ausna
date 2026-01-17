@@ -33,11 +33,11 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const supabase = createClient()
   const avatarHelpers = createAvatarUploadHelpers(supabase)
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       // Validate file type
-      if (!file.type.startsWith('image/')) {
+      if (!file.type.startsWith('image/') && !file.name.toLowerCase().endsWith('.heic') && !file.name.toLowerCase().endsWith('.heif')) {
         setError('Please select an image file')
         return
       }
@@ -48,16 +48,29 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
         return
       }
 
-      setAvatarFile(file)
-      setSelectedEmoji(null) // Clear emoji when image is selected
       setError(null)
 
-      // Create preview
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setAvatarPreview(reader.result as string)
+      try {
+        // Convert HEIC to JPEG if needed
+        const { ensureBrowserCompatibleImage } = await import('@/lib/utils/heic-converter')
+        const compatibleFile = await ensureBrowserCompatibleImage(file)
+        
+        setAvatarFile(compatibleFile)
+        setSelectedEmoji(null) // Clear emoji when image is selected
+
+        // Create preview
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          setAvatarPreview(reader.result as string)
+        }
+        reader.readAsDataURL(compatibleFile)
+      } catch (error: any) {
+        console.error('Error processing image:', error)
+        setError(error.message || 'Failed to process image. Please try a different image.')
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
       }
-      reader.readAsDataURL(file)
     }
   }
 
@@ -199,7 +212,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,image/heic,image/heif,.heic,.heif"
                   onChange={handleFileChange}
                   className="hidden"
                 />

@@ -132,7 +132,8 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
               <Link
                 key={`note-${item.id}`}
                 href={`/notes/${item.id}`}
-                className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 p-4"
+                className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 p-4 cursor-pointer"
+                prefetch={true}
               >
                 <div className="flex items-start justify-between mb-2">
                   <UIText as="span">

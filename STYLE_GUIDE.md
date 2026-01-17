@@ -437,11 +437,6 @@ export default function MyPage() {
 - **Purpose**: View individual portfolio details
 - **Structure**: Standard structure with portfolio information
 
-#### `/portfolio/[type]/[id]/all` - Portfolio All View
-- **Component**: `components/portfolio/PortfolioAllView.tsx`
-- **Purpose**: View all notes and sub-portfolios for a portfolio
-- **Structure**: Standard structure with tabs for notes/portfolios
-
 #### `/portfolio/[type]/[id]/members` - Members Page
 - **File**: `app/portfolio/[type]/[id]/members/page.tsx`
 - **Purpose**: View and manage portfolio members

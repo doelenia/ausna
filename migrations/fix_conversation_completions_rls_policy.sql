@@ -10,3 +10,4 @@ CREATE POLICY "Users can view their own conversation completions"
   USING (auth.uid() = user_id OR auth.uid() = partner_id);
 
 
+

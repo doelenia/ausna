@@ -62,7 +62,10 @@ export function FeedTabs({
           <div className="flex gap-2 overflow-x-auto scrollbar-hide">
             {/* All feed tab */}
             <button
-              onClick={() => handleTabClick('all')}
+              onClick={(e) => {
+                e.preventDefault()
+                handleTabClick('all')
+              }}
               className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
                 activeFeed === 'all' && !activeCommunityId
                   ? 'bg-gray-200 text-gray-700'
@@ -74,7 +77,10 @@ export function FeedTabs({
 
             {/* Friends feed tab */}
             <button
-              onClick={() => handleTabClick('friends')}
+              onClick={(e) => {
+                e.preventDefault()
+                handleTabClick('friends')
+              }}
               className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
                 activeFeed === 'friends'
                   ? 'bg-gray-200 text-gray-700'
@@ -91,7 +97,10 @@ export function FeedTabs({
               communities.map((community) => (
                 <button
                   key={community.id}
-                  onClick={() => handleTabClick('community', community.id)}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    handleTabClick('community', community.id)
+                  }}
                   className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
                     activeFeed === 'community' && activeCommunityId === community.id
                       ? 'bg-gray-200 text-gray-700'

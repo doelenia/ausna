@@ -37,6 +37,18 @@ export async function updateSession(request: NextRequest) {
   // supabase.auth.getUser(). A simple mistake could make it very hard to debug
   // issues with users being randomly logged out.
 
+  // Check if this is a public route that doesn't need auth
+  // This allows us to skip getUser() for static assets and public pages
+  const pathname = request.nextUrl.pathname
+  const isStaticAsset = pathname.startsWith('/_next/') || 
+                        pathname.startsWith('/api/') ||
+                        /\.(svg|png|jpg|jpeg|gif|webp|ico)$/i.test(pathname)
+  
+  // For static assets, skip auth check entirely
+  if (isStaticAsset) {
+    return supabaseResponse
+  }
+
   // IMPORTANT: Call getUser() immediately after creating the client
   // This will automatically refresh expired sessions and update cookies
   const {

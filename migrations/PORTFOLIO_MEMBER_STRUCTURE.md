@@ -159,3 +159,4 @@ The following features are planned but not yet implemented:
 - Managers are assigned automatically to creator when portfolio is created
 
 
+

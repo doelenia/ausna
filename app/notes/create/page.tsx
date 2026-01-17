@@ -102,7 +102,7 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
             defaultPortfolioIds={defaultPortfolioIds}
             humanPortfolioId={undefined}
             mentionedNoteId={searchParams.annotate || undefined}
-            redirectUrl={sourcePortfolio ? `/portfolio/${sourcePortfolio.type}/${sourcePortfolio.id}/all` : '/portfolio'}
+            redirectUrl="/main"
           />
         </div>
   )

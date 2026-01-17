@@ -26,7 +26,10 @@ export function AdminTabs() {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={(e) => {
+                e.preventDefault()
+                setActiveTab(tab.id)
+              }}
               className={`px-4 py-2 rounded-lg text-sm transition-colors ${
                 activeTab === tab.id
                   ? 'bg-gray-200 text-gray-700'

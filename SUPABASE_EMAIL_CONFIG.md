@@ -84,3 +84,4 @@ After making these changes:
 - Both should point to `/auth/callback` which then redirects to `/main`
 - Always use the utility function `getAuthCallbackUrl()` for consistency
 
+

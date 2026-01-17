@@ -114,3 +114,4 @@ Use semantic color names from Tailwind config:
 - `text-sm font-medium` - Labels
 - `text-xs` - Captions
 
+

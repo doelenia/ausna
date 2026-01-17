@@ -51,3 +51,4 @@ COMMENT ON COLUMN subscriptions.user_id IS 'The user who is subscribing';
 COMMENT ON COLUMN subscriptions.portfolio_id IS 'The portfolio being subscribed to';
 
 
+

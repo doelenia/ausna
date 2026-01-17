@@ -6,3 +6,4 @@ CREATE POLICY "Users can cancel invitations by updating status"
   WITH CHECK (auth.uid() = inviter_id AND status = 'cancelled');
 
 
+

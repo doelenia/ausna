@@ -447,7 +447,6 @@ export async function updatePortfolio(
         
         // Revalidate Next.js cache for this portfolio page
         revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
-        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/all`)
         revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
         revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/pinned`)
       } catch (avatarError: any) {
@@ -472,7 +471,6 @@ export async function updatePortfolio(
 
     // Revalidate Next.js cache for portfolio pages after any update
     revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/all`)
     revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
     revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/pinned`)
 

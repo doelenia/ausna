@@ -8,3 +8,4 @@ CREATE POLICY "Users can update their own conversation completions"
   WITH CHECK (auth.uid() = user_id);
 
 
+

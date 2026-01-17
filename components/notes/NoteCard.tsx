@@ -9,9 +9,11 @@ import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
 import { Title, Subtitle, Content, UIText, UIButtonText, Card, UserAvatar, Button } from '@/components/ui'
+import { SkeletonAvatar, SkeletonText, SkeletonBanner } from '@/components/ui/Skeleton'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
+import { useDataCache } from '@/lib/cache/useDataCache'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -47,6 +49,7 @@ export function NoteCard({
   onRemovedFromPortfolio,
 }: NoteCardProps) {
   const router = useRouter()
+  const { getCachedPortfolioData, setCachedPortfolioData, getCachedPortfolio, setCachedPortfolio } = useDataCache()
   const [ownerPortfolio, setOwnerPortfolio] = useState<Portfolio | null>(null)
   const [assignedProjects, setAssignedProjects] = useState<Portfolio[]>([])
   const [loadingPortfolios, setLoadingPortfolios] = useState(true)
@@ -67,6 +70,21 @@ export function NoteCard({
       const MAX_RETRIES = 2
       const RETRY_DELAY = 1000 // 1 second
       const AUTH_WAIT_MAX = 3000 // Max 3 seconds to wait for auth
+
+      // Check cache first
+      const cachedData = getCachedPortfolioData(note.id)
+      if (cachedData) {
+        setOwnerPortfolio(cachedData.ownerPortfolio)
+        setAssignedProjects(cachedData.assignedProjects)
+        setLoadingPortfolios(false)
+        
+        // Still fetch fresh data in background to update cache
+        // (don't await, let it run in background)
+        fetchPortfolios(0).catch(() => {
+          // Silently fail background fetch
+        })
+        return
+      }
 
       try {
         const supabase = createClient()
@@ -143,7 +161,10 @@ export function NoteCard({
           }
         } else if (ownerPortfolios) {
           // Portfolio found successfully
-          setOwnerPortfolio(ownerPortfolios as Portfolio)
+          const portfolio = ownerPortfolios as Portfolio
+          setOwnerPortfolio(portfolio)
+          // Cache the portfolio
+          setCachedPortfolio(portfolio.id, portfolio)
         } else {
           // No error, but no data - portfolio doesn't exist (expected for some users)
           // This is normal and will use the fallback name
@@ -177,7 +198,12 @@ export function NoteCard({
               await new Promise(resolve => setTimeout(resolve, 500))
             }
           } else if (assignedPortfolios && assignedPortfolios.length > 0) {
-            setAssignedProjects(assignedPortfolios as Portfolio[])
+            const projects = assignedPortfolios as Portfolio[]
+            setAssignedProjects(projects)
+            // Cache each portfolio
+            projects.forEach(project => {
+              setCachedPortfolio(project.id, project)
+            })
           } else {
             // Fallback: if portfolioId is provided and it's a project, use it
             if (portfolioId) {
@@ -196,7 +222,10 @@ export function NoteCard({
                   noteId: note.id,
                 })
               } else if (portfolioData) {
-                setAssignedProjects([portfolioData as Portfolio])
+                const portfolio = portfolioData as Portfolio
+                setAssignedProjects([portfolio])
+                // Cache the portfolio
+                setCachedPortfolio(portfolio.id, portfolio)
               }
             }
           }
@@ -217,7 +246,10 @@ export function NoteCard({
               noteId: note.id,
             })
           } else if (portfolioData) {
-            setAssignedProjects([portfolioData as Portfolio])
+            const portfolio = portfolioData as Portfolio
+            setAssignedProjects([portfolio])
+            // Cache the portfolio
+            setCachedPortfolio(portfolio.id, portfolio)
           }
         }
       } catch (error) {
@@ -760,7 +792,11 @@ export function NoteCard({
         className="bg-white border border-gray-200 rounded-xl relative overflow-hidden" 
         style={{ aspectRatio: '1 / 1', minHeight: '200px' }}
       >
-        <Link href={`/notes/${note.id}`} className="block relative w-full h-full">
+        <Link 
+          href={`/notes/${note.id}`} 
+          className="block relative w-full h-full cursor-pointer"
+          prefetch={true}
+        >
           {/* Blurred and dimmed header image background */}
           {firstUrlRef!.headerImage && (
             <div className="absolute inset-0 z-0">
@@ -824,7 +860,11 @@ export function NoteCard({
         className="bg-white border border-gray-200 rounded-xl relative overflow-hidden" 
         style={{ aspectRatio: getAspectRatio(), minHeight: '200px' }}
       >
-        <Link href={`/notes/${note.id}`} className="block relative w-full h-full">
+        <Link 
+          href={`/notes/${note.id}`} 
+          className="block relative w-full h-full cursor-pointer"
+          prefetch={true}
+        >
           {/* Image fills the card */}
           <img
             ref={imageRef}
@@ -850,7 +890,9 @@ export function NoteCard({
 
   // Project Assignment Banner - rendered at the end of the main card content,
   // visually matching search result items (avatar + name/type + second line)
-  const projectBanner = assignedProjects.length > 0 ? (() => {
+  const projectBanner = loadingPortfolios ? (
+    <SkeletonBanner avatarSize={48} />
+  ) : assignedProjects.length > 0 ? (() => {
     const project = assignedProjects[0]
     const basic = getPortfolioBasic(project)
     const metadata = project.metadata as any
@@ -914,22 +956,29 @@ export function NoteCard({
         <div className="px-3 pt-3">
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-3 flex-wrap">
-              <Link
-                href={`/portfolio/human/${note.owner_account_id}`}
-                onClick={(e) => e.stopPropagation()}
-                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-              >
-                <UserAvatar
-                  userId={note.owner_account_id}
-                  name={ownerName}
-                  avatar={ownerBasic?.avatar}
-                  size={32}
-                  showLink={false}
-                />
-                <UIText as="span" className="hover:text-blue-600">
-                  {ownerName}
-                </UIText>
-              </Link>
+              {loadingPortfolios ? (
+                <div className="flex items-center gap-2">
+                  <SkeletonAvatar size={32} />
+                  <SkeletonText lines={1} width={100} lineHeight={16} />
+                </div>
+              ) : (
+                <Link
+                  href={`/portfolio/human/${note.owner_account_id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+                >
+                  <UserAvatar
+                    userId={note.owner_account_id}
+                    name={ownerName}
+                    avatar={ownerBasic?.avatar}
+                    size={32}
+                    showLink={false}
+                  />
+                  <UIText as="span" className="hover:text-blue-600">
+                    {ownerName}
+                  </UIText>
+                </Link>
+              )}
               <UIText as="span">
                 {new Date(note.created_at).toLocaleDateString()}
               </UIText>
@@ -1083,7 +1132,11 @@ export function NoteCard({
   const wrappedContent = isViewMode ? (
     cardContent
   ) : (
-    <Link href={`/notes/${note.id}`} className="block">
+    <Link 
+      href={`/notes/${note.id}`} 
+      className="block cursor-pointer"
+      prefetch={true}
+    >
       {cardContent}
     </Link>
   )

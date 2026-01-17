@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Note } from '@/types/note'
 import { Portfolio } from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
@@ -36,6 +36,8 @@ export function NoteActions({
   isRemoving = false,
 }: NoteActionsProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; right: number } | null>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const [pinOptions, setPinOptions] = useState<PinOption[]>([])
   const [loadingPins, setLoadingPins] = useState(true)
   const [pinning, setPinning] = useState<string | null>(null)
@@ -235,10 +237,46 @@ export function NoteActions({
     }
   }
 
+  // Calculate dropdown position when opening
+  const handleToggle = () => {
+    if (!isOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + 8, // 8px = mt-2 equivalent
+        right: window.innerWidth - rect.right,
+      })
+    }
+    setIsOpen(!isOpen)
+  }
+
+  // Update position on scroll/resize when open
+  useEffect(() => {
+    if (isOpen && buttonRef.current) {
+      const updatePosition = () => {
+        if (buttonRef.current) {
+          const rect = buttonRef.current.getBoundingClientRect()
+          setDropdownPosition({
+            top: rect.bottom + 8,
+            right: window.innerWidth - rect.right,
+          })
+        }
+      }
+
+      window.addEventListener('scroll', updatePosition, true)
+      window.addEventListener('resize', updatePosition)
+
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true)
+        window.removeEventListener('resize', updatePosition)
+      }
+    }
+  }, [isOpen])
+
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        ref={buttonRef}
+        onClick={handleToggle}
         className="p-1 text-gray-400 hover:text-gray-600 rounded"
         aria-label="Note actions"
       >
@@ -257,13 +295,19 @@ export function NoteActions({
         </svg>
       </button>
 
-      {isOpen && (
+      {isOpen && dropdownPosition && (
         <>
           <div
             className="fixed inset-0 z-10"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg z-20 border border-gray-200">
+          <div 
+            className="fixed w-56 bg-white rounded-md shadow-lg z-50 border border-gray-200"
+            style={{
+              top: `${dropdownPosition.top}px`,
+              right: `${dropdownPosition.right}px`,
+            }}
+          >
             <div className="py-1">
               {/* Pin options */}
               {!loadingPins && pinOptions.length > 0 && (

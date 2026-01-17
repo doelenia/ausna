@@ -6,6 +6,7 @@ import { Portfolio, isProjectPortfolio } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { UIText, Button } from '@/components/ui'
+import { ensureBrowserCompatibleImage } from '@/lib/utils/heic-converter'
 
 interface CreateNoteFormProps {
   portfolios: Portfolio[]
@@ -558,14 +559,31 @@ export function CreateNoteForm({
       
       for (let i = 0; i < files.length; i++) {
         const file = files[i]
-        setCompressionProgress(((i + 1) / totalFiles) * 100)
+        setCompressionProgress(((i + 0.5) / totalFiles) * 100) // First half for conversion
         
         try {
+          // Convert HEIC to JPEG if needed (before compression)
+          const compatibleFile = await ensureBrowserCompatibleImage(file)
+          
+          setCompressionProgress(((i + 1) / totalFiles) * 100) // Second half for compression
+          
           // Compress image: max 1920x1920, quality 0.85
-          const compressedFile = await compressImage(file, 1920, 1920, 0.85)
+          const compressedFile = await compressImage(compatibleFile, 1920, 1920, 0.85)
           compressedFiles.push(compressedFile)
         } catch (error) {
-          console.error(`Failed to compress ${file.name}:`, error)
+          console.error(`Failed to process ${file.name}:`, error)
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+          // If HEIC conversion fails, show specific error
+          if (errorMessage.includes('HEIC') || errorMessage.includes('convert')) {
+            setError(`Failed to convert HEIC image "${file.name}": ${errorMessage}`)
+            // Clear the input on error
+            if (e.target) {
+              e.target.value = ''
+            }
+            setIsCompressing(false)
+            setCompressionProgress(0)
+            return
+          }
           // If compression fails, use original file (server will compress it)
           compressedFiles.push(file)
         }
@@ -849,7 +867,7 @@ export function CreateNoteForm({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/jpeg,image/jpg,image/png,image/webp,image/*"
+            accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif,image/*"
             multiple
             onChange={handleImageSelect}
             disabled={isCompressing}

@@ -351,7 +351,10 @@ export function MembersPageClient({
       {/* Tabs */}
       <div className="flex gap-4 mb-6 border-b border-gray-200">
         <button
-          onClick={() => setActiveTab('members')}
+          onClick={(e) => {
+            e.preventDefault()
+            setActiveTab('members')
+          }}
           className={`pb-2 px-1 border-b-2 transition-colors ${
             activeTab === 'members'
               ? 'border-blue-600 text-blue-600'
@@ -361,7 +364,10 @@ export function MembersPageClient({
           <UIText as="span">Members {allMembers.length > 0 && `(${allMembers.length})`}</UIText>
         </button>
         <button
-          onClick={() => setActiveTab('subscribers')}
+          onClick={(e) => {
+            e.preventDefault()
+            setActiveTab('subscribers')
+          }}
           className={`pb-2 px-1 border-b-2 transition-colors ${
             activeTab === 'subscribers'
               ? 'border-blue-600 text-blue-600'

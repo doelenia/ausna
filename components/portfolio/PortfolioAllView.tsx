@@ -43,7 +43,10 @@ export function PortfolioAllView({
             <div className="mb-6">
               <nav className="flex gap-2">
                 <button
-                  onClick={() => setActiveTab('notes')}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setActiveTab('notes')
+                  }}
                   className={`px-4 py-2 rounded-lg text-sm transition-colors ${
                     activeTab === 'notes'
                       ? 'bg-gray-200 text-gray-700'
@@ -53,7 +56,10 @@ export function PortfolioAllView({
                   <UIText>Notes</UIText>
                 </button>
                 <button
-                  onClick={() => setActiveTab('portfolios')}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    setActiveTab('portfolios')
+                  }}
                   className={`px-4 py-2 rounded-lg text-sm transition-colors ${
                     activeTab === 'portfolios'
                       ? 'bg-gray-200 text-gray-700'

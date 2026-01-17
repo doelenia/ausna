@@ -137,3 +137,4 @@ grep -r "bg-white.*shadow.*rounded" components/ app/
 - Button and Card styles are in their respective component files
 - All changes will automatically propagate once components are used
 
+

@@ -2,6 +2,8 @@
 
 import { Note } from '@/types/note'
 import { NoteCard } from './NoteCard'
+import { LazyLoad } from '@/components/ui/LazyLoad'
+import { SkeletonCard } from '@/components/ui/Skeleton'
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 interface NotesMasonryProps {
@@ -226,15 +228,24 @@ export function NotesMasonry({
               visibility: isPositioned ? 'visible' : 'hidden',
             }}
           >
-            <NoteCard
-              note={note}
-              portfolioId={portfolioId}
-              currentUserId={currentUserId}
-              isPinned={pinnedNoteIds.has(note.id)}
-              viewMode="collage"
-              onDeleted={onNoteDeleted}
-              onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
-            />
+            <LazyLoad
+              rootMargin="300px"
+              fallback={
+                <div style={{ width: '100%', height: '300px' }}>
+                  <SkeletonCard showAvatar={false} showBanner={false} />
+                </div>
+              }
+            >
+              <NoteCard
+                note={note}
+                portfolioId={portfolioId}
+                currentUserId={currentUserId}
+                isPinned={pinnedNoteIds.has(note.id)}
+                viewMode="collage"
+                onDeleted={onNoteDeleted}
+                onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
+              />
+            </LazyLoad>
           </div>
         )
       })}

@@ -8,7 +8,7 @@ import { MoreVertical, LucideIcon } from 'lucide-react'
 
 export interface DropdownItem {
   label: string
-  onClick: () => void
+  onClick?: () => void
   variant?: ButtonVariant
   disabled?: boolean
   asLink?: boolean
@@ -142,7 +142,7 @@ export function Dropdown({
     .join(' ')
 
   const handleItemClick = (item: DropdownItem) => {
-    if (!item.disabled) {
+    if (!item.disabled && item.onClick) {
       item.onClick()
       setIsOpen(false)
     }

@@ -93,3 +93,4 @@ COMMENT ON COLUMN conversation_completions.user_id IS 'The user who marked the c
 COMMENT ON COLUMN conversation_completions.partner_id IS 'The conversation partner';
 
 
+
