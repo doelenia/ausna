@@ -8,7 +8,7 @@ import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
-import { Content, UIText, Button, Dropdown } from '@/components/ui'
+import { Content, UIText, Button, Dropdown, Card } from '@/components/ui'
 import { Archive } from 'lucide-react'
 
 interface PartnerInfo {
@@ -680,6 +680,73 @@ function ConversationViewContent() {
     })
   }, [supabase])
 
+  // Component for displaying comment preview messages
+  const CommentPreviewCard = ({ message, isSent }: { message: any; isSent: boolean }) => {
+    const [commentNote, setCommentNote] = useState<any>(null)
+    const [parentNoteId, setParentNoteId] = useState<string | null>(null)
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+      const loadCommentData = async () => {
+        try {
+          const { data: note } = await supabase
+            .from('notes')
+            .select('id, text, mentioned_note_id, owner_account_id, created_at')
+            .eq('id', message.note_id)
+            .single()
+
+          if (note) {
+            setCommentNote(note)
+            setParentNoteId(note.mentioned_note_id)
+          }
+        } catch (error) {
+          console.error('Error loading comment:', error)
+        } finally {
+          setLoading(false)
+        }
+      }
+
+      loadCommentData()
+    }, [message.note_id])
+
+    if (loading) {
+      return (
+        <Card variant="subtle" className="p-3">
+          <UIText className="text-sm text-gray-500">Loading comment...</UIText>
+        </Card>
+      )
+    }
+
+    if (!commentNote) {
+      return (
+        <Card variant="subtle" className="p-3">
+          <UIText className="text-sm text-gray-500 italic">Comment is no longer available</UIText>
+        </Card>
+      )
+    }
+
+    return (
+      <Card variant="subtle" className="p-4 border-2 border-blue-200">
+        <div className="mb-2">
+          <UIText className="text-xs font-medium text-blue-700 mb-1">New comment on your note</UIText>
+          <Content as="p" className="text-sm line-clamp-3">
+            {message.text || commentNote.text}
+          </Content>
+        </div>
+        {parentNoteId && (
+          <Link
+            href={`/notes/${parentNoteId}`}
+            className="inline-block mt-2"
+          >
+            <Button variant="primary" size="sm">
+              <UIText>View comment</UIText>
+            </Button>
+          </Link>
+        )}
+      </Card>
+    )
+  }
+
   return (
     <div className="bg-transparent flex flex-col" style={{ height: 'calc(100dvh - 4rem)', maxHeight: 'calc(100dvh - 4rem)' }}>
       {/* Header */}
@@ -840,14 +907,21 @@ function ConversationViewContent() {
                   key={`${message.id}-${refreshKey}`}
                   className={`flex flex-col ${isSent ? 'items-end' : 'items-start'}`}
                 >
-                  {message.note_id && (
+                  {message.note_id && message.message_type === 'comment_preview' ? (
+                    <div className={`mb-1 max-w-xs lg:max-w-md`}>
+                      <CommentPreviewCard 
+                        message={message}
+                        isSent={isSent}
+                      />
+                    </div>
+                  ) : message.note_id ? (
                     <div className={`mb-1 max-w-xs lg:max-w-md`}>
                       <MessageNoteCard 
                         noteId={message.note_id} 
                         isSent={isSent}
                       />
                     </div>
-                  )}
+                  ) : null}
                   
                   {isPortfolioInvitationMessage && portfolio && (
                     <div className={`mb-1 max-w-xs lg:max-w-md`}>

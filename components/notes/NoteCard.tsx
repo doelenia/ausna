@@ -34,6 +34,11 @@ interface NoteCardProps {
   flatOnMobile?: boolean
   onDeleted?: () => void
   onRemovedFromPortfolio?: () => void
+  /**
+   * When true, show at most 1 comment preview in feed view
+   * Comments are loaded lazily when card is in viewport
+   */
+  showComments?: boolean
 }
 
 export function NoteCard({
@@ -47,6 +52,7 @@ export function NoteCard({
   flatOnMobile = false,
   onDeleted,
   onRemovedFromPortfolio,
+  showComments = false,
 }: NoteCardProps) {
   const router = useRouter()
   const { getCachedPortfolioData, setCachedPortfolioData, getCachedPortfolio, setCachedPortfolio } = useDataCache()
@@ -61,9 +67,14 @@ export function NoteCard({
   const [isTextExpanded, setIsTextExpanded] = useState(false)
   const [isTextTruncated, setIsTextTruncated] = useState(false)
   const [wasTruncated, setWasTruncated] = useState(false)
+  const [comments, setComments] = useState<Note[]>([])
+  const [commentCount, setCommentCount] = useState<number | null>(null)
+  const [loadingComments, setLoadingComments] = useState(false)
+  const [commentsLoaded, setCommentsLoaded] = useState(false)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const carouselRef = useRef<HTMLDivElement | null>(null)
   const textRef = useRef<HTMLDivElement | null>(null)
+  const cardRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const fetchPortfolios = async (retryCount = 0) => {
@@ -272,6 +283,57 @@ export function NoteCard({
 
     fetchPortfolios()
   }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id])
+
+  // Lazy load comments when showComments=true and card is in viewport
+  useEffect(() => {
+    if (!showComments || commentsLoaded || isViewMode) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !commentsLoaded) {
+          setCommentsLoaded(true)
+          loadComments()
+        }
+      },
+      {
+        rootMargin: '200px', // Start loading 200px before card is visible
+      }
+    )
+
+    if (cardRef.current) {
+      observer.observe(cardRef.current)
+    }
+
+    return () => {
+      if (cardRef.current) {
+        observer.unobserve(cardRef.current)
+      }
+    }
+  }, [showComments, commentsLoaded, isViewMode, note.id])
+
+  const loadComments = async () => {
+    setLoadingComments(true)
+    try {
+      // Fetch comment count first
+      const countResponse = await fetch(`/api/notes/${note.id}/annotations?offset=0&limit=1`)
+      if (countResponse.ok) {
+        const countData = await countResponse.json()
+        if (countData.success) {
+          setCommentCount(countData.totalCount || 0)
+          
+          // Fetch first comment if available
+          if (countData.annotations && countData.annotations.length > 0) {
+            const firstAnnotation = countData.annotations[0]
+            setComments([firstAnnotation.annotation])
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading comments:', error)
+    } finally {
+      setLoadingComments(false)
+    }
+  }
 
   const renderReference = (ref: NoteReference, index: number) => {
     if (ref.type === 'image') {
@@ -1125,6 +1187,39 @@ export function NoteCard({
 
         {/* Project banner at the end of the main card (not in collage view) */}
         {!isCollageView && projectBanner}
+
+        {/* Comments preview (feed view only) */}
+        {showComments && !isViewMode && !isCollageView && (
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            {loadingComments ? (
+              <div className="flex items-center gap-2 text-gray-500">
+                <UIText className="text-sm">Loading comments...</UIText>
+              </div>
+            ) : commentCount !== null && commentCount > 0 ? (
+              <div className="space-y-2">
+                {comments.length > 0 && (
+                  <div className="flex gap-2 items-start">
+                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-200" />
+                    <div className="flex-1 min-w-0">
+                      <Content as="p" className="text-sm line-clamp-2">
+                        {comments[0].text}
+                      </Content>
+                    </div>
+                  </div>
+                )}
+                {commentCount > 1 && (
+                  <Link
+                    href={`/notes/${note.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    <UIText>View {commentCount} {commentCount === 1 ? 'comment' : 'comments'}</UIText>
+                  </Link>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
     </>
   )
@@ -1169,7 +1264,7 @@ export function NoteCard({
 
   // Default behavior: card on all viewports
   return (
-    <div className="w-full md:max-w-xl md:mx-auto">
+    <div ref={cardRef} className="w-full md:max-w-xl md:mx-auto">
       <Card
         variant="subtle"
         className="relative overflow-hidden"

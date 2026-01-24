@@ -36,17 +36,15 @@ export default async function NotePage({ params }: NotePageProps) {
   const portfolioIds = note.assigned_portfolios || []
   
   // Fetch data in parallel for better performance
+  // Note: Annotations are loaded dynamically client-side for better performance
   const [
     referencedNoteResult,
-    annotationsResult,
     portfoliosData
   ] = await Promise.all([
     // Check if referenced note is deleted (only if this is an annotation)
     note.mentioned_note_id 
       ? getNoteById(note.mentioned_note_id, true)
       : Promise.resolve({ success: false, notes: [] }),
-    // Get annotations
-    getAnnotationsByNote(note.id),
     // Fetch portfolios
     portfolioIds.length > 0
       ? supabase.from('portfolios').select('*').in('id', portfolioIds)
@@ -59,8 +57,8 @@ export default async function NotePage({ params }: NotePageProps) {
     referencedNoteDeleted = referencedNoteResult.notes[0].deleted_at !== null
   }
 
-  // Process annotations
-  const annotations = annotationsResult.success ? annotationsResult.notes || [] : []
+  // Annotations will be loaded dynamically client-side
+  const annotations: Note[] = []
 
   // Process portfolios
   const portfolios = portfoliosData.data

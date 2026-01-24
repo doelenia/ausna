@@ -213,6 +213,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
                         note={note}
                         currentUserId={currentUserId}
                         flatOnMobile={true}
+                        showComments={true}
                       />
                     </LazyLoad>
                   </div>

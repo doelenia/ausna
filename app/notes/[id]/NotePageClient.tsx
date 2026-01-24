@@ -9,7 +9,7 @@ import { useDataCache } from '@/lib/cache/useDataCache'
 interface NotePageClientProps {
   noteId: string
   serverNote: Note
-  annotations: Note[]
+  annotations: Note[] // Deprecated: annotations loaded dynamically client-side
   portfolios: Portfolio[]
   humanPortfolios: Portfolio[]
   currentUserId?: string

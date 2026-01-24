@@ -51,6 +51,7 @@ export async function GET(
       .from('notes')
       .select('*')
       .is('deleted_at', null)
+      .is('mentioned_note_id', null) // Exclude annotations
       .order('created_at', { ascending: false })
       .limit(queryLimit)
     
@@ -76,6 +77,11 @@ export async function GET(
     // For human portfolios: filter by owner_account_id (notes created by this user)
     // For other portfolios: filter by assigned_portfolios (notes assigned to this portfolio)
     const filteredNotes = (allNotes || []).filter((note: any) => {
+      // Exclude annotations (should already be filtered in query, but double-check)
+      if (note.mentioned_note_id) {
+        return false
+      }
+      
       // First apply collection filter if provided
       if (noteIdsInCollection && !noteIdsInCollection.includes(note.id)) {
         return false
