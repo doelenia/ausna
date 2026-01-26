@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { CreateHumanPortfolioInput } from '@/app/admin/actions'
 import { PublicUploadFormSubmission } from '@/types/public-upload-form'
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
 export async function POST(request: NextRequest) {
   try {
@@ -41,26 +43,71 @@ export async function POST(request: NextRequest) {
       })),
     }
 
-    const supabase = await createClient()
+    // Use createServerClient but with empty cookies to ensure anonymous access
+    // createSupabaseClient doesn't properly set the role context for RLS
+    // We need to use createServerClient which properly handles the anon key
+    const cookieStore = await cookies()
+    
+    // Use publishable/anon key
+    const apiKey =
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
-    const { data, error } = await supabase
+    // Create a server client that doesn't use any cookies
+    // This ensures it works as an anonymous client
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      apiKey,
+      {
+        cookies: {
+          getAll() {
+            // Return empty array to ensure no session cookies are used
+            // This forces anonymous access with the anon role
+            return []
+          },
+          setAll() {
+            // Don't set any cookies for anonymous requests
+            // This prevents any session from being created
+          },
+        },
+      }
+    )
+
+    // Use a database function to insert, which bypasses RLS
+    // This is safe because we validate input in the API route
+    // The function has SECURITY DEFINER and is granted to anon role
+    const { data: insertedId, error: functionError } = await supabase.rpc('insert_public_upload_form', {
+      p_submission_data: enforcedData,
+      p_status: 'pending',
+    })
+
+    // If function call succeeds, return the ID directly
+    if (!functionError && insertedId) {
+      return NextResponse.json<{ id: string }>({ id: insertedId })
+    }
+
+    // If function call fails, try direct insert as fallback
+
+    // Try direct insert
+    const { data: insertedData, error: insertError } = await supabase
       .from('public_upload_forms')
       .insert({
         submission_data: enforcedData,
         status: 'pending',
       })
-      .select()
+      .select('id')
       .single()
 
-    if (error) {
-      console.error('Error creating submission:', error)
+    if (insertError) {
+      console.error('Error creating submission:', insertError)
       return NextResponse.json(
         { error: 'Failed to submit form' },
         { status: 500 }
       )
     }
 
-    return NextResponse.json<{ id: string }>({ id: data.id })
+    return NextResponse.json<{ id: string }>({ id: insertedData.id })
   } catch (error: any) {
     console.error('Error in POST submission:', error)
     return NextResponse.json(
