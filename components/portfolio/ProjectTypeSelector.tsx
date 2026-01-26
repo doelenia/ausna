@@ -182,15 +182,28 @@ export function ProjectTypeSelector({
     // If "Others" is selected, automatically use custom input (no predefined types)
     setUseCustom(category === 'Others')
     setError('')
+    // Clear any previous selection when category changes
+    // Don't call onSelect here - wait for specific type selection
   }
 
   const handleSpecificSelect = (type: string) => {
+    if (!type) return // Don't process empty selection
+    
     setSelectedSpecific(type)
     setCustomType('')
     setUseCustom(false)
     setError('')
-    if (selectedGeneral) {
-      onSelect(selectedGeneral, type)
+    // Use selectedGeneral from state (which should be current) or fallback to prop
+    // This ensures we always have the current general category even if state hasn't updated yet
+    const currentGeneral = selectedGeneral || generalCategory
+    if (currentGeneral && type) {
+      onSelect(currentGeneral, type)
+    } else {
+      console.warn('ProjectTypeSelector: Cannot select specific type without general category', {
+        selectedGeneral,
+        generalCategory,
+        type,
+      })
     }
   }
 
@@ -204,8 +217,10 @@ export function ProjectTypeSelector({
         setError('Must be 2 words or less')
         return
       }
-      if (selectedGeneral) {
-        onSelect(selectedGeneral, value.trim())
+      // Use selectedGeneral from state (which should be current) or fallback to prop
+      const currentGeneral = selectedGeneral || generalCategory
+      if (currentGeneral) {
+        onSelect(currentGeneral, value.trim())
       }
     }
   }
@@ -224,14 +239,13 @@ export function ProjectTypeSelector({
       {/* General Category Selection */}
       <div>
         <UIText as="label" className="block mb-2">
-          General Category <span className="text-red-500">*</span>
+          General Category
         </UIText>
         <select
           value={selectedGeneral}
           onChange={(e) => handleGeneralSelect(e.target.value)}
           disabled={disabled}
           className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          required
         >
           <option value="">-- Select a category --</option>
           {GENERAL_CATEGORIES.map((category) => (
@@ -246,7 +260,7 @@ export function ProjectTypeSelector({
       {selectedGeneral && (
         <div>
           <UIText as="label" className="block mb-2">
-            Specific Type <span className="text-red-500">*</span>
+            Specific Type
           </UIText>
           
           {!useCustom && availableTypes.length > 0 && (
@@ -256,7 +270,6 @@ export function ProjectTypeSelector({
                 onChange={(e) => handleSpecificSelect(e.target.value)}
                 disabled={disabled}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
-                required
               >
                 <option value="">-- Select a type --</option>
                 {availableTypes.map((type) => (
@@ -286,7 +299,6 @@ export function ProjectTypeSelector({
                 placeholder="Enter custom type (max 2 words)"
                 maxLength={50}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-2"
-                required
               />
               {error && (
                 <UIText className="text-red-600 text-sm">{error}</UIText>

@@ -345,9 +345,14 @@ export async function updatePortfolio(
     }
 
     // Update project type if provided (for projects and communities)
-    if ((portfolio.type === 'projects' || portfolio.type === 'community') && projectTypeGeneral && projectTypeSpecific) {
-      updatedMetadata.project_type_general = projectTypeGeneral
-      updatedMetadata.project_type_specific = projectTypeSpecific
+    // Allow clearing project types by providing empty values
+    if (portfolio.type === 'projects' || portfolio.type === 'community') {
+      if (projectTypeGeneral !== null && projectTypeSpecific !== null) {
+        // If both are provided (even if empty), update them
+        updatedMetadata.project_type_general = projectTypeGeneral || undefined
+        updatedMetadata.project_type_specific = projectTypeSpecific || undefined
+      }
+      // If not provided in formData, leave existing values unchanged
     }
 
     // Check if description changed (compare trimmed versions)
@@ -379,33 +384,47 @@ export async function updatePortfolio(
       }
     }
 
-    // Trigger background interest processing if description changed (fire-and-forget)
+    // Trigger background property processing if description changed (fire-and-forget)
     if (descriptionChanged) {
       try {
         // Use absolute URL - in server actions, we need the full URL
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-        const isPersonalPortfolio =
-          portfolio.type === 'human' && portfolio.user_id === user.id
 
         // Use fetch without await - fire and forget
-        fetch(`${baseUrl}/api/process-portfolio-interests`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            portfolioId,
-            userId: user.id,
-            isPersonalPortfolio,
-            description: normalizedDescription,
-          }),
-        }).catch((error) => {
-          // Log error but don't fail portfolio update
-          console.error('Failed to trigger background interest processing:', error)
-        })
+        if (portfolio.type === 'human') {
+          fetch(`${baseUrl}/api/index-human-description`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId,
+              userId: user.id,
+              description: normalizedDescription,
+            }),
+          }).catch((error) => {
+            // Log error but don't fail portfolio update
+            console.error('Failed to trigger human description processing:', error)
+          })
+        } else if (portfolio.type === 'projects') {
+          fetch(`${baseUrl}/api/index-project-description`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId,
+              userId: user.id,
+              description: normalizedDescription,
+            }),
+          }).catch((error) => {
+            // Log error but don't fail portfolio update
+            console.error('Failed to trigger project description processing:', error)
+          })
+        }
       } catch (error) {
-        // Don't fail portfolio update if interest processing trigger fails
-        console.error('Error triggering background interest processing:', error)
+        // Don't fail portfolio update if property processing trigger fails
+        console.error('Error triggering background property processing:', error)
       }
     }
 

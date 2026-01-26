@@ -3,6 +3,17 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { createServiceClient } from '@/lib/supabase/service'
+import {
+  findUserByEmail,
+  findHumanPortfolioByEmail,
+  findOrCreateHumanPortfolioForEmail,
+  updateHumanPortfolioMetadataById,
+  findOrCreateUserByEmail,
+  createPlaceholderHumanPortfolio,
+  addProjectToOwnedListById,
+} from '@/lib/portfolio/admin-helpers'
+import { generateSlug } from '@/lib/portfolio/helpers'
+import { HumanPortfolioMetadata, ProjectPortfolioMetadata } from '@/types/portfolio'
 
 // Waitlist actions
 interface ApproveWaitlistResult {
@@ -46,6 +57,11 @@ interface GetUsersResult {
 }
 
 interface BlockUserResult {
+  success: boolean
+  error?: string
+}
+
+interface DeleteUserResult {
   success: boolean
   error?: string
 }
@@ -107,6 +123,45 @@ interface DeleteNoteResult {
 
 interface DeletePortfolioResult {
   success: boolean
+  error?: string
+}
+
+// Create human portfolio actions
+export interface CreateHumanPortfolioInput {
+  name: string
+  email: string
+  description?: string
+  joined_community?: string // community portfolio ID
+  is_pseudo?: boolean // defaults to true
+  properties?: {
+    current_location?: string
+    availability?: string
+    social_preferences?: string
+    preferred_contact_method?: string
+  }
+  projects: Array<{
+    name: string
+    description?: string
+    project_type_general: string
+    project_type_specific: string
+    is_pseudo?: boolean // defaults to true
+    members: Array<{
+      name: string
+      email?: string
+      role?: string // max 2 words
+      is_pseudo?: boolean // defaults to true
+    }>
+    properties?: {
+      goals?: string
+      timelines?: string
+      asks?: Array<{ title: string; description: string }>
+    }
+  }>
+}
+
+interface CreateHumanPortfolioResult {
+  success: boolean
+  portfolioId?: string
   error?: string
 }
 
@@ -329,6 +384,246 @@ export async function getUsers(): Promise<GetUsersResult> {
       users,
     }
   } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Delete a user and all their associated data
+ * This performs comprehensive cleanup:
+ * - Deletes owned projects (and removes them from member portfolios)
+ * - Removes user from joined communities
+ * - Deletes owned notes (cascade)
+ * - Deletes user from auth
+ * - Other data (subscriptions, friends, messages, etc.) cascade delete
+ */
+export async function deleteUser(userId: string): Promise<DeleteUserResult> {
+  try {
+    await requireAdmin()
+    const serviceClient = createServiceClient()
+
+    // Prevent deleting yourself
+    const { user: adminUser } = await requireAdmin()
+    if (adminUser.id === userId) {
+      return {
+        success: false,
+        error: 'You cannot delete yourself',
+      }
+    }
+
+    // Step 1: Get all projects owned by the user
+    const { data: ownedProjects, error: projectsError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata')
+      .eq('type', 'projects')
+      .eq('user_id', userId)
+
+    if (projectsError) {
+      console.error('Error fetching owned projects:', projectsError)
+      return {
+        success: false,
+        error: `Failed to fetch owned projects: ${projectsError.message}`,
+      }
+    }
+
+    // Step 2: For each owned project, remove it from all member portfolios' owned_projects lists
+    if (ownedProjects && ownedProjects.length > 0) {
+      for (const project of ownedProjects) {
+        const projectMetadata = project.metadata as any
+        const members = projectMetadata?.members || []
+        const allMembers = Array.isArray(members) ? members : []
+
+        // Remove project from each member's owned_projects list
+        for (const memberId of allMembers) {
+          try {
+            const { removeProjectFromOwnedListById } = await import('@/lib/portfolio/admin-helpers')
+            // Pass user_id to find the portfolio
+            await removeProjectFromOwnedListById(memberId, project.id)
+          } catch (error) {
+            // Log but continue - member might not have a portfolio or project might already be removed
+            console.error(`Failed to remove project ${project.id} from member ${memberId}'s owned_projects:`, error)
+          }
+        }
+      }
+
+      // Delete all owned projects
+      const projectIds = ownedProjects.map((p) => p.id)
+      const { error: deleteProjectsError } = await serviceClient
+        .from('portfolios')
+        .delete()
+        .in('id', projectIds)
+
+      if (deleteProjectsError) {
+        console.error('Error deleting owned projects:', deleteProjectsError)
+        return {
+          success: false,
+          error: `Failed to delete owned projects: ${deleteProjectsError.message}`,
+        }
+      }
+    }
+
+    // Step 3: Remove user from projects where they are a member (but not owner)
+    const { data: allProjects, error: allProjectsError } = await serviceClient
+      .from('portfolios')
+      .select('id, user_id, metadata')
+      .eq('type', 'projects')
+
+    if (allProjectsError) {
+      console.error('Error fetching all projects:', allProjectsError)
+      // Continue anyway - this is not critical
+    } else if (allProjects) {
+      for (const project of allProjects) {
+        // Skip if user is owner (already handled above)
+        if (project.user_id === userId) {
+          continue
+        }
+
+        const metadata = project.metadata as any
+        const members = metadata?.members || []
+        const managers = metadata?.managers || []
+        const isMember = Array.isArray(members) && members.includes(userId)
+        const isManager = Array.isArray(managers) && managers.includes(userId)
+
+        if (isMember || isManager) {
+          // Remove user from members and/or managers
+          const updatedMembers = Array.isArray(members)
+            ? members.filter((id: string) => id !== userId)
+            : []
+          const updatedManagers = Array.isArray(managers)
+            ? managers.filter((id: string) => id !== userId)
+            : []
+
+          const { error: updateError } = await serviceClient
+            .from('portfolios')
+            .update({
+              metadata: {
+                ...metadata,
+                members: updatedMembers,
+                managers: updatedManagers,
+              },
+            })
+            .eq('id', project.id)
+
+          if (updateError) {
+            console.error(`Error removing user from project ${project.id}:`, updateError)
+            // Continue with other projects even if this fails
+          }
+        }
+      }
+    }
+
+    // Step 4: Get all communities where user is a member or manager
+    const { data: allCommunities, error: communitiesError } = await serviceClient
+      .from('portfolios')
+      .select('id, user_id, metadata')
+      .eq('type', 'community')
+
+    if (communitiesError) {
+      console.error('Error fetching communities:', communitiesError)
+      return {
+        success: false,
+        error: `Failed to fetch communities: ${communitiesError.message}`,
+      }
+    }
+
+    // Step 5: Remove user from communities where they are a member or manager
+    if (allCommunities) {
+      for (const community of allCommunities) {
+        const metadata = community.metadata as any
+        const members = metadata?.members || []
+        const managers = metadata?.managers || []
+        const isCreator = community.user_id === userId
+        const isMember = Array.isArray(members) && members.includes(userId)
+        const isManager = Array.isArray(managers) && managers.includes(userId)
+
+        if (isCreator) {
+          // If user is creator, we need to transfer ownership or delete the community
+          // For now, we'll transfer to the first manager, or delete if no managers
+          const remainingManagers = Array.isArray(managers)
+            ? managers.filter((id: string) => id !== userId)
+            : []
+
+          if (remainingManagers.length > 0) {
+            // Transfer ownership to first manager
+            const newCreatorId = remainingManagers[0]
+            const updatedManagers = remainingManagers.filter((id: string) => id !== newCreatorId)
+            const updatedMembers = Array.isArray(members)
+              ? [...members.filter((id: string) => id !== userId), newCreatorId]
+              : [newCreatorId]
+
+            const { error: transferError } = await serviceClient
+              .from('portfolios')
+              .update({
+                user_id: newCreatorId,
+                metadata: {
+                  ...metadata,
+                  members: updatedMembers,
+                  managers: updatedManagers,
+                },
+              })
+              .eq('id', community.id)
+
+            if (transferError) {
+              console.error(`Error transferring community ${community.id} ownership:`, transferError)
+              // Continue with other communities even if this fails
+            }
+          } else {
+            // No managers, delete the community
+            const { error: deleteCommunityError } = await serviceClient
+              .from('portfolios')
+              .delete()
+              .eq('id', community.id)
+
+            if (deleteCommunityError) {
+              console.error(`Error deleting community ${community.id}:`, deleteCommunityError)
+              // Continue with other communities even if this fails
+            }
+          }
+        } else if (isMember || isManager) {
+          // Remove user from members and/or managers
+          const updatedMembers = Array.isArray(members)
+            ? members.filter((id: string) => id !== userId)
+            : []
+          const updatedManagers = Array.isArray(managers)
+            ? managers.filter((id: string) => id !== userId)
+            : []
+
+          const { error: updateError } = await serviceClient
+            .from('portfolios')
+            .update({
+              metadata: {
+                ...metadata,
+                members: updatedMembers,
+                managers: updatedManagers,
+              },
+            })
+            .eq('id', community.id)
+
+          if (updateError) {
+            console.error(`Error removing user from community ${community.id}:`, updateError)
+            // Continue with other communities even if this fails
+          }
+        }
+      }
+    }
+
+    // Step 6: Delete user from auth (this will cascade delete notes, subscriptions, friends, messages, etc.)
+    const { error: deleteUserError } = await serviceClient.auth.admin.deleteUser(userId)
+
+    if (deleteUserError) {
+      console.error('Error deleting user from auth:', deleteUserError)
+      return {
+        success: false,
+        error: `Failed to delete user from auth: ${deleteUserError.message}`,
+      }
+    }
+
+    return { success: true }
+  } catch (error: any) {
+    console.error('Exception deleting user:', error)
     return {
       success: false,
       error: error.message || 'An unexpected error occurred',
@@ -589,6 +884,13 @@ export async function searchNotes(
  * Search portfolios (projects or communities) by creator name, name, or id
  * If no query, fetch all portfolios of the type paginated
  */
+/**
+ * Search portfolios in admin portal
+ * Note: This function includes pseudo portfolios (is_pseudo = true) because:
+ * - requireAdmin() ensures the user is authenticated as an admin
+ * - RLS policies allow admins to see all portfolios including pseudo ones
+ * - The is_current_user_admin() function in RLS checks the admin flag
+ */
 export async function searchPortfolios(
   type: 'projects' | 'community',
   query: string,
@@ -820,6 +1122,434 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
     return { success: true }
   } catch (error: any) {
     console.error('Exception deleting portfolio:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Create or update human portfolio with associated projects
+ * If human portfolio exists for email, updates it; otherwise creates new one
+ */
+export async function createHumanPortfolioWithProjects(
+  data: CreateHumanPortfolioInput
+): Promise<CreateHumanPortfolioResult> {
+  try {
+    await requireAdmin()
+    const supabase = await createClient()
+    const serviceClient = createServiceClient()
+
+    // Validate input
+    if (!data.name || !data.name.trim()) {
+      return {
+        success: false,
+        error: 'Name is required',
+      }
+    }
+
+    if (!data.email || !data.email.trim()) {
+      return {
+        success: false,
+        error: 'Email is required',
+      }
+    }
+
+    const email = data.email.toLowerCase().trim()
+    const name = data.name.trim()
+    const isPseudo = data.is_pseudo !== false // Default to true
+    const joinedCommunity = data.joined_community?.trim()
+
+    // Find or create human portfolio
+    let humanPortfolio: Awaited<ReturnType<typeof findOrCreateHumanPortfolioForEmail>>['portfolio']
+    let isNewPortfolio: boolean
+
+    try {
+      const result = await findOrCreateHumanPortfolioForEmail(email, name)
+      humanPortfolio = result.portfolio
+      isNewPortfolio = result.isNew
+    } catch (error: any) {
+      // Error should not occur now since we create users automatically
+      return {
+        success: false,
+        error: error.message || 'Failed to find or create human portfolio',
+      }
+    }
+
+    // Prepare metadata updates
+    const metadataUpdates: Partial<HumanPortfolioMetadata> = {}
+
+    // Update basic metadata (name and description)
+    metadataUpdates.basic = {
+      ...humanPortfolio.metadata.basic,
+      name,
+    }
+    if (data.description !== undefined) {
+      metadataUpdates.basic.description = data.description
+    }
+
+    // Update joined_community if provided
+    if (joinedCommunity) {
+      metadataUpdates.joined_community = joinedCommunity
+    }
+
+    // Update properties if provided
+    if (data.properties) {
+      metadataUpdates.properties = {
+        ...(humanPortfolio.metadata.properties || {}),
+        ...data.properties,
+      }
+    }
+
+    // Update is_pseudo if explicitly set
+    if (isPseudo !== undefined) {
+      // Update portfolio is_pseudo field directly
+      const { error: updatePseudoError } = await supabase
+        .from('portfolios')
+        .update({ is_pseudo: isPseudo })
+        .eq('id', humanPortfolio.id)
+
+      if (updatePseudoError) {
+        console.error('Error updating is_pseudo:', updatePseudoError)
+      }
+    }
+
+    // Update metadata if there are changes
+    const descriptionChanged = data.description !== undefined
+    if (Object.keys(metadataUpdates).length > 0) {
+      await updateHumanPortfolioMetadataById(humanPortfolio.id, metadataUpdates)
+      // Refresh portfolio data
+      const { data: updated } = await supabase
+        .from('portfolios')
+        .select('*')
+        .eq('id', humanPortfolio.id)
+        .single()
+      if (updated) {
+        humanPortfolio = updated as typeof humanPortfolio
+      }
+    }
+
+    // Trigger background human description processing if description was provided (fire-and-forget)
+    if (descriptionChanged && data.description) {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+        fetch(`${baseUrl}/api/index-human-description`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            portfolioId: humanPortfolio.id,
+            userId: humanPortfolio.user_id,
+            description: data.description,
+          }),
+        }).catch((error) => {
+          console.error('Failed to trigger human description processing:', error)
+        })
+      } catch (error) {
+        console.error('Error triggering human description processing:', error)
+      }
+    }
+
+    // Get existing owned_projects to preserve them
+    const existingMetadata = humanPortfolio.metadata as HumanPortfolioMetadata
+    const existingOwnedProjects = existingMetadata.owned_projects || []
+    const newProjectIds: string[] = []
+
+    // Process each project
+    for (const projectData of data.projects) {
+      // Validate project data
+      if (!projectData.name || !projectData.name.trim()) {
+        continue // Skip invalid projects
+      }
+
+      // Project types are optional - allow projects without types
+
+      // Validate member roles (max 2 words)
+      const invalidRole = projectData.members.find((m) => {
+        if (!m.role) return false
+        const words = m.role.trim().split(/\s+/)
+        return words.length > 2
+      })
+
+      if (invalidRole) {
+        continue // Skip project with invalid role
+      }
+
+      // Generate slug for project
+      const baseSlug = generateSlug(projectData.name)
+      let slug = baseSlug
+      let slugCounter = 1
+
+      // Ensure slug is unique for projects type
+      while (true) {
+        const { data: existing } = await supabase
+          .from('portfolios')
+          .select('id')
+          .eq('type', 'projects')
+          .eq('slug', slug)
+          .maybeSingle()
+
+        if (!existing) {
+          break
+        }
+
+        slug = `${baseSlug}-${slugCounter}`
+        slugCounter++
+      }
+
+      // Process members - resolve user IDs
+      const memberUserIds: string[] = []
+      const memberRoles: { [userId: string]: string } = {}
+
+      // Add the human portfolio owner as creator/manager
+      memberUserIds.push(humanPortfolio.user_id)
+      memberRoles[humanPortfolio.user_id] = 'Creator'
+
+      // Process each member
+      for (const member of projectData.members) {
+        if (!member.name || !member.name.trim()) {
+          continue // Skip invalid members
+        }
+
+        if (member.email) {
+          // Try to find user by email
+          let memberUserId = await findUserByEmail(member.email.toLowerCase().trim())
+
+          if (memberUserId) {
+            // User exists - add to members
+            if (!memberUserIds.includes(memberUserId)) {
+              memberUserIds.push(memberUserId)
+            }
+            // Set role if provided
+            if (member.role) {
+              memberRoles[memberUserId] = member.role.trim()
+            }
+          } else {
+            // User doesn't exist - create user account and placeholder human portfolio
+            try {
+              // First check if placeholder portfolio exists (by email in metadata)
+              const placeholderPortfolio = await findHumanPortfolioByEmail(member.email.toLowerCase().trim())
+              
+              if (placeholderPortfolio) {
+                // Placeholder exists - use its user_id
+                memberUserId = placeholderPortfolio.user_id
+                if (!memberUserIds.includes(memberUserId)) {
+                  memberUserIds.push(memberUserId)
+                }
+                if (member.role) {
+                  memberRoles[memberUserId] = member.role.trim()
+                }
+              } else {
+                // Create user account and placeholder human portfolio
+                // Create user account
+                memberUserId = await findOrCreateUserByEmail(member.email.toLowerCase().trim(), member.name.trim())
+                
+                // Get member's pseudo status (defaults to true)
+                const memberIsPseudo = member.is_pseudo !== false
+                
+                // Create placeholder human portfolio with specified pseudo status
+                await createPlaceholderHumanPortfolio(
+                  member.email.toLowerCase().trim(),
+                  member.name.trim(),
+                  memberUserId,
+                  memberIsPseudo
+                )
+                
+                // Add to members
+                if (!memberUserIds.includes(memberUserId)) {
+                  memberUserIds.push(memberUserId)
+                }
+                if (member.role) {
+                  memberRoles[memberUserId] = member.role.trim()
+                }
+              }
+            } catch (error: any) {
+              console.error(`Error creating placeholder for ${member.email}:`, error)
+              // Continue with other members even if one fails
+            }
+          }
+        } else {
+          // No email - store as information holder in metadata
+          // We'll store this in a separate field in project metadata
+          // For now, skip members without emails (they can't be added to members array)
+          console.warn(`Skipping member ${member.name} - no email provided`)
+        }
+      }
+
+      // Create project portfolio
+      const projectMetadata: ProjectPortfolioMetadata = {
+        basic: {
+          name: projectData.name.trim(),
+          description: projectData.description || '',
+          avatar: '',
+        },
+        pinned: [],
+        settings: {},
+        members: memberUserIds,
+        managers: [humanPortfolio.user_id], // Creator is manager
+        ...(projectData.project_type_general && projectData.project_type_specific ? {
+          project_type_general: projectData.project_type_general,
+          project_type_specific: projectData.project_type_specific,
+        } : {}),
+        memberRoles,
+      }
+
+      // Add properties if provided
+      if (projectData.properties) {
+        projectMetadata.properties = {
+          goals: projectData.properties.goals,
+          timelines: projectData.properties.timelines,
+          asks: projectData.properties.asks && projectData.properties.asks.length > 0
+            ? projectData.properties.asks
+            : undefined,
+        }
+      }
+
+      const projectIsPseudo = projectData.is_pseudo !== false // Default to true
+
+      const { data: projectPortfolio, error: projectError } = await supabase
+        .from('portfolios')
+        .insert({
+          type: 'projects',
+          slug,
+          user_id: humanPortfolio.user_id,
+          is_pseudo: projectIsPseudo,
+          metadata: projectMetadata,
+        })
+        .select()
+        .single()
+
+      if (projectError || !projectPortfolio) {
+        console.error('Error creating project:', projectError)
+        continue // Skip this project and continue with next
+      }
+
+      // Trigger background property processing for project (fire-and-forget)
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+        
+        // Process project description if it exists
+        if (projectData.description) {
+          fetch(`${baseUrl}/api/index-project-description`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId: projectPortfolio.id,
+              userId: humanPortfolio.user_id,
+              description: projectData.description,
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger project description processing:', error)
+          })
+        }
+
+        // Process project properties if they exist
+        if (projectData.properties) {
+          // Process goals
+          if (projectData.properties.goals) {
+            fetch(`${baseUrl}/api/index-project-property`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                portfolioId: projectPortfolio.id,
+                userId: humanPortfolio.user_id,
+                propertyName: 'goals',
+                propertyValue: projectData.properties.goals,
+              }),
+            }).catch((error) => {
+              console.error('Failed to trigger goals processing:', error)
+            })
+          }
+
+          // Process timelines
+          if (projectData.properties.timelines) {
+            fetch(`${baseUrl}/api/index-project-property`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                portfolioId: projectPortfolio.id,
+                userId: humanPortfolio.user_id,
+                propertyName: 'timelines',
+                propertyValue: projectData.properties.timelines,
+              }),
+            }).catch((error) => {
+              console.error('Failed to trigger timelines processing:', error)
+            })
+          }
+
+          // Process asks
+          if (projectData.properties.asks && projectData.properties.asks.length > 0) {
+            const asksText = projectData.properties.asks
+              .map((ask) => `${ask.title}: ${ask.description}`)
+              .join('\n\n')
+            fetch(`${baseUrl}/api/index-project-property`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                portfolioId: projectPortfolio.id,
+                userId: humanPortfolio.user_id,
+                propertyName: 'asks',
+                propertyValue: asksText,
+              }),
+            }).catch((error) => {
+              console.error('Failed to trigger asks processing:', error)
+            })
+          }
+        }
+      } catch (error) {
+        console.error('Error triggering project property processing:', error)
+      }
+
+      // Add project to main human portfolio's owned_projects list (append, preserve existing)
+      newProjectIds.push(projectPortfolio.id)
+
+      // Add project to each member's human portfolio's owned_projects list
+      for (const memberUserId of memberUserIds) {
+        try {
+          // Get member's human portfolio
+          const { data: memberPortfolio } = await supabase
+            .from('portfolios')
+            .select('id')
+            .eq('type', 'human')
+            .eq('user_id', memberUserId)
+            .maybeSingle()
+
+          if (memberPortfolio) {
+            // Add project to member's owned_projects
+            await addProjectToOwnedListById(memberPortfolio.id, projectPortfolio.id)
+          }
+        } catch (error: any) {
+          // Log error but continue with other members
+          console.error(`Error adding project to member ${memberUserId}'s owned_projects:`, error)
+        }
+      }
+    }
+
+    // Update owned_projects array - append new projects, preserve existing
+    if (newProjectIds.length > 0) {
+      const updatedOwnedProjects = [...newProjectIds, ...existingOwnedProjects.filter((id) => !newProjectIds.includes(id))]
+      
+      await updateHumanPortfolioMetadataById(humanPortfolio.id, {
+        owned_projects: updatedOwnedProjects,
+      })
+    }
+
+    return {
+      success: true,
+      portfolioId: humanPortfolio.id,
+    }
+  } catch (error: any) {
+    console.error('Exception creating human portfolio with projects:', error)
     return {
       success: false,
       error: error.message || 'An unexpected error occurred',

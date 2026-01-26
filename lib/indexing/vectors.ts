@@ -1,6 +1,6 @@
 import { openai } from '@/lib/openai/client'
 import { createServiceClient } from '@/lib/supabase/service'
-import { Topic, Intention } from '@/types/indexing'
+import { Topic } from '@/types/indexing'
 
 /**
  * Generate embedding vector for text using OpenAI
@@ -59,45 +59,6 @@ export async function findSimilarTopic(
   return null
 }
 
-/**
- * Find similar intention by description or name (70% similarity threshold)
- */
-export async function findSimilarIntention(
-  name: string,
-  description: string,
-  descriptionVector: number[]
-): Promise<Intention | null> {
-  const supabase = createServiceClient()
-
-  // Search by vector similarity (cosine distance)
-  // 70% similarity = 0.3 cosine distance
-  const { data: similarIntentions, error } = await supabase.rpc('match_intentions', {
-    query_embedding: descriptionVector,
-    match_threshold: 0.3, // 70% similarity (1 - 0.3 = 0.7)
-    match_count: 5,
-  })
-
-  if (error) {
-    // If RPC doesn't exist, fall back to name matching
-    console.warn('RPC match_intentions not available, falling back to name matching:', error)
-    const { data: nameMatch } = await supabase
-      .from('intentions')
-      .select('*')
-      .ilike('name', `%${name}%`)
-      .limit(1)
-      .single()
-
-    return nameMatch as Intention | null
-  }
-
-  // Check if any similar intention matches
-  if (similarIntentions && similarIntentions.length > 0) {
-    // Return the most similar one
-    return similarIntentions[0] as Intention
-  }
-
-  return null
-}
 
 /**
  * Store note vectors
@@ -127,11 +88,22 @@ export async function storeNoteVectors(
 }
 
 /**
- * Store atomic knowledge
+ * Store atomic knowledge with optional metadata
  */
 export async function storeAtomicKnowledge(
-  noteId: string,
-  knowledgeTexts: string[]
+  knowledgeTexts: string[],
+  options: {
+    noteId?: string | null
+    isAsks?: boolean[]
+    assignedHuman?: string[]
+    assignedProjects?: string[]
+    topics?: string[] // Single array of topic IDs (same for all knowledge items from this source)
+    sourceInfo?: {
+      source_type: 'note' | 'human_description' | 'project_description' | 'project_property'
+      source_id: string
+      property_name?: 'goals' | 'timelines' | 'asks'
+    } | null
+  } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -144,11 +116,19 @@ export async function storeAtomicKnowledge(
     // Convert vectors to text format for RPC function
     const vectorTexts = knowledgeVectors.map((vector) => `[${vector.join(',')}]`)
     
+    // Convert source_info to JSONB string if provided
+    const sourceInfoJson = options.sourceInfo ? JSON.stringify(options.sourceInfo) : null
+    
     // Use RPC function to insert with vectors as text arrays
     const { error } = await supabase.rpc('store_atomic_knowledge', {
-      p_note_id: noteId,
+      p_note_id: options.noteId || null,
       p_knowledge_texts: knowledgeTexts,
       p_knowledge_vectors: vectorTexts,
+      p_is_asks: options.isAsks || null,
+      p_assigned_human: options.assignedHuman || null,
+      p_assigned_projects: options.assignedProjects || null,
+      p_topics: options.topics || null,
+      p_source_info: sourceInfoJson,
     })
 
     if (error) {
@@ -159,11 +139,12 @@ export async function storeAtomicKnowledge(
 
 /**
  * Create or update topic, handling similarity matching
+ * noteId is optional (for property sources that don't have note_id)
  */
 export async function createOrUpdateTopic(
   name: string,
   description: string,
-  noteId: string
+  noteId?: string | null
 ): Promise<string> {
   const supabase = createServiceClient()
 
@@ -175,7 +156,7 @@ export async function createOrUpdateTopic(
     p_name: name,
     p_description: description,
     p_description_vector: descriptionVector,
-    p_note_id: noteId,
+    p_note_id: noteId || null,
   })
 
   if (error) {
@@ -186,30 +167,64 @@ export async function createOrUpdateTopic(
 }
 
 /**
- * Create or update intention, handling similarity matching
+ * Extract additional topics from asks
+ * Given a list of asks with their assigned topics, ask AI to suggest additional topics
+ * that would help users find resources to fulfill these asks
  */
-export async function createOrUpdateIntention(
-  name: string,
-  description: string,
-  noteId: string
-): Promise<string> {
-  const supabase = createServiceClient()
+export async function extractAdditionalTopicsFromAsks(
+  asksWithTopics: Array<{ ask: string; topics: Array<{ name: string; description: string }> }>
+): Promise<Array<{ name: string; description: string }>> {
+  try {
+    // Build the prompt with asks and their topics
+    const asksText = asksWithTopics
+      .map((item, idx) => {
+        const topicsText = item.topics.map((t) => `- ${t.name}: ${t.description}`).join('\n')
+        return `Ask ${idx + 1}: ${item.ask}\nAssociated Topics:\n${topicsText}`
+      })
+      .join('\n\n')
 
-  // Generate embedding for description
-  const descriptionVector = await generateEmbedding(description)
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-5-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert at identifying topics that would help users find resources to fulfill asks.
 
-  // Use RPC function to create or update intention
-  const { data, error } = await supabase.rpc('create_or_update_intention', {
-    p_name: name,
-    p_description: description,
-    p_description_vector: descriptionVector,
-    p_note_id: noteId,
-  })
+Given a list of asks and their associated topics, identify additional topics that would help users explore resources to fulfill these asks. These additional topics should represent areas of knowledge, skills, tools, services, or communities that could be relevant.
 
-  if (error) {
-    throw new Error(`Failed to create or update intention: ${error.message}`)
+Return a JSON object with a field "additionalTopics" containing an array of topics. Each topic should have:
+- name: string (under 3 words, using commonly used terminology)
+- description: string (one sentence describing the topic)
+
+IMPORTANT: Use commonly used terminology and standard definitions. Prefer widely recognized terms over niche or custom terminology.`,
+        },
+        {
+          role: 'user',
+          content: `Given these asks and their topics, what additional topics would help users find resources to fulfill these asks?\n\n${asksText}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_completion_tokens: 1000,
+    })
+
+    const content = completion.choices[0]?.message?.content
+    if (!content) {
+      throw new Error('No response from AI')
+    }
+
+    const result = JSON.parse(content) as { additionalTopics?: Array<{ name: string; description: string }> }
+
+    // Validate and clean results
+    if (Array.isArray(result.additionalTopics)) {
+      return result.additionalTopics.filter(
+        (t) => t.name && t.description && t.name.trim().length > 0 && t.description.trim().length > 0
+      )
+    }
+
+    return []
+  } catch (error) {
+    console.error('Failed to extract additional topics from asks:', error)
+    throw error
   }
-
-  return data as string
 }
 

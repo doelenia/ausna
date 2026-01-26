@@ -33,10 +33,21 @@ export interface PortfolioMetadata {
 }
 
 /**
+ * Human portfolio properties template
+ */
+export interface HumanPortfolioProperties {
+  current_location?: string
+  availability?: string
+  social_preferences?: string
+  preferred_contact_method?: string
+}
+
+/**
  * Human portfolio metadata
  */
 export interface HumanPortfolioMetadata extends PortfolioMetadata {
   username?: string // Keep for backward compatibility
+  email?: string // Email address for the human portfolio
   skills?: string[]
   experience?: Array<{
     title: string
@@ -52,7 +63,26 @@ export interface HumanPortfolioMetadata extends PortfolioMetadata {
   location?: string
   availability?: string
   owned_projects?: string[] // Array of project portfolio IDs, ordered by most recent activity (most recent first)
+  joined_community?: string // Community portfolio ID that this human has joined
+  properties?: HumanPortfolioProperties
   [key: string]: any
+}
+
+/**
+ * Project portfolio ask item
+ */
+export interface ProjectPortfolioAsk {
+  title: string
+  description: string
+}
+
+/**
+ * Project portfolio properties template
+ */
+export interface ProjectPortfolioProperties {
+  goals?: string
+  timelines?: string
+  asks?: ProjectPortfolioAsk[]
 }
 
 /**
@@ -71,6 +101,7 @@ export interface ProjectPortfolioMetadata extends PortfolioMetadata {
   collaborators?: string[]
   start_date?: string
   end_date?: string
+  properties?: ProjectPortfolioProperties
   [key: string]: any
 }
 
@@ -102,6 +133,7 @@ export interface BasePortfolio {
   created_at: string
   updated_at: string
   metadata: Json
+  is_pseudo?: boolean // If true, portfolio is hidden from customer search but visible to admins (defaults to false in DB)
 }
 
 /**

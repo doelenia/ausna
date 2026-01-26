@@ -56,13 +56,7 @@ export async function createPortfolio(
       }
     }
 
-    // Validate type
-    if (!projectTypeGeneral || !projectTypeSpecific) {
-      return {
-        success: false,
-        error: `${type === 'projects' ? 'Project' : 'Community'} type is required`,
-      }
-    }
+    // Project types are optional - no validation needed
 
     // Validate creator role (max 2 words)
     if (creatorRole.trim()) {
@@ -117,8 +111,10 @@ export async function createPortfolio(
       settings: {},
       members: [user.id], // Creator is automatically a member
       managers: [user.id], // Creator is automatically a manager
-      project_type_general: projectTypeGeneral,
-      project_type_specific: projectTypeSpecific,
+      ...(projectTypeGeneral && projectTypeSpecific ? {
+        project_type_general: projectTypeGeneral,
+        project_type_specific: projectTypeSpecific,
+      } : {}),
       memberRoles: {
         [user.id]: creatorRole.trim() || 'Creator',
       },

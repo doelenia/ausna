@@ -39,6 +39,12 @@ function calculateSimilarity(query: string, text: string | null | undefined): nu
  * Query params:
  *   - q: search query (optional - if not provided, returns initial results)
  *   - limit: number of results (default: 50)
+ * 
+ * Pseudo Portfolio Behavior:
+ * - Portfolios with is_pseudo = true are automatically excluded from results for non-admin users
+ * - This filtering happens at the database level via RLS policies
+ * - Admin users will see all portfolios including pseudo ones
+ * - No explicit filtering is needed in this code as RLS handles it automatically
  */
 export async function GET(request: NextRequest) {
   try {
@@ -73,6 +79,7 @@ export async function GET(request: NextRequest) {
         }
         
         // Get human portfolios of friends
+        // Note: RLS automatically excludes pseudo portfolios for non-admin users
         let friendPortfolios: any[] = []
         if (friendIds.size > 0) {
           const { data } = await supabase
@@ -85,6 +92,7 @@ export async function GET(request: NextRequest) {
         }
         
         // Get projects/communities user is a member of
+        // Note: RLS automatically excludes pseudo portfolios for non-admin users
         const { data: allPortfolios } = await supabase
           .from('portfolios')
           .select('*')
@@ -103,6 +111,7 @@ export async function GET(request: NextRequest) {
         ]
       } else {
         // For visitors: show recent portfolios
+        // Note: RLS automatically excludes pseudo portfolios for non-admin users
         const { data: recentPortfolios } = await supabase
           .from('portfolios')
           .select('*')
@@ -117,6 +126,8 @@ export async function GET(request: NextRequest) {
       
       // Fetch all portfolios and filter in JavaScript
       // This is necessary because Supabase doesn't support ilike on JSONB paths directly
+      // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users
+      // Admin users will see all portfolios including pseudo ones
       const { data: allPortfolios, error } = await supabase
         .from('portfolios')
         .select('*')

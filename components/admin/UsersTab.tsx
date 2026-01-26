@@ -8,8 +8,10 @@ import {
   deleteWaitlist,
   blockUser,
   searchUsers,
+  deleteUser,
 } from '@/app/admin/actions'
 import Link from 'next/link'
+import { Button } from '@/components/ui'
 
 function IdCell({ id }: { id: string }) {
   const [copied, setCopied] = useState(false)
@@ -155,6 +157,38 @@ export function UsersTab() {
         setError(result.error || `Failed to ${block ? 'block' : 'unblock'} user`)
       }
     } catch (err: any) {
+      setError(err.message || 'An error occurred')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleDeleteUser = async (userId: string) => {
+    if (
+      !confirm(
+        'Are you sure you want to delete this user? This will permanently delete:\n' +
+        '- All owned projects (and remove them from member portfolios)\n' +
+        '- All owned notes\n' +
+        '- Remove user from joined communities\n' +
+        '- Delete user account\n' +
+        '\nThis action cannot be undone!'
+      )
+    ) {
+      return
+    }
+
+    setActionLoading(userId)
+    setError(null)
+    try {
+      const result = await deleteUser(userId)
+      if (result.success) {
+        await loadData()
+      } else {
+        console.error('Delete user failed:', result.error)
+        setError(result.error || 'Failed to delete user')
+      }
+    } catch (err: any) {
+      console.error('Delete user exception:', err)
       setError(err.message || 'An error occurred')
     } finally {
       setActionLoading(null)
@@ -347,6 +381,14 @@ export function UsersTab() {
                           : user.is_blocked
                           ? 'Unblock'
                           : 'Block'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user.id)}
+                        disabled={actionLoading === user.id}
+                        className="text-red-600 hover:text-red-800 disabled:opacity-50"
+                        title="Delete user permanently"
+                      >
+                        {actionLoading === user.id ? '...' : 'Delete'}
                       </button>
                     </td>
                   </tr>
