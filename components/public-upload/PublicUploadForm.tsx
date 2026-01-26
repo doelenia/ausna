@@ -815,24 +815,14 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
       <div className="w-full md:max-w-xl md:mx-auto space-y-4">
         {/* Activities header */}
         <div className="md:hidden px-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <Subtitle>Activities</Subtitle>
-            </div>
-            <Button type="button" variant="secondary" onClick={addProject}>
-              Add Activity
-            </Button>
+          <div>
+            <Subtitle>Activities</Subtitle>
           </div>
         </div>
         <div className="hidden md:block">
           <div className="bg-transparent rounded-xl p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <Subtitle>Activities</Subtitle>
-              </div>
-              <Button type="button" variant="secondary" onClick={addProject}>
-                Add Activity
-              </Button>
+            <div>
+              <Subtitle>Activities</Subtitle>
             </div>
           </div>
         </div>
@@ -1122,6 +1112,24 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
             </div>
           )
         })}
+
+        {/* Add Activity button - at the end of activities list */}
+        <div className="w-full md:max-w-xl md:mx-auto">
+          {/* Mobile: proper padding */}
+          <div className="md:hidden px-4">
+            <Button type="button" variant="secondary" onClick={addProject} fullWidth>
+              Add Activity
+            </Button>
+          </div>
+          {/* Desktop: transparent card with same padding */}
+          <div className="hidden md:block">
+            <div className="bg-transparent rounded-xl p-6">
+              <Button type="button" variant="secondary" onClick={addProject} fullWidth>
+                Add Activity
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Closing paragraph - transparent card for consistency */}

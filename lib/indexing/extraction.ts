@@ -7,11 +7,19 @@ import { ExtractionResult } from '@/types/indexing'
 export async function extractFromCompoundText(compoundText: string): Promise<ExtractionResult> {
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5-mini',
+      model: 'gpt-4o-mini-search-preview',
       messages: [
         {
           role: 'system',
-          content: `You are an expert at extracting structured information from text. 
+          content: `You are an expert at extracting structured information from text.
+
+WEB SEARCH INSTRUCTIONS:
+- Use web search when the content contains URLs, website references, or links
+- Use web search for topics that require current information (e.g., latest technologies, recent events, current standards)
+- Use web search to get full context about specific companies, products, tools, or services mentioned
+- Use web search to verify and enrich topic descriptions with accurate, current information
+- After using web search, extract atomic knowledge and topics based on both the original content AND the web search results
+
 Extract the following:
 1. A one-sentence summary (can include annotated note content for context)
 2. Atomic knowledge points (high-to-low level, each in one sentence, no compounded knowledge) - EXCLUDE content from [Annotated Note: ...] sections as it's already indexed
@@ -20,7 +28,7 @@ Extract the following:
 
 IMPORTANT: When extracting atomic knowledge, topics, and asks, ONLY extract from the current note's content (the note text, image descriptions, and URL references). DO NOT extract from any [Annotated Note: ...] sections, as that content has already been indexed separately. The annotated note is only provided for context when generating the summary.
 
-Return a JSON object with these fields:
+CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The JSON must have these exact fields:
 - summary: string (one sentence, can reference annotated note for context)
 - atomicKnowledge: string[] (array of atomic knowledge sentences, ONLY from current note, exclude annotated note)
 - topics: Array<{name: string, description: string}> (name under 3 words using commonly used terminology, description one sentence using standard definitions, ONLY from current note, exclude annotated note)
@@ -28,10 +36,9 @@ Return a JSON object with these fields:
         },
         {
           role: 'user',
-          content: `Extract information from this text. Remember to exclude [Annotated Note: ...] sections when extracting atomic knowledge, topics, and asks:\n\n${compoundText}`,
+          content: `Extract information from this text. Remember to exclude [Annotated Note: ...] sections when extracting atomic knowledge, topics, and asks. Respond with ONLY a valid JSON object:\n\n${compoundText}`,
         },
       ],
-      response_format: { type: 'json_object' },
       max_completion_tokens: 2000,
     })
 
@@ -40,7 +47,15 @@ Return a JSON object with these fields:
       throw new Error('No response from AI')
     }
 
-    const result = JSON.parse(content) as ExtractionResult
+    // Extract JSON from response (handle markdown code blocks if present)
+    let jsonText = content.trim()
+    // Remove markdown code blocks if present
+    const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/)
+    if (jsonMatch) {
+      jsonText = jsonMatch[1]
+    }
+    
+    const result = JSON.parse(jsonText) as ExtractionResult
 
     // Validate and clean results
     return {
@@ -119,11 +134,18 @@ export async function extractFromPropertyText(
     }
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-5-mini',
+      model: 'gpt-4o-mini-search-preview',
       messages: [
         {
           role: 'system',
-          content: `You are an expert at extracting structured information from text. 
+          content: `You are an expert at extracting structured information from text.
+
+WEB SEARCH INSTRUCTIONS:
+- Use web search when the content contains URLs, website references, or links
+- Use web search for topics that require current information (e.g., latest technologies, recent events, current standards)
+- Use web search to get full context about specific companies, products, tools, or services mentioned
+- Use web search to verify and enrich topic descriptions with accurate, current information
+- After using web search, extract atomic knowledge and topics based on both the original content AND the web search results
 
 CRITICAL EXTRACTION RULES:
 - ONLY extract information from the TARGET PROPERTY text (clearly marked below)
@@ -138,7 +160,7 @@ Extract the following from the TARGET PROPERTY ONLY:
 3. Topics (general and specific, each under 3 words, with one-sentence descriptions) - ONLY from target property. IMPORTANT: Use commonly used terminology and standard definitions. Prefer widely recognized terms over niche or custom terminology. For example, use "Graphic Design" instead of "Visual Communication Design", "Web Development" instead of "Frontend Engineering", "Machine Learning" instead of "Neural Network Training". Use terms that most people in the field would recognize and use.
 4. Asks (detect any clear intention to find, seek, need, or look for resources, people, help, services, tools, information, or opportunities. Include both explicit and implicit asks. Examples: "looking for graphic designer", "need help with X", "seeking collaborators", "want to find Y". Each ask should be a single sentence describing what is being sought) - ONLY from target property${propertyInstructions}
 
-Return a JSON object with these fields:
+CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The JSON must have these exact fields:
 - summary: string (one sentence, can reference context for understanding)
 - atomicKnowledge: string[] (array of atomic knowledge sentences, ONLY from target property)
 - topics: Array<{name: string, description: string}> (name under 3 words using commonly used terminology, description one sentence using standard definitions, ONLY from target property)
@@ -146,10 +168,9 @@ Return a JSON object with these fields:
         },
         {
           role: 'user',
-          content: `Extract information from the following ${propertyLabel}. Remember: ONLY extract from the ${propertyLabel} text below, NOT from the context.${contextString}\n\n[TARGET PROPERTY - ${propertyLabel}]:\n${propertyText}`,
+          content: `Extract information from the following ${propertyLabel}. Remember: ONLY extract from the ${propertyLabel} text below, NOT from the context. Respond with ONLY a valid JSON object.${contextString}\n\n[TARGET PROPERTY - ${propertyLabel}]:\n${propertyText}`,
         },
       ],
-      response_format: { type: 'json_object' },
       max_completion_tokens: 2000,
     })
 
@@ -158,7 +179,15 @@ Return a JSON object with these fields:
       throw new Error('No response from AI')
     }
 
-    const result = JSON.parse(content) as ExtractionResult
+    // Extract JSON from response (handle markdown code blocks if present)
+    let jsonText = content.trim()
+    // Remove markdown code blocks if present
+    const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/)
+    if (jsonMatch) {
+      jsonText = jsonMatch[1]
+    }
+    
+    const result = JSON.parse(jsonText) as ExtractionResult
 
     // Validate and clean results
     return {
