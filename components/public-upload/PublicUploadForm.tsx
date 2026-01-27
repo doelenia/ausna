@@ -77,6 +77,12 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
   }>>([])
   const [projectMembersLoading, setProjectMembersLoading] = useState(true)
   
+  // Legal agreement state
+  const [agreedToTerms, setAgreedToTerms] = useState(false)
+  const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
+  const [termsVersion, setTermsVersion] = useState<number | null>(null)
+  const [privacyVersion, setPrivacyVersion] = useState<number | null>(null)
+  
   // Project ID for this form
   const PROJECT_ID = 'a1b40e33-1d1a-4150-bedf-ef472de1e64b'
   
@@ -218,6 +224,36 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
     }
 
     fetchProjectMembers()
+  }, [])
+
+  // Load active legal documents
+  useEffect(() => {
+    const loadActiveDocuments = async () => {
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from('legal_documents')
+          .select('type, version')
+          .eq('is_active', true)
+
+        if (error || !data) {
+          console.error('Error loading legal documents:', error)
+          return
+        }
+
+        for (const doc of data as Array<{ type: 'terms' | 'privacy'; version: number }>) {
+          if (doc.type === 'terms') {
+            setTermsVersion(doc.version)
+          } else if (doc.type === 'privacy') {
+            setPrivacyVersion(doc.version)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load legal documents:', err)
+      }
+    }
+
+    loadActiveDocuments()
   }, [])
 
   // Scroll to top of form when page changes to activities
@@ -550,12 +586,21 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return 'Invalid email format'
     }
+    if (!description.trim()) {
+      return 'Description is required'
+    }
+    if (!agreedToTerms || !agreedToPrivacy) {
+      return 'You must agree to the Terms & Conditions and Privacy Policy to submit this form.'
+    }
 
     // Validate activities
     for (let i = 0; i < projects.length; i++) {
       const project = projects[i]
       if (!project.name.trim()) {
         return `Activity ${i + 1}: Name is required`
+      }
+      if (!project.description || !project.description.trim()) {
+        return `Activity ${i + 1}: Description is required`
       }
 
       // Validate member roles (max 2 words)
@@ -591,7 +636,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
       const submissionData: CreateHumanPortfolioInput = {
         name: name.trim(),
         email: email.trim(),
-        description: description.trim() || undefined,
+        description: description.trim(),
         joined_community: '9f4fc0af-8997-494e-945c-d2831eaf258a', // Default admin community
         is_pseudo: true, // Enforced
         properties: {
@@ -614,7 +659,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         },
         projects: projects.map((p) => ({
           name: p.name.trim(),
-          description: p.description?.trim() || undefined,
+          description: p.description!.trim(), // Validated to exist above
           project_type_general: p.project_type_general.trim(),
           project_type_specific: p.project_type_specific.trim(),
           is_pseudo: true, // Enforced
@@ -653,6 +698,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
       }
 
       setSubmissionId(result.id)
+      
       // Scroll to top to show success message
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: any) {
@@ -748,12 +794,14 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         <div>
           <label htmlFor="description" className="block mb-1">
             <MarkdownText>{descriptionConfig?.label || 'Description'}</MarkdownText>
+            <UIText> *</UIText>
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
+            required
             maxLength={1000}
             className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={descriptionConfig?.placeholder || 'Tell us about yourself...'}
@@ -1096,11 +1144,13 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                   <div>
                     <label className="block mb-1">
                       <MarkdownText>{projectDescConfig?.label || 'Description'}</MarkdownText>
+                      <UIText> *</UIText>
                     </label>
                     <textarea
                       value={project.description || ''}
                       onChange={(e) => updateProject(projectIndex, { description: e.target.value })}
                       rows={3}
+                      required
                       maxLength={1000}
                       className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder={projectDescConfig?.placeholder || 'Activity description'}
@@ -1353,12 +1403,122 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         </div>
       </div>
 
+      {/* Terms and Privacy Agreement */}
+      <div className="w-full md:max-w-xl md:mx-auto">
+        {/* Mobile: proper padding */}
+        <div className="md:hidden px-4 py-4">
+          <UIText as="p" className="mb-3">
+            Before submitting, please review and agree to the following:
+          </UIText>
+          <div className="space-y-3">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={agreedToTerms}
+                onChange={(event) => setAgreedToTerms(event.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                required
+              />
+              <UIText as="span" className="text-sm">
+                I have read and agree to the{' '}
+                <Link 
+                  href="/legal/terms" 
+                  className="text-blue-600 hover:text-blue-500 underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Terms &amp; Conditions
+                </Link>
+                .
+              </UIText>
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={agreedToPrivacy}
+                onChange={(event) => setAgreedToPrivacy(event.target.checked)}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                required
+              />
+              <UIText as="span" className="text-sm">
+                I have read and understand the{' '}
+                <Link 
+                  href="/legal/privacy" 
+                  className="text-blue-600 hover:text-blue-500 underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Privacy Policy
+                </Link>
+                .
+              </UIText>
+            </label>
+          </div>
+        </div>
+        {/* Desktop: transparent card with same padding */}
+        <div className="hidden md:block">
+          <div className="bg-transparent rounded-xl px-6 py-4">
+            <UIText as="p" className="mb-3">
+              Before submitting, please review and agree to the following:
+            </UIText>
+            <div className="space-y-3">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={agreedToTerms}
+                  onChange={(event) => setAgreedToTerms(event.target.checked)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  required
+                />
+                <UIText as="span" className="text-sm">
+                  I have read and agree to the{' '}
+                  <Link 
+                    href="/legal/terms" 
+                    className="text-blue-600 hover:text-blue-500 underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Terms &amp; Conditions
+                  </Link>
+                  .
+                </UIText>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={agreedToPrivacy}
+                  onChange={(event) => setAgreedToPrivacy(event.target.checked)}
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  required
+                />
+                <UIText as="span" className="text-sm">
+                  I have read and understand the{' '}
+                  <Link 
+                    href="/legal/privacy" 
+                    className="text-blue-600 hover:text-blue-500 underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Privacy Policy
+                  </Link>
+                  .
+                </UIText>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Submit button - with proper margins matching sections above */}
       <div className="w-full md:max-w-xl md:mx-auto">
         {/* Mobile: proper padding */}
         <div className="md:hidden px-4 pb-12">
           <div className="flex gap-4 justify-end">
-            <Button type="submit" variant="primary" disabled={loading}>
+            <Button 
+              type="submit" 
+              variant="primary" 
+              disabled={loading || !agreedToTerms || !agreedToPrivacy}
+            >
               {loading ? 'Submitting...' : 'Submit Form'}
             </Button>
           </div>

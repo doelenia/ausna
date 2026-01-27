@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { createHumanPortfolioWithProjects } from '@/app/admin/actions'
 import { PublicUploadFormSubmission } from '@/types/public-upload-form'
@@ -51,6 +52,67 @@ export async function POST(
         { error: result.error || 'Failed to process submission' },
         { status: 500 }
       )
+    }
+
+    // Record legal agreements after portfolio creation
+    if (result.portfolioId) {
+      try {
+        // Get the portfolio to get user_id
+        const { data: portfolio } = await supabase
+          .from('portfolios')
+          .select('user_id')
+          .eq('id', result.portfolioId)
+          .single()
+
+        if (portfolio?.user_id) {
+          // Fetch active legal document versions
+          const { data: legalDocs } = await supabase
+            .from('legal_documents')
+            .select('type, version')
+            .eq('is_active', true)
+
+          if (legalDocs && legalDocs.length > 0) {
+            const termsDoc = legalDocs.find((doc: any) => doc.type === 'terms')
+            const privacyDoc = legalDocs.find((doc: any) => doc.type === 'privacy')
+
+            if (termsDoc && privacyDoc) {
+              // Record agreements directly using service client
+              const serviceClient = createServiceClient()
+              const ipAddress =
+                request.headers.get('x-forwarded-for') ??
+                request.headers.get('x-real-ip') ??
+                null
+
+              const rows = [
+                {
+                  user_id: portfolio.user_id,
+                  document_type: 'terms',
+                  document_version: termsDoc.version,
+                  ip_address: ipAddress,
+                },
+                {
+                  user_id: portfolio.user_id,
+                  document_type: 'privacy',
+                  document_version: privacyDoc.version,
+                  ip_address: ipAddress,
+                },
+              ]
+
+              const { error: agreementError } = await serviceClient
+                .from('user_legal_agreements')
+                .insert(rows)
+
+              if (agreementError) {
+                console.error('Failed to record legal agreements:', agreementError)
+                // Don't fail approval if agreement recording fails
+              }
+            }
+          }
+        }
+      } catch (agreementError) {
+        console.error('Error recording legal agreements:', agreementError)
+        // Don't fail approval if agreement recording fails
+      }
     }
 
     // Update submission status
