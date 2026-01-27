@@ -208,7 +208,7 @@ export function AuthForm({ mode }: AuthFormProps) {
           console.error('Error checking username:', checkError)
         } else if (existingPortfolios) {
           // Check if any portfolio has this username in metadata
-          const usernameTaken = existingPortfolios.some(portfolio => {
+          const usernameTaken = existingPortfolios.some((portfolio: { metadata: unknown }) => {
             const metadata = portfolio.metadata as any
             return metadata?.username?.toLowerCase() === username.toLowerCase()
           })

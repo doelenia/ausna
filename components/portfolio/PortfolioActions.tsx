@@ -129,6 +129,10 @@ export function PortfolioActions({
     fetchUserProjects()
   }, [currentUserId, isHumanPortfolio(portfolio), isOwner, supabase])
 
+  // NOTE: Approval for creating new projects is now enforced at the database level
+  // via is_current_user_approved(), which uses non-pseudo human portfolios (is_pseudo = false).
+  // The UI here no longer needs a separate isApproved state; any failing attempts will be blocked by RLS.
+
   const handleShare = () => {
     alert('Share feature coming soon!')
   }
@@ -277,29 +281,6 @@ export function PortfolioActions({
                         </UIText>
                       </Link>
                     ))}
-                    {/* Create Project Button */}
-                    <Link
-                      href="/portfolio/create/projects"
-                      className="flex flex-col items-center gap-4 py-4 px-4 hover:opacity-80 transition-opacity"
-                      onClick={() => setShowProjectSelector(false)}
-                    >
-                      <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
-                        <svg
-                          className="h-12 w-12 text-gray-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 4v16m8-8H4"
-                          />
-                        </svg>
-                      </div>
-                      <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
-                    </Link>
                   </div>
                 )}
                 

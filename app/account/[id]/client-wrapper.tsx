@@ -128,7 +128,7 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
       if (!session?.user) {
         router.push('/login')
       } else {

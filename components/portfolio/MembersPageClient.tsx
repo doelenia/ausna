@@ -145,7 +145,7 @@ export function MembersPageClient({
           .eq('invitation_type', 'manager')
 
         if (invitations) {
-          const invitedIds = new Set(invitations.map((inv: any) => inv.invitee_id))
+          const invitedIds = new Set<string>(invitations.map((inv: any) => inv.invitee_id as string))
           setInvitedManagers(invitedIds)
         }
       } catch (error) {

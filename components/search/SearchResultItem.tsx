@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { Content, UIText, UIButtonText } from '@/components/ui'
+import { BadgeCheck } from 'lucide-react'
 import { PortfolioType } from '@/types/portfolio'
 
 interface SearchResult {
@@ -17,6 +18,8 @@ interface SearchResult {
   username?: string | null
   projectType?: string | null
   user_id: string
+  // Derived verification flag from server (is_pseudo-based, with legacy fallback)
+  is_approved?: boolean
 }
 
 interface MutualInfo {
@@ -153,9 +156,18 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
 
       {/* Content */}
       <div className="flex-1 min-w-0 overflow-hidden">
-        {/* First row: Name + Username/Type */}
+        {/* First row: Name + Verified Badge + Username/Type */}
         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
-          <Content className="truncate min-w-0">{result.name}</Content>
+          <div className="flex items-center gap-1 min-w-0">
+            <Content className="truncate min-w-0">{result.name}</Content>
+            {result.type === 'human' && result.is_approved && (
+              <BadgeCheck
+                aria-label="Verified user"
+                className="w-4 h-4 text-blue-500 flex-shrink-0"
+                strokeWidth={2}
+              />
+            )}
+          </div>
           {result.type === 'human' && result.username && (
             <UIButtonText className="text-gray-500 flex-shrink-0">@{result.username}</UIButtonText>
           )}

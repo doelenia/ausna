@@ -47,7 +47,7 @@ export function UsernameEditor({ initialUsername, userId }: UsernameEditorProps)
       if (checkError) throw checkError
 
       // Check if any existing portfolio has this username
-      const usernameTaken = existingPortfolios?.some(portfolio => {
+      const usernameTaken = existingPortfolios?.some((portfolio: { metadata: unknown }) => {
         const metadata = portfolio.metadata as any
         return metadata?.username?.toLowerCase() === username.toLowerCase()
       })

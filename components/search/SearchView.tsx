@@ -17,6 +17,7 @@ interface SearchResult {
   projectType?: string | null
   user_id: string
   created_at: string
+  is_approved?: boolean
 }
 
 export function SearchView() {

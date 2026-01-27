@@ -52,11 +52,18 @@ interface GetUsersResult {
     created_at: string
     is_blocked: boolean
     human_portfolio_id: string | null
+    // Derived approval status: true if user has at least one non-pseudo human portfolio
+    is_approved?: boolean
   }>
   error?: string
 }
 
 interface BlockUserResult {
+  success: boolean
+  error?: string
+}
+
+interface ApproveUserResult {
   success: boolean
   error?: string
 }
@@ -77,6 +84,8 @@ interface SearchUsersResult {
     created_at: string
     is_blocked: boolean
     human_portfolio_id: string | null
+    // Derived approval/verification status from human portfolio is_pseudo
+    is_approved?: boolean
   }>
   error?: string
 }
@@ -341,7 +350,7 @@ export async function getUsers(): Promise<GetUsersResult> {
     // Get all human portfolios to match with users
     const { data: humanPortfolios, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('user_id, metadata, id')
+      .select('user_id, metadata, id, is_pseudo')
       .eq('type', 'human')
 
     if (portfolioError) {
@@ -351,22 +360,29 @@ export async function getUsers(): Promise<GetUsersResult> {
       }
     }
 
-    // Create a map of user_id to portfolio
+    // Create a map of user_id to portfolio, including is_pseudo for approval status
     const portfolioMap = new Map(
       (humanPortfolios || []).map((p) => [
         p.user_id,
         {
           id: p.id,
           metadata: p.metadata as any,
+          is_pseudo: (p as any).is_pseudo as boolean | null | undefined,
         },
       ])
     )
 
     // Combine user data with portfolio info
     const users = (authUsers.users || []).map((authUser) => {
-      const portfolio = portfolioMap.get(authUser.id)
+      const portfolio = portfolioMap.get(authUser.id) as
+        | { id: string; metadata: any; is_pseudo?: boolean }
+        | undefined
       const metadata = portfolio?.metadata || {}
       const userMetadata = authUser.user_metadata || {}
+
+      // A user is considered approved if they have at least one non-pseudo human portfolio.
+      // Admins can see pseudo portfolios, but for display we treat pseudo = not approved.
+      const isApproved = portfolio ? portfolio.is_pseudo === false : false
 
       return {
         id: authUser.id,
@@ -376,6 +392,7 @@ export async function getUsers(): Promise<GetUsersResult> {
         created_at: authUser.created_at,
         is_blocked: userMetadata.is_blocked === true,
         human_portfolio_id: portfolio?.id || null,
+        is_approved: isApproved,
       }
     })
 
@@ -681,6 +698,112 @@ export async function blockUser(userId: string, block: boolean): Promise<BlockUs
 }
 
 /**
+ * Approve or unapprove a user for posting.
+ * This now controls approval via the human portfolio is_pseudo flag:
+ * - approved   => at least one non-pseudo human portfolio (is_pseudo = false)
+ * - unapproved => all human portfolios are pseudo (is_pseudo = true)
+ */
+export async function approveUser(userId: string, approve: boolean): Promise<ApproveUserResult> {
+  try {
+    await requireAdmin()
+    const supabase = await createClient()
+    const serviceClient = createServiceClient()
+
+    // Find the user's human portfolio (admin context, so pseudo portfolios are visible)
+    const { data: humanPortfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, user_id, is_pseudo, metadata')
+      .eq('type', 'human')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle()
+
+    if (portfolioError) {
+      console.error('Error fetching human portfolio for approval:', portfolioError)
+      return {
+        success: false,
+        error: portfolioError.message || 'Failed to load human portfolio for user',
+      }
+    }
+
+    if (!humanPortfolio) {
+      return {
+        success: false,
+        error:
+          'No human portfolio found for this user. Create a human portfolio before changing approval status.',
+      }
+    }
+
+    // Update is_pseudo based on approval:
+    // - approve   => is_pseudo = false (real / verified)
+    // - unapprove => is_pseudo = true  (pseudo / unverified)
+    const nextIsPseudo = !approve
+
+    const { error: updatePortfolioError } = await supabase
+      .from('portfolios')
+      .update({ is_pseudo: nextIsPseudo })
+      .eq('id', humanPortfolio.id)
+
+    if (updatePortfolioError) {
+      console.error('Error updating portfolio is_pseudo for approval:', updatePortfolioError)
+      return {
+        success: false,
+        error: updatePortfolioError.message || 'Failed to update approval status on portfolio',
+      }
+    }
+
+    // Optionally mirror approval status into portfolio metadata for client-side display
+    try {
+      const currentMetadata = (humanPortfolio.metadata || {}) as HumanPortfolioMetadata
+      const metadataUpdates: Partial<HumanPortfolioMetadata> = {
+        ...currentMetadata,
+        // Keep is_approved in metadata for badges/search display; derived from is_pseudo.
+        is_approved: approve,
+      }
+
+      await updateHumanPortfolioMetadataById(humanPortfolio.id, metadataUpdates)
+    } catch (error) {
+      console.error('Error updating human portfolio approval metadata:', error)
+      // Non-fatal for core approval behavior
+    }
+
+    // Optionally keep auth.users metadata is_approved in sync for backward compatibility.
+    try {
+      const { data } = await serviceClient.auth.admin.getUserById(userId)
+      const authUser = data?.user
+
+      if (authUser) {
+        const currentUserMetadata = authUser.user_metadata || {}
+        const updatedUserMetadata = {
+          ...currentUserMetadata,
+          is_approved: approve,
+        }
+
+        const { error: updateAuthError } = await serviceClient.auth.admin.updateUserById(userId, {
+          user_metadata: updatedUserMetadata,
+          app_metadata: {
+            ...(authUser.app_metadata || {}),
+          },
+        })
+
+        if (updateAuthError) {
+          console.error('Error updating auth user approval metadata:', updateAuthError)
+        }
+      }
+    } catch (error) {
+      console.error('Error syncing auth user approval metadata:', error)
+    }
+
+    return { success: true }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
  * Search users by name, email, or id
  */
 export async function searchUsers(query: string): Promise<SearchUsersResult> {
@@ -697,10 +820,10 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
     // Get all users
     const { data: authUsers } = await serviceClient.auth.admin.listUsers()
 
-    // Get all human portfolios
+    // Get all human portfolios, including is_pseudo for verification status
     const { data: humanPortfolios } = await supabase
       .from('portfolios')
-      .select('user_id, metadata, id')
+      .select('user_id, metadata, id, is_pseudo')
       .eq('type', 'human')
 
     const portfolioMap = new Map(
@@ -709,6 +832,7 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
         {
           id: p.id,
           metadata: p.metadata as any,
+          is_pseudo: (p as any).is_pseudo as boolean | null | undefined,
         },
       ])
     )
@@ -732,9 +856,14 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
         )
       })
       .map((authUser) => {
-        const portfolio = portfolioMap.get(authUser.id)
+        const portfolio = portfolioMap.get(authUser.id) as
+          | { id: string; metadata: any; is_pseudo?: boolean | null }
+          | undefined
         const metadata = portfolio?.metadata || {}
         const userMetadata = authUser.user_metadata || {}
+
+        // A user is considered verified/approved if they have at least one non-pseudo human portfolio.
+        const isApproved = portfolio ? portfolio.is_pseudo === false : false
 
         return {
           id: authUser.id,
@@ -744,6 +873,7 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
           created_at: authUser.created_at,
           is_blocked: userMetadata.is_blocked === true,
           human_portfolio_id: portfolio?.id || null,
+          is_approved: isApproved,
         }
       })
 
@@ -1158,7 +1288,7 @@ export async function createHumanPortfolioWithProjects(
 
     const email = data.email.toLowerCase().trim()
     const name = data.name.trim()
-    const isPseudo = data.is_pseudo !== false // Default to true
+    const isPseudoFromInput = data.is_pseudo !== false // Default to true for new records
     const joinedCommunity = data.joined_community?.trim()
 
     // Find or create human portfolio
@@ -1202,16 +1332,47 @@ export async function createHumanPortfolioWithProjects(
       }
     }
 
-    // Update is_pseudo if explicitly set
-    if (isPseudo !== undefined) {
-      // Update portfolio is_pseudo field directly
+    // Determine target pseudo status:
+    // - For NEW human portfolios: use the input (typically pseudo = true for form submissions).
+    // - For EXISTING human portfolios: NEVER override existing is_pseudo here.
+    const currentIsPseudo =
+      (humanPortfolio as any).is_pseudo !== undefined ? (humanPortfolio as any).is_pseudo : false
+    const targetIsPseudo = isNewPortfolio ? isPseudoFromInput : currentIsPseudo
+
+    // Mirror approval status in portfolio metadata for client-side display
+    ;(metadataUpdates as any).is_approved = !targetIsPseudo
+
+    // Only set is_pseudo when we're creating a brand-new human portfolio.
+    if (isNewPortfolio) {
       const { error: updatePseudoError } = await supabase
         .from('portfolios')
-        .update({ is_pseudo: isPseudo })
+        .update({ is_pseudo: targetIsPseudo })
         .eq('id', humanPortfolio.id)
 
       if (updatePseudoError) {
-        console.error('Error updating is_pseudo:', updatePseudoError)
+        console.error('Error updating is_pseudo for new human portfolio:', updatePseudoError)
+      }
+
+      // For new portfolios, keep auth.users metadata roughly in sync so existing
+      // UI that reads user_metadata.is_approved still behaves as expected.
+      try {
+        const shouldBeApproved = !targetIsPseudo
+        const { data } = await serviceClient.auth.admin.getUserById(
+          humanPortfolio.user_id
+        )
+        const authUser = data?.user
+
+        if (authUser) {
+          const currentMetadata = authUser.user_metadata || {}
+          await serviceClient.auth.admin.updateUserById(humanPortfolio.user_id, {
+            user_metadata: {
+              ...currentMetadata,
+              is_approved: shouldBeApproved,
+            },
+          })
+        }
+      } catch (error) {
+        console.error('Error updating user approval status for new portfolio:', error)
       }
     }
 

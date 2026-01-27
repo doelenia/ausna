@@ -185,6 +185,17 @@ export async function GET(request: NextRequest) {
     const results = portfolios.map((p: any) => {
       const metadata = p.metadata as any
       const basic = metadata?.basic || {}
+
+      // Derive verification from is_pseudo column first, with metadata.is_approved as a legacy fallback:
+      // - if is_pseudo === false -> verified
+      // - if is_pseudo === true  -> not verified
+      // - if is_pseudo is null/undefined -> fall back to metadata.is_approved
+      const isPseudo: boolean | null | undefined = (p as any).is_pseudo
+      const isApprovedFromMeta = metadata?.is_approved === true
+      const isApproved =
+        isPseudo === false ? true :
+        isPseudo === true ? false :
+        isApprovedFromMeta
       
       return {
         id: p.id,
@@ -197,6 +208,8 @@ export async function GET(request: NextRequest) {
         projectType: metadata?.project_type_specific || null,
         user_id: p.user_id,
         created_at: p.created_at,
+        // Kept name is_approved for backwards compatibility, but it's now is_pseudo-derived
+        is_approved: isApproved,
       }
     })
     

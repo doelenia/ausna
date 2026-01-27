@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { UserAvatar } from '@/components/ui'
 import { Content, UIText } from '@/components/ui'
 import Link from 'next/link'
-import { Crown, Shield } from 'lucide-react'
+import { Crown, Shield, BadgeCheck } from 'lucide-react'
 
 interface CommunityMember {
   id: string
@@ -17,6 +17,7 @@ interface CommunityMember {
   isManager: boolean
   role: string | null
   description?: string | null
+  isApproved?: boolean
 }
 
 interface CommunityMembersGridProps {
@@ -70,7 +71,7 @@ export function CommunityMembersGrid({
         // Fetch human portfolios for all members
         const { data: memberPortfolios } = await supabase
           .from('portfolios')
-          .select('id, user_id, metadata')
+          .select('id, user_id, metadata, is_pseudo')
           .eq('type', 'human')
           .in('user_id', allMemberIds.current)
 
@@ -92,6 +93,13 @@ export function CommunityMembersGrid({
           if (portfolio) {
             const metadata = portfolio.metadata as any
             const basic = metadata?.basic || {}
+            const isPseudo: boolean | null | undefined = (portfolio as any).is_pseudo
+            const isApprovedFromMeta = metadata?.is_approved === true
+            const isApproved =
+              isPseudo === false ? true :
+              isPseudo === true ? false :
+              isApprovedFromMeta
+
             return {
               id: memberId,
               portfolioId: portfolio.id || null,
@@ -102,6 +110,7 @@ export function CommunityMembersGrid({
               isManager,
               role: customRole,
               description: basic.description || null,
+              isApproved,
             }
           }
           
@@ -259,13 +268,24 @@ export function CommunityMembersGrid({
               
               {/* Text content */}
               <div className="flex flex-col items-center gap-1.5 w-full">
-                {/* First line: Name */}
-                <Content
-                  className="text-center w-full line-clamp-2"
-                  title={member.name || 'Unknown'}
-                >
-                  {member.name || 'Unknown'}
-                </Content>
+                {/* First line: Name + Verified badge (grouped and centered together) */}
+                <div className="flex items-center justify-center gap-1 w-full">
+                  <div className="flex items-center justify-center gap-1 max-w-full">
+                    <Content
+                      className="text-center line-clamp-2"
+                      title={member.name || 'Unknown'}
+                    >
+                      {member.name || 'Unknown'}
+                    </Content>
+                    {member.isApproved && (
+                      <BadgeCheck
+                        aria-label="Verified user"
+                        className="w-4 h-4 text-blue-500 flex-shrink-0"
+                        strokeWidth={2}
+                      />
+                    )}
+                  </div>
+                </div>
                 
                 {/* Second line: Role in gray tag */}
                 {getRoleText(member) && (

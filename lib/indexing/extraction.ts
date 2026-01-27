@@ -7,7 +7,7 @@ import { ExtractionResult } from '@/types/indexing'
 export async function extractFromCompoundText(compoundText: string): Promise<ExtractionResult> {
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini-search-preview',
+      model: 'gpt-4o-search-preview',
       messages: [
         {
           role: 'system',
@@ -134,7 +134,7 @@ export async function extractFromPropertyText(
     }
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini-search-preview',
+      model: 'gpt-4o-search-preview',
       messages: [
         {
           role: 'system',

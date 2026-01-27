@@ -7,7 +7,17 @@ function isSafari(): boolean {
   return /safari/.test(userAgent) && !/chrome/.test(userAgent) && !/chromium/.test(userAgent)
 }
 
+let browserClient: ReturnType<typeof createBrowserClient> | null = null
+let browserClientId: string | null = null
+
 export function createClient() {
+  const clientId = Math.random().toString(36).substring(7)
+
+  // Reuse a singleton client in the browser to avoid multiple competing Supabase clients
+  if (typeof window !== 'undefined' && browserClient) {
+    return browserClient
+  }
+
   // Use publishable key (recommended) with fallback to legacy anon key for backward compatibility
   const apiKey =
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
@@ -17,6 +27,11 @@ export function createClient() {
   // createBrowserClient from @supabase/ssr automatically handles cookies
   // It sets cookies with proper SameSite=Lax which allows them to be sent with server actions
   const client = createBrowserClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, apiKey)
+
+  if (typeof window !== 'undefined') {
+    browserClient = client
+    browserClientId = clientId
+  }
   
   // Safari-specific handling: Ensure cookies are accessible
   if (isSafari() && typeof window !== 'undefined') {

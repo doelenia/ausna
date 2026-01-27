@@ -9,6 +9,7 @@ import {
   blockUser,
   searchUsers,
   deleteUser,
+  approveUser,
 } from '@/app/admin/actions'
 import Link from 'next/link'
 import { Button } from '@/components/ui'
@@ -59,6 +60,7 @@ interface User {
   created_at: string
   is_blocked: boolean
   human_portfolio_id: string | null
+  is_approved?: boolean
 }
 
 export function UsersTab() {
@@ -68,6 +70,7 @@ export function UsersTab() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [approvalLoading, setApprovalLoading] = useState<string | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -192,6 +195,23 @@ export function UsersTab() {
       setError(err.message || 'An error occurred')
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  const handleApproveUser = async (userId: string, approve: boolean) => {
+    setApprovalLoading(userId)
+    setError(null)
+    try {
+      const result = await approveUser(userId, approve)
+      if (result.success) {
+        await loadData()
+      } else {
+        setError(result.error || `Failed to ${approve ? 'approve' : 'unapprove'} user`)
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred')
+    } finally {
+      setApprovalLoading(null)
     }
   }
 
@@ -329,6 +349,9 @@ export function UsersTab() {
                     Status
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Verification
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
@@ -360,6 +383,17 @@ export function UsersTab() {
                         {user.is_blocked ? 'Blocked' : 'Active'}
                       </span>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full ${
+                          user.is_approved
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {user.is_approved ? 'Verified (non-pseudo)' : 'Pseudo / Unverified'}
+                      </span>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                       {user.human_portfolio_id && (
                         <Link
@@ -381,6 +415,17 @@ export function UsersTab() {
                           : user.is_blocked
                           ? 'Unblock'
                           : 'Block'}
+                      </button>
+                      <button
+                        onClick={() => handleApproveUser(user.id, !user.is_approved)}
+                        disabled={approvalLoading === user.id}
+                        className="text-blue-600 hover:text-blue-800 disabled:opacity-50"
+                      >
+                        {approvalLoading === user.id
+                          ? '...'
+                          : user.is_approved
+                          ? 'Unapprove'
+                          : 'Approve'}
                       </button>
                       <button
                         onClick={() => handleDeleteUser(user.id)}

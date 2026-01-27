@@ -203,7 +203,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         })
 
         // Sort by role priority: creator (0), then managers (1), then members (2)
-        const sortedMembers = membersWithRoles.sort((a, b) => {
+        const sortedMembers = membersWithRoles.sort((a: { rolePriority: number; name: string | null }, b: { rolePriority: number; name: string | null }) => {
           if (a.rolePriority !== b.rolePriority) {
             return a.rolePriority - b.rolePriority
           }
@@ -212,7 +212,9 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         })
 
         // Remove rolePriority from final result
-        const members = sortedMembers.map(({ rolePriority, ...member }) => member)
+        const members = sortedMembers.map(
+          ({ rolePriority, ...member }: { rolePriority: number; name: string | null }) => member
+        )
 
         setProjectMembers(members)
       } catch (error) {
