@@ -1,11 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { Button, Card, Title, Subtitle, Content, UIText } from '@/components/ui'
 import { MarkdownText, MarkdownContent } from '@/components/ui/MarkdownText'
+import { UserAvatar } from '@/components/ui/UserAvatar'
 import { ProjectTypeSelector } from '@/components/portfolio/ProjectTypeSelector'
 import { CreateHumanPortfolioInput } from '@/app/admin/actions'
 import { PublicUploadFormConfig, EmailCheckResponse } from '@/types/public-upload-form'
+import { createClient } from '@/lib/supabase/client'
+import { getPortfolioUrl } from '@/lib/portfolio/routes'
 
 interface ProjectMember {
   name: string
@@ -64,6 +68,20 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
   const [error, setError] = useState<string | null>(null)
   const [submissionId, setSubmissionId] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState<'main' | 'activities'>('main')
+  
+  // Project members state
+  const [projectMembers, setProjectMembers] = useState<Array<{
+    id: string
+    name: string | null
+    avatar: string | null
+  }>>([])
+  const [projectMembersLoading, setProjectMembersLoading] = useState(true)
+  
+  // Project ID for this form
+  const PROJECT_ID = 'a1b40e33-1d1a-4150-bedf-ef472de1e64b'
+  
+  // Ref for form element to scroll to top
+  const formRef = useRef<HTMLFormElement>(null)
 
   // Debounced email check
   const checkEmail = useCallback(
@@ -109,6 +127,112 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
 
     return () => clearTimeout(timer)
   }, [email, checkEmail])
+
+  // Fetch project members
+  useEffect(() => {
+    const fetchProjectMembers = async () => {
+      setProjectMembersLoading(true)
+      try {
+        const supabase = createClient()
+        
+        // Fetch project portfolio
+        const { data: project, error: projectError } = await supabase
+          .from('portfolios')
+          .select('id, user_id, metadata')
+          .eq('id', PROJECT_ID)
+          .eq('type', 'projects')
+          .maybeSingle()
+
+        if (projectError || !project) {
+          console.error('Failed to fetch project:', projectError)
+          setProjectMembers([])
+          return
+        }
+
+        const metadata = project.metadata as any
+        const creatorId = project.user_id
+        const managerIds = metadata?.managers || []
+        const memberIds = metadata?.members || []
+        
+        // Combine all member IDs (removing duplicates)
+        const allMemberIds = [
+          creatorId,
+          ...managerIds,
+          ...memberIds,
+        ]
+        const uniqueMemberIds = Array.from(new Set(allMemberIds))
+        
+        if (uniqueMemberIds.length === 0) {
+          setProjectMembers([])
+          return
+        }
+
+        // Fetch human portfolios for all members
+        const { data: memberPortfolios } = await supabase
+          .from('portfolios')
+          .select('user_id, metadata')
+          .eq('type', 'human')
+          .in('user_id', uniqueMemberIds)
+
+        // Map members with their role information
+        const membersWithRoles = (memberPortfolios || []).map((p: any) => {
+          const memberMetadata = p.metadata as any
+          const memberBasic = memberMetadata?.basic || {}
+          const userId = p.user_id
+          
+          // Determine role priority: 0 = creator, 1 = manager, 2 = member
+          let rolePriority = 2 // default to member
+          if (userId === creatorId) {
+            rolePriority = 0 // creator
+          } else if (managerIds.includes(userId)) {
+            rolePriority = 1 // manager
+          }
+          
+          return {
+            id: userId,
+            avatar: memberBasic.avatar || memberMetadata?.avatar_url || null,
+            name: memberBasic.name || memberMetadata?.username || null,
+            rolePriority,
+          }
+        })
+
+        // Sort by role priority: creator (0), then managers (1), then members (2)
+        const sortedMembers = membersWithRoles.sort((a, b) => {
+          if (a.rolePriority !== b.rolePriority) {
+            return a.rolePriority - b.rolePriority
+          }
+          // If same role, maintain original order (by name for consistency)
+          return (a.name || '').localeCompare(b.name || '')
+        })
+
+        // Remove rolePriority from final result
+        const members = sortedMembers.map(({ rolePriority, ...member }) => member)
+
+        setProjectMembers(members)
+      } catch (error) {
+        console.error('Failed to fetch project members:', error)
+        setProjectMembers([])
+      } finally {
+        setProjectMembersLoading(false)
+      }
+    }
+
+    fetchProjectMembers()
+  }, [])
+
+  // Scroll to top of form when page changes to activities
+  useEffect(() => {
+    if (currentPage === 'activities' && formRef.current) {
+      // Use setTimeout to ensure DOM has updated after React re-render
+      setTimeout(() => {
+        const formElement = formRef.current
+        if (formElement) {
+          // Scroll the form element into view at the top
+          formElement.scrollIntoView({ behavior: 'smooth', block: 'start', inline: 'nearest' })
+        }
+      }, 150)
+    }
+  }, [currentPage])
 
   const addProject = () => {
     setProjects([
@@ -685,19 +809,95 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
   );
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
       {currentPage === 'main' ? (
         <>
           {/* Title - above the card */}
           <div className="w-full md:max-w-xl md:mx-auto">
             {/* Mobile: proper padding */}
-            <div className="md:hidden px-4 pt-6 pb-2">
+            <div className="md:hidden px-4 pt-6 pb-0">
               <Title>{config.title}</Title>
+              {/* Project Members */}
+              {!projectMembersLoading && projectMembers.length > 0 && (
+                <Link
+                  href={getPortfolioUrl('projects', PROJECT_ID)}
+                  className="inline-flex items-center gap-2 mt-3 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex -space-x-2">
+                    {projectMembers.slice(0, 5).map((member, index) => (
+                      <div
+                        key={member.id}
+                        className="relative"
+                        style={{ zIndex: Math.min(projectMembers.length, 5) - index }}
+                      >
+                        <UserAvatar
+                          userId={member.id}
+                          name={member.name}
+                          avatar={member.avatar}
+                          size={32}
+                          showLink={false}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <UIText className="text-gray-600">
+                    {(() => {
+                      const memberNames = projectMembers.map(m => m.name).filter(Boolean) as string[]
+                      if (memberNames.length === 0) return null
+                      if (memberNames.length === 1) return memberNames[0]
+                      // Join all names with " and ", but if too many, show first few and "..."
+                      if (memberNames.length <= 3) {
+                        return memberNames.join(' and ')
+                      }
+                      // For more than 3, show first 2 and indicate more
+                      return `${memberNames[0]} and ${memberNames[1]} and ...`
+                    })()}
+                  </UIText>
+                </Link>
+              )}
             </div>
             {/* Desktop: transparent card with same padding */}
             <div className="hidden md:block">
-              <div className="bg-transparent rounded-xl p-6 pb-2">
+              <div className="bg-transparent rounded-xl px-6 pt-6 pb-0">
                 <Title>{config.title}</Title>
+                {/* Project Members */}
+                {!projectMembersLoading && projectMembers.length > 0 && (
+                  <Link
+                    href={getPortfolioUrl('projects', PROJECT_ID)}
+                    className="inline-flex items-center gap-2 mt-3 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
+                  >
+                    <div className="flex -space-x-2">
+                      {projectMembers.slice(0, 5).map((member, index) => (
+                        <div
+                          key={member.id}
+                          className="relative"
+                          style={{ zIndex: Math.min(projectMembers.length, 5) - index }}
+                        >
+                          <UserAvatar
+                            userId={member.id}
+                            name={member.name}
+                            avatar={member.avatar}
+                            size={32}
+                            showLink={false}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <UIText className="text-gray-600">
+                      {(() => {
+                        const memberNames = projectMembers.map(m => m.name).filter(Boolean) as string[]
+                        if (memberNames.length === 0) return null
+                        if (memberNames.length === 1) return memberNames[0]
+                        // Join all names with " and ", but if too many, show first few and "..."
+                        if (memberNames.length <= 3) {
+                          return memberNames.join(' and ')
+                        }
+                        // For more than 3, show first 2 and indicate more
+                        return `${memberNames[0]} and ${memberNames[1]} and ...`
+                      })()}
+                    </UIText>
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -705,12 +905,12 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           {/* Main Information Card - Flat on mobile, card on desktop */}
           <div className="w-full md:max-w-xl md:mx-auto">
             {/* Mobile: flat layout (no card) */}
-            <div className="md:hidden px-4 py-6">
+            <div className="md:hidden px-4 pt-0 pb-6">
               {mainFormContent}
             </div>
 
             {/* Desktop: keep card */}
-            <div className="hidden md:block">
+            <div className="hidden md:block -mt-2">
               <Card variant="default">
                 {mainFormContent}
               </Card>
@@ -737,7 +937,6 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                     }
                     setError(null)
                     setCurrentPage('activities')
-                    window.scrollTo({ top: 0, behavior: 'smooth' })
                   }}
                 >
                   Next
@@ -763,7 +962,15 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                       }
                       setError(null)
                       setCurrentPage('activities')
-                      window.scrollTo({ top: 0, behavior: 'smooth' })
+                      // Scroll to top of form after state update
+                      requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                          if (formRef.current) {
+                            const formTop = formRef.current.getBoundingClientRect().top + window.pageYOffset
+                            window.scrollTo({ top: formTop, behavior: 'smooth' })
+                          }
+                        })
+                      })
                     }}
                   >
                     Next
@@ -812,15 +1019,15 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           </div>
 
           {/* Activities section - with proper margins */}
-      <div className="w-full md:max-w-xl md:mx-auto space-y-4">
+      <div className="w-full md:max-w-xl md:mx-auto space-y-2">
         {/* Activities header */}
-        <div className="md:hidden px-4">
+        <div className="md:hidden px-4 pt-2 pb-1">
           <div>
             <Subtitle>Activities</Subtitle>
           </div>
         </div>
         <div className="hidden md:block">
-          <div className="bg-transparent rounded-xl p-6">
+          <div className="bg-transparent rounded-xl px-6 pt-2 pb-1">
             <div>
               <Subtitle>Activities</Subtitle>
             </div>
@@ -830,12 +1037,12 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         {/* Activities paragraph - transparent card for consistency */}
         <div>
           {/* Mobile: subtle background to distinguish from activity cards */}
-          <div className="md:hidden px-4 py-6 bg-gray-50/50">
+          <div className="md:hidden px-4 pt-2 pb-2 bg-gray-50/50">
             <MarkdownContent>{config.activities_section_paragraph}</MarkdownContent>
           </div>
           {/* Desktop: transparent card with same padding */}
           <div className="hidden md:block">
-            <div className="bg-transparent rounded-xl p-6">
+            <div className="bg-transparent rounded-xl px-6 pt-2 pb-2">
               <MarkdownContent>{config.activities_section_paragraph}</MarkdownContent>
             </div>
           </div>
@@ -1118,14 +1325,14 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           {/* Mobile: proper padding */}
           <div className="md:hidden px-4">
             <Button type="button" variant="secondary" onClick={addProject} fullWidth>
-              Add Activity
+              Add More Activities
             </Button>
           </div>
           {/* Desktop: transparent card with same padding */}
           <div className="hidden md:block">
             <div className="bg-transparent rounded-xl p-6">
               <Button type="button" variant="secondary" onClick={addProject} fullWidth>
-                Add Activity
+                Add More Activities
               </Button>
             </div>
           </div>
