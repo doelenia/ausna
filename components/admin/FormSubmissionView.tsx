@@ -10,6 +10,7 @@ interface FormSubmissionViewProps {
   submission: PublicUploadFormSubmission
   onApprove: (id: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
+  onReprocess?: (id: string) => Promise<void>
   onUpdate: () => Promise<void>
   onClose: () => void
   actionLoading: string | null
@@ -19,6 +20,7 @@ export function FormSubmissionView({
   submission,
   onApprove,
   onDelete,
+  onReprocess,
   onUpdate,
   onClose,
   actionLoading,
@@ -372,6 +374,15 @@ export function FormSubmissionView({
               {actionLoading === submission.id ? 'Approving...' : 'Approve & Process'}
             </Button>
           </>
+        )}
+        {submission.status === 'approved' && onReprocess && (
+          <Button
+            variant="secondary"
+            onClick={() => onReprocess(submission.id)}
+            disabled={actionLoading === submission.id}
+          >
+            {actionLoading === submission.id ? 'Reprocessing...' : 'Reprocess'}
+          </Button>
         )}
         <Button variant="secondary" onClick={onClose}>
           Close

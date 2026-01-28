@@ -194,7 +194,16 @@ export async function findOrCreateHumanPortfolioForEmail(
   
   // Check if user already has a human portfolio
   const supabase = await createClient()
-  const { data: existingUserPortfolio } = await supabase
+  const { data: existingUserPortfolio, error: checkError } = await supabase
+    .from('portfolios')
+    .select('*')
+    .eq('type', 'human')
+    .eq('user_id', userId)
+    .maybeSingle()
+  
+  // Also check with service client to see if RLS is hiding the portfolio
+  const serviceClient = createServiceClient()
+  const { data: servicePortfolio, error: serviceError } = await serviceClient
     .from('portfolios')
     .select('*')
     .eq('type', 'human')
@@ -202,6 +211,37 @@ export async function findOrCreateHumanPortfolioForEmail(
     .maybeSingle()
   
   if (existingUserPortfolio) {
+    // Check if portfolio was just created by trigger (within last 5 seconds)
+    // If so, treat it as "new" so pseudo status can be set from form
+    const createdAt = new Date(existingUserPortfolio.created_at).getTime()
+    const now = Date.now()
+    const timeSinceCreation = now - createdAt
+    const wasJustCreated = timeSinceCreation < 5000 // 5 seconds
+    const isPseudoUndefinedOrFalse = existingUserPortfolio.is_pseudo === undefined || existingUserPortfolio.is_pseudo === false
+    
+    // If portfolio was just created by trigger and has default pseudo status, treat as new
+    if (wasJustCreated && isPseudoUndefinedOrFalse) {
+      // Update email in metadata
+      const metadata = existingUserPortfolio.metadata as HumanPortfolioMetadata
+      const updatedMetadata = {
+        ...metadata,
+        email: email.toLowerCase(),
+      }
+      
+      // Update metadata (without select to avoid RLS blocking)
+      const { error: updateError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', existingUserPortfolio.id)
+      
+      if (updateError) {
+        throw new Error(`Failed to update portfolio email: ${updateError.message}`)
+      }
+      
+      // Return as new so caller can set pseudo status
+      return { portfolio: existingUserPortfolio, isNew: true }
+    }
+    
     // User has portfolio but email doesn't match - update email in metadata
     const metadata = existingUserPortfolio.metadata as HumanPortfolioMetadata
     const updatedMetadata = {
@@ -209,16 +249,77 @@ export async function findOrCreateHumanPortfolioForEmail(
       email: email.toLowerCase(),
     }
     
-    const { data: updated } = await supabase
+    // Update metadata (without select to avoid RLS blocking)
+    const { error: updateError } = await supabase
       .from('portfolios')
       .update({ metadata: updatedMetadata })
       .eq('id', existingUserPortfolio.id)
-      .select()
+    
+    if (updateError) {
+      throw new Error(`Failed to update portfolio email: ${updateError.message}`)
+    }
+    
+    // Fetch updated portfolio in a separate query (avoids RLS blocking on update chain)
+    const { data: updated, error: selectError } = await supabase
+      .from('portfolios')
+      .select('*')
+      .eq('id', existingUserPortfolio.id)
+      .eq('type', 'human')
       .single()
     
-    if (updated) {
-      return { portfolio: updated as HumanPortfolio, isNew: false }
+    if (selectError || !updated) {
+      // If we can't fetch it, return the existing portfolio we already have
+      // The update succeeded, we just can't verify it due to RLS
+      return { portfolio: existingUserPortfolio, isNew: false }
     }
+    
+    return { portfolio: updated as HumanPortfolio, isNew: false }
+  }
+  
+  // If service client found a portfolio but regular client didn't, use the service client result
+  if (servicePortfolio && !existingUserPortfolio) {
+    // Check if portfolio was just created by trigger (within last 5 seconds)
+    const createdAt = new Date(servicePortfolio.created_at).getTime()
+    const now = Date.now()
+    const timeSinceCreation = now - createdAt
+    const wasJustCreated = timeSinceCreation < 5000 // 5 seconds
+    const isPseudoUndefinedOrFalse = servicePortfolio.is_pseudo === undefined || servicePortfolio.is_pseudo === false
+    
+    // If portfolio was just created by trigger and has default pseudo status, treat as new
+    if (wasJustCreated && isPseudoUndefinedOrFalse) {
+      // Update email in metadata if needed
+      const metadata = servicePortfolio.metadata as HumanPortfolioMetadata
+      if (metadata.email?.toLowerCase() !== email.toLowerCase()) {
+        const updatedMetadata = {
+          ...metadata,
+          email: email.toLowerCase(),
+        }
+        await updateHumanPortfolioMetadataById(servicePortfolio.id, updatedMetadata)
+      }
+      // Return as new so caller can set pseudo status
+      return { portfolio: servicePortfolio as HumanPortfolio, isNew: true }
+    }
+    
+    // Update email in metadata if needed
+    const metadata = servicePortfolio.metadata as HumanPortfolioMetadata
+    if (metadata.email?.toLowerCase() !== email.toLowerCase()) {
+      const updatedMetadata = {
+        ...metadata,
+        email: email.toLowerCase(),
+      }
+      await updateHumanPortfolioMetadataById(servicePortfolio.id, updatedMetadata)
+      // Fetch updated portfolio
+      const { data: updated } = await supabase
+        .from('portfolios')
+        .select('*')
+        .eq('id', servicePortfolio.id)
+        .eq('type', 'human')
+        .single()
+      if (updated) {
+        return { portfolio: updated as HumanPortfolio, isNew: false }
+      }
+    }
+    return { portfolio: servicePortfolio as HumanPortfolio, isNew: false }
   }
   
   // Create new human portfolio for the user
@@ -260,15 +361,26 @@ export async function updateHumanPortfolioMetadataById(
     },
   }
   
-  const { data, error } = await supabase
+  // Update metadata (without select to avoid RLS blocking)
+  const { error: updateError } = await supabase
     .from('portfolios')
     .update({ metadata: updatedMetadata })
     .eq('id', portfolioId)
-    .select()
+  
+  if (updateError) {
+    throw new Error(`Failed to update human portfolio: ${updateError.message}`)
+  }
+  
+  // Fetch updated portfolio in a separate query (avoids RLS blocking on update chain)
+  const { data, error: selectError } = await supabase
+    .from('portfolios')
+    .select('*')
+    .eq('id', portfolioId)
+    .eq('type', 'human')
     .single()
   
-  if (error || !data) {
-    throw new Error(`Failed to update human portfolio: ${error?.message}`)
+  if (selectError || !data) {
+    throw new Error(`Failed to fetch updated human portfolio: ${selectError?.message || 'No data returned'}`)
   }
   
   return data as HumanPortfolio

@@ -43,12 +43,15 @@ export async function cleanupPropertyIndexes(
  */
 export async function buildPropertyContext(
   portfolioId: string,
-  propertyType: 'human_description' | 'project_description' | 'project_property'
+  propertyType: 'human_description' | 'project_description' | 'project_property',
+  propertyName?: 'goals' | 'timelines' | 'asks'
 ): Promise<{
   projectDescription?: string
   humanDescription?: string
   projectName?: string
   humanName?: string
+  projectGoals?: string
+  projectAsks?: string
 }> {
   const supabase = createServiceClient()
 
@@ -68,12 +71,30 @@ export async function buildPropertyContext(
     humanDescription?: string
     projectName?: string
     humanName?: string
+    projectGoals?: string
+    projectAsks?: string
   } = {}
 
   if (portfolio.type === 'projects') {
     const metadata = portfolio.metadata as ProjectPortfolioMetadata
     context.projectName = metadata.basic?.name
     context.projectDescription = metadata.basic?.description
+
+    // Include other project properties for context when processing goals or asks
+    // This helps AI infer missing information
+    if (propertyType === 'project_property' && metadata.properties) {
+      if (propertyName === 'asks' && metadata.properties.goals) {
+        // When processing asks, include goals for context
+        context.projectGoals = metadata.properties.goals
+      }
+      if (propertyName === 'goals' && metadata.properties.asks) {
+        // When processing goals, include asks for context
+        const asks = metadata.properties.asks || []
+        if (asks.length > 0) {
+          context.projectAsks = asks.map((ask) => `${ask.title}: ${ask.description}`).join('\n\n')
+        }
+      }
+    }
 
     // Get human portfolio of project owner
     const { data: humanPortfolio } = await supabase
@@ -411,9 +432,16 @@ export async function processProjectProperty(
     }
   }
 
-  if (!finalValue || finalValue.trim().length === 0) {
-    // No value to process
+  // For goals and asks, process even if empty to allow AI inference based on context
+  // For timelines, skip if empty as there's no inference needed
+  if (propertyName === 'timelines' && (!finalValue || finalValue.trim().length === 0)) {
+    // No timeline value to process
     return
+  }
+  
+  // For goals and asks, if empty, use empty string to trigger inference
+  if (!finalValue || finalValue.trim().length === 0) {
+    finalValue = ''
   }
 
   // Get project owner's human portfolio
@@ -439,16 +467,18 @@ export async function processProjectProperty(
   // Cleanup existing indexes
   await cleanupPropertyIndexes('project_property', portfolioId, propertyName)
 
-  // Build context
-  const context = await buildPropertyContext(portfolioId, 'project_property')
+  // Build context (include property name to get related properties for inference)
+  const context = await buildPropertyContext(portfolioId, 'project_property', propertyName)
 
-  // Extract information
+  // Extract information (include related properties for inference)
   const extraction = await extractFromPropertyText(finalValue, {
     propertyType: 'project_property',
     propertyName,
     projectName: context.projectName,
     projectDescription: context.projectDescription,
     humanDescription: context.humanDescription,
+    projectGoals: context.projectGoals,
+    projectAsks: context.projectAsks,
   })
 
   // Process topics

@@ -739,7 +739,8 @@ export async function approveUser(userId: string, approve: boolean): Promise<App
     // - unapprove => is_pseudo = true  (pseudo / unverified)
     const nextIsPseudo = !approve
 
-    const { error: updatePortfolioError } = await supabase
+    // Use service client for admin operations to bypass RLS
+    const { error: updatePortfolioError } = await serviceClient
       .from('portfolios')
       .update({ is_pseudo: nextIsPseudo })
       .eq('id', humanPortfolio.id)
@@ -1344,7 +1345,8 @@ export async function createHumanPortfolioWithProjects(
 
     // Only set is_pseudo when we're creating a brand-new human portfolio.
     if (isNewPortfolio) {
-      const { error: updatePseudoError } = await supabase
+      // Use service client for admin operations to bypass RLS
+      const { error: updatePseudoError } = await serviceClient
         .from('portfolios')
         .update({ is_pseudo: targetIsPseudo })
         .eq('id', humanPortfolio.id)
@@ -1490,41 +1492,32 @@ export async function createHumanPortfolioWithProjects(
           } else {
             // User doesn't exist - create user account and placeholder human portfolio
             try {
-              // First check if placeholder portfolio exists (by email in metadata)
-              const placeholderPortfolio = await findHumanPortfolioByEmail(member.email.toLowerCase().trim())
+              // Use findOrCreateHumanPortfolioForEmail to avoid duplicate key errors
+              // This handles the case where a user is created and a trigger automatically creates a portfolio
+              const { portfolio: memberPortfolio } = await findOrCreateHumanPortfolioForEmail(
+                member.email.toLowerCase().trim(),
+                member.name.trim()
+              )
               
-              if (placeholderPortfolio) {
-                // Placeholder exists - use its user_id
-                memberUserId = placeholderPortfolio.user_id
-                if (!memberUserIds.includes(memberUserId)) {
-                  memberUserIds.push(memberUserId)
-                }
-                if (member.role) {
-                  memberRoles[memberUserId] = member.role.trim()
-                }
-              } else {
-                // Create user account and placeholder human portfolio
-                // Create user account
-                memberUserId = await findOrCreateUserByEmail(member.email.toLowerCase().trim(), member.name.trim())
-                
-                // Get member's pseudo status (defaults to true)
-                const memberIsPseudo = member.is_pseudo !== false
-                
-                // Create placeholder human portfolio with specified pseudo status
-                await createPlaceholderHumanPortfolio(
-                  member.email.toLowerCase().trim(),
-                  member.name.trim(),
-                  memberUserId,
-                  memberIsPseudo
-                )
-                
-                // Add to members
-                if (!memberUserIds.includes(memberUserId)) {
-                  memberUserIds.push(memberUserId)
-                }
-                if (member.role) {
-                  memberRoles[memberUserId] = member.role.trim()
-                }
+              memberUserId = memberPortfolio.user_id
+              
+              // Update pseudo status if needed
+              const memberIsPseudo = member.is_pseudo !== false
+              const currentIsPseudo = memberPortfolio.is_pseudo ?? false
+              if (currentIsPseudo !== memberIsPseudo) {
+                // Use service client for admin operations to bypass RLS
+                await serviceClient
+                  .from('portfolios')
+                  .update({ is_pseudo: memberIsPseudo })
+                  .eq('id', memberPortfolio.id)
+              }
+              
+              // Add to members
+              if (!memberUserIds.includes(memberUserId)) {
+                memberUserIds.push(memberUserId)
+              }
+              if (member.role) {
+                memberRoles[memberUserId] = member.role.trim()
               }
             } catch (error: any) {
               console.error(`Error creating placeholder for ${member.email}:`, error)
@@ -1608,27 +1601,26 @@ export async function createHumanPortfolioWithProjects(
           })
         }
 
-        // Process project properties if they exist
+        // Process project properties
+        // For goals and asks, process even if empty to allow AI inference based on project context
         if (projectData.properties) {
-          // Process goals
-          if (projectData.properties.goals) {
-            fetch(`${baseUrl}/api/index-project-property`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                portfolioId: projectPortfolio.id,
-                userId: humanPortfolio.user_id,
-                propertyName: 'goals',
-                propertyValue: projectData.properties.goals,
-              }),
-            }).catch((error) => {
-              console.error('Failed to trigger goals processing:', error)
-            })
-          }
+          // Process goals (process even if empty to allow inference)
+          fetch(`${baseUrl}/api/index-project-property`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId: projectPortfolio.id,
+              userId: humanPortfolio.user_id,
+              propertyName: 'goals',
+              propertyValue: projectData.properties.goals || '',
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger goals processing:', error)
+          })
 
-          // Process timelines
+          // Process timelines (only if exists)
           if (projectData.properties.timelines) {
             fetch(`${baseUrl}/api/index-project-property`, {
               method: 'POST',
@@ -1646,26 +1638,59 @@ export async function createHumanPortfolioWithProjects(
             })
           }
 
-          // Process asks
-          if (projectData.properties.asks && projectData.properties.asks.length > 0) {
-            const asksText = projectData.properties.asks
-              .map((ask) => `${ask.title}: ${ask.description}`)
-              .join('\n\n')
-            fetch(`${baseUrl}/api/index-project-property`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                portfolioId: projectPortfolio.id,
-                userId: humanPortfolio.user_id,
-                propertyName: 'asks',
-                propertyValue: asksText,
-              }),
-            }).catch((error) => {
-              console.error('Failed to trigger asks processing:', error)
-            })
-          }
+          // Process asks (process even if empty to allow inference)
+          const asksText = projectData.properties.asks && projectData.properties.asks.length > 0
+            ? projectData.properties.asks
+                .map((ask) => `${ask.title}: ${ask.description}`)
+                .join('\n\n')
+            : ''
+          fetch(`${baseUrl}/api/index-project-property`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId: projectPortfolio.id,
+              userId: humanPortfolio.user_id,
+              propertyName: 'asks',
+              propertyValue: asksText,
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger asks processing:', error)
+          })
+        } else {
+          // Even if no properties object exists, process empty goals and asks for inference
+          // Process empty goals
+          fetch(`${baseUrl}/api/index-project-property`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId: projectPortfolio.id,
+              userId: humanPortfolio.user_id,
+              propertyName: 'goals',
+              propertyValue: '',
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger goals processing:', error)
+          })
+
+          // Process empty asks
+          fetch(`${baseUrl}/api/index-project-property`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId: projectPortfolio.id,
+              userId: humanPortfolio.user_id,
+              propertyName: 'asks',
+              propertyValue: '',
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger asks processing:', error)
+          })
         }
       } catch (error) {
         console.error('Error triggering project property processing:', error)
@@ -1711,6 +1736,274 @@ export async function createHumanPortfolioWithProjects(
     }
   } catch (error: any) {
     console.error('Exception creating human portfolio with projects:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Reprocess an approved form submission
+ * This will:
+ * 1. Clean up the account (delete pseudo projects and human portfolio)
+ * 2. Remove from communities
+ * 3. Clean up all relevant atomic knowledge
+ * 4. Reduce topic counts
+ * 5. Reset form status to pending
+ */
+export interface ReprocessFormResult {
+  success: boolean
+  error?: string
+}
+
+export async function reprocessApprovedForm(
+  formId: string
+): Promise<ReprocessFormResult> {
+  try {
+    await requireAdmin()
+    const serviceClient = createServiceClient()
+    const supabase = await createClient()
+
+    // Step 1: Get the form submission
+    const { data: submission, error: fetchError } = await serviceClient
+      .from('public_upload_forms')
+      .select('*')
+      .eq('id', formId)
+      .single()
+
+    if (fetchError || !submission) {
+      return {
+        success: false,
+        error: 'Form submission not found',
+      }
+    }
+
+    if (submission.status !== 'approved') {
+      return {
+        success: false,
+        error: 'Can only reprocess approved forms',
+      }
+    }
+
+    const email = submission.submission_data.email?.toLowerCase().trim()
+    if (!email) {
+      return {
+        success: false,
+        error: 'Email not found in submission data',
+      }
+    }
+
+    // Step 2: Find the user and human portfolio by email
+    const humanPortfolio = await findHumanPortfolioByEmail(email)
+    if (!humanPortfolio) {
+      // No portfolio exists, just reset the form status
+      const { error: updateError } = await serviceClient
+        .from('public_upload_forms')
+        .update({
+          status: 'pending',
+          approved_at: null,
+          approved_by: null,
+          processed_at: null,
+        })
+        .eq('id', formId)
+
+      if (updateError) {
+        return {
+          success: false,
+          error: `Failed to reset form status: ${updateError.message}`,
+        }
+      }
+
+      return { success: true }
+    }
+
+    const userId = humanPortfolio.user_id
+
+    // Step 3: Get all pseudo projects owned by this user
+    const { data: pseudoProjects, error: projectsError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata')
+      .eq('type', 'projects')
+      .eq('user_id', userId)
+      .eq('is_pseudo', true)
+
+    if (projectsError) {
+      console.error('Error fetching pseudo projects:', projectsError)
+    }
+
+    const projectIds: string[] = []
+    if (pseudoProjects && pseudoProjects.length > 0) {
+      projectIds.push(...pseudoProjects.map((p) => p.id))
+
+      // Remove projects from member portfolios' owned_projects lists
+      for (const project of pseudoProjects) {
+        const projectMetadata = project.metadata as any
+        const members = projectMetadata?.members || []
+        const allMembers = Array.isArray(members) ? members : []
+
+        for (const memberId of allMembers) {
+          try {
+            const { removeProjectFromOwnedListById } = await import('@/lib/portfolio/admin-helpers')
+            await removeProjectFromOwnedListById(memberId, project.id)
+          } catch (error) {
+            console.error(`Failed to remove project ${project.id} from member ${memberId}:`, error)
+          }
+        }
+      }
+
+      // Delete all pseudo projects
+      if (projectIds.length > 0) {
+        const { error: deleteProjectsError } = await serviceClient
+          .from('portfolios')
+          .delete()
+          .in('id', projectIds)
+
+        if (deleteProjectsError) {
+          console.error('Error deleting pseudo projects:', deleteProjectsError)
+        }
+      }
+    }
+
+    // Step 4: Collect all portfolio IDs (human + projects) for cleanup
+    const allPortfolioIds = [humanPortfolio.id, ...projectIds]
+
+    // Step 5: Get all atomic knowledge entries for these portfolios
+    // We'll query for each portfolio ID separately and combine results
+    let atomicKnowledgeEntries: any[] = []
+    for (const portfolioId of allPortfolioIds) {
+      const { data: entries, error: fetchError } = await serviceClient
+        .from('atomic_knowledge')
+        .select('id, topics, source_info')
+        .eq('source_info->>source_id', portfolioId)
+
+      if (fetchError) {
+        console.error(`Error fetching atomic knowledge for portfolio ${portfolioId}:`, fetchError)
+      } else if (entries) {
+        atomicKnowledgeEntries.push(...entries)
+      }
+    }
+
+    // Step 6: Collect all unique topic IDs from atomic knowledge entries
+    const topicIdsSet = new Set<string>()
+    if (atomicKnowledgeEntries) {
+      for (const entry of atomicKnowledgeEntries) {
+        if (entry.topics && Array.isArray(entry.topics)) {
+          entry.topics.forEach((topicId: string) => topicIdsSet.add(topicId))
+        }
+      }
+    }
+
+    // Step 7: Delete atomic knowledge entries for these portfolios
+    if (allPortfolioIds.length > 0) {
+      // Delete by source_id matching any of our portfolio IDs
+      for (const portfolioId of allPortfolioIds) {
+        const { error: deleteAkError } = await serviceClient
+          .from('atomic_knowledge')
+          .delete()
+          .eq('source_info->>source_id', portfolioId)
+
+        if (deleteAkError) {
+          console.error(`Error deleting atomic knowledge for portfolio ${portfolioId}:`, deleteAkError)
+        }
+      }
+    }
+
+    // Step 8: Decrement topic mention counts
+    const topicIds = Array.from(topicIdsSet)
+    if (topicIds.length > 0) {
+      try {
+        const { error: decrementError } = await serviceClient.rpc('decrement_topic_mention_counts', {
+          topic_ids: topicIds,
+        })
+
+        if (decrementError) {
+          console.error('Error decrementing topic counts:', decrementError)
+        }
+      } catch (error) {
+        console.error('Error calling decrement_topic_mention_counts:', error)
+      }
+    }
+
+    // Step 9: Remove user from communities (if human portfolio is pseudo)
+    if (humanPortfolio.is_pseudo) {
+      const { data: allCommunities, error: communitiesError } = await serviceClient
+        .from('portfolios')
+        .select('id, metadata')
+        .eq('type', 'community')
+
+      if (!communitiesError && allCommunities) {
+        for (const community of allCommunities) {
+          const metadata = community.metadata as any
+          const members = metadata?.members || []
+          const managers = metadata?.managers || []
+          const isMember = Array.isArray(members) && members.includes(userId)
+          const isManager = Array.isArray(managers) && managers.includes(userId)
+
+          if (isMember || isManager) {
+            const updatedMembers = Array.isArray(members)
+              ? members.filter((id: string) => id !== userId)
+              : []
+            const updatedManagers = Array.isArray(managers)
+              ? managers.filter((id: string) => id !== userId)
+              : []
+
+            const { error: updateError } = await serviceClient
+              .from('portfolios')
+              .update({
+                metadata: {
+                  ...metadata,
+                  members: updatedMembers,
+                  managers: updatedManagers,
+                },
+              })
+              .eq('id', community.id)
+
+            if (updateError) {
+              console.error(`Error removing user from community ${community.id}:`, updateError)
+            }
+          }
+        }
+      }
+    }
+
+    // Step 10: Delete pseudo human portfolio
+    if (humanPortfolio.is_pseudo) {
+      const { error: deleteHumanError } = await serviceClient
+        .from('portfolios')
+        .delete()
+        .eq('id', humanPortfolio.id)
+
+      if (deleteHumanError) {
+        console.error('Error deleting human portfolio:', deleteHumanError)
+        return {
+          success: false,
+          error: `Failed to delete human portfolio: ${deleteHumanError.message}`,
+        }
+      }
+    }
+
+    // Step 11: Reset form status to pending
+    const { error: updateError } = await serviceClient
+      .from('public_upload_forms')
+      .update({
+        status: 'pending',
+        approved_at: null,
+        approved_by: null,
+        processed_at: null,
+      })
+      .eq('id', formId)
+
+    if (updateError) {
+      return {
+        success: false,
+        error: `Failed to reset form status: ${updateError.message}`,
+      }
+    }
+
+    return { success: true }
+  } catch (error: any) {
+    console.error('Exception reprocessing approved form:', error)
     return {
       success: false,
       error: error.message || 'An unexpected error occurred',

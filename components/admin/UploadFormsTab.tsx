@@ -137,6 +137,46 @@ export function UploadFormsTab() {
     }
   }
 
+  const handleReprocess = async (submissionId: string) => {
+    if (
+      !confirm(
+        'Reprocess this approved form? This will:\n' +
+        '1. Delete all pseudo projects and the pseudo profile/account\n' +
+        '2. Remove from communities\n' +
+        '3. Clean up all relevant atomic knowledge\n' +
+        '4. Reduce topic counts\n' +
+        '5. Reset form status to pending for reprocessing\n\n' +
+        'This action cannot be undone.'
+      )
+    ) {
+      return
+    }
+
+    setActionLoading(submissionId)
+    setError(null)
+    try {
+      const response = await fetch(`/api/public-upload-forms/${submissionId}/reprocess`, {
+        method: 'POST',
+      })
+
+      if (!response.ok) {
+        const result = await response.json()
+        throw new Error(result.error || 'Failed to reprocess submission')
+      }
+
+      await loadSubmissions()
+      if (selectedSubmission?.id === submissionId) {
+        // Update the selected submission with the new status
+        const updated = await response.json()
+        setSelectedSubmission(updated)
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const getSubmissionName = (submission: PublicUploadFormSubmission) => {
     return submission.submission_data.name || 'Unknown'
   }
@@ -237,6 +277,7 @@ export function UploadFormsTab() {
               submission={selectedSubmission}
               onApprove={handleApprove}
               onDelete={handleDelete}
+              onReprocess={handleReprocess}
               onUpdate={loadSubmissions}
               onClose={() => setSelectedSubmission(null)}
               actionLoading={actionLoading}
