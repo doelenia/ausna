@@ -52,3 +52,4 @@ COMMENT ON COLUMN subscriptions.portfolio_id IS 'The portfolio being subscribed 
 
 
 
+

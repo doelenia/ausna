@@ -33,10 +33,10 @@ export async function POST(request: NextRequest) {
       ...submissionData,
       is_pseudo: true,
       joined_community: submissionData.joined_community || '9f4fc0af-8997-494e-945c-d2831eaf258a',
-      projects: submissionData.projects.map((project) => ({
+      projects: submissionData.projects?.map((project) => ({
         ...project,
         is_pseudo: true,
-        members: project.members.map((member) => ({
+        members: (project.members || []).map((member) => ({
           ...member,
           is_pseudo: true,
         })),

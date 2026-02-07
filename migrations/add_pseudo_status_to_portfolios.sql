@@ -14,3 +14,4 @@ WHERE is_pseudo = true;
 COMMENT ON COLUMN portfolios.is_pseudo IS 
   'If true, portfolio is hidden from customer search but visible to admins';
 
+

@@ -588,33 +588,23 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return 'Invalid email format'
     }
-    if (!description.trim()) {
-      return 'Description is required'
-    }
     if (!agreedToTerms || !agreedToPrivacy) {
       return 'You must agree to the Terms & Conditions and Privacy Policy to submit this form.'
     }
 
-    // Validate activities
+    // Validate activities (only if they exist and have content)
     for (let i = 0; i < projects.length; i++) {
       const project = projects[i]
-      if (!project.name.trim()) {
-        return `Activity ${i + 1}: Name is required`
-      }
-      if (!project.description || !project.description.trim()) {
-        return `Activity ${i + 1}: Description is required`
-      }
-
-      // Validate member roles (max 2 words)
-      for (let j = 0; j < project.members.length; j++) {
-        const member = project.members[j]
-        if (!member.name.trim()) {
-          return `Project ${i + 1}, Member ${j + 1}: Name is required`
-        }
-        if (member.role) {
-          const words = member.role.trim().split(/\s+/)
-          if (words.length > 2) {
-            return `Activity ${i + 1}, Member ${j + 1}: Role must be 2 words or less`
+      // Only validate if project has a name (meaning user started filling it)
+      if (project.name.trim()) {
+        // If name is provided, validate member roles (max 2 words)
+        for (let j = 0; j < project.members.length; j++) {
+          const member = project.members[j]
+          if (member.name.trim() && member.role) {
+            const words = member.role.trim().split(/\s+/)
+            if (words.length > 2) {
+              return `Activity ${i + 1}, Member ${j + 1}: Role must be 2 words or less`
+            }
           }
         }
       }
@@ -635,35 +625,43 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
 
     setLoading(true)
     try {
-      const submissionData: CreateHumanPortfolioInput = {
-        name: name.trim(),
-        email: email.trim(),
-        description: description.trim(),
-        joined_community: '9f4fc0af-8997-494e-945c-d2831eaf258a', // Default admin community
-        is_pseudo: true, // Enforced
-        properties: {
-          current_location: humanProperties.current_location.trim() || undefined,
-          availability: humanProperties.availability.trim() || undefined,
-          social_preferences: humanProperties.social_preferences.trim() || undefined,
-          preferred_contact_method: humanProperties.preferred_contact_method.trim() || undefined,
-          // Include multiple choice answers (replace __other__ with actual other value)
-          ...Object.fromEntries(
-            Object.entries(multipleChoiceAnswers).map(([key, value]) => {
-              if (Array.isArray(value)) {
-                const processedValues = value.map(v => v === '__other__' ? otherValues[key] || '' : v).filter(v => v)
-                return [key, processedValues.join(', ')]
-              } else {
-                const processedValue = value === '__other__' ? otherValues[key] || '' : value
-                return [key, processedValue]
-              }
-            })
-          ),
-        },
-        projects: projects.map((p) => ({
+      // Build properties object only if there are any values
+      const propertiesEntries: Record<string, string> = {}
+      if (humanProperties.current_location.trim()) {
+        propertiesEntries.current_location = humanProperties.current_location.trim()
+      }
+      if (humanProperties.availability.trim()) {
+        propertiesEntries.availability = humanProperties.availability.trim()
+      }
+      if (humanProperties.social_preferences.trim()) {
+        propertiesEntries.social_preferences = humanProperties.social_preferences.trim()
+      }
+      if (humanProperties.preferred_contact_method.trim()) {
+        propertiesEntries.preferred_contact_method = humanProperties.preferred_contact_method.trim()
+      }
+      // Include multiple choice answers (replace __other__ with actual other value)
+      Object.entries(multipleChoiceAnswers).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          const processedValues = value.map(v => v === '__other__' ? otherValues[key] || '' : v).filter(v => v)
+          if (processedValues.length > 0) {
+            propertiesEntries[key] = processedValues.join(', ')
+          }
+        } else {
+          const processedValue = value === '__other__' ? otherValues[key] || '' : value
+          if (processedValue) {
+            propertiesEntries[key] = processedValue
+          }
+        }
+      })
+
+      // Filter out empty projects and build projects array
+      const validProjects = projects
+        .filter((p) => p.name.trim()) // Only include projects with a name
+        .map((p) => ({
           name: p.name.trim(),
-          description: p.description!.trim(), // Validated to exist above
-          project_type_general: p.project_type_general.trim(),
-          project_type_specific: p.project_type_specific.trim(),
+          description: p.description?.trim() || undefined,
+          project_type_general: p.project_type_general.trim() || undefined,
+          project_type_specific: p.project_type_specific.trim() || undefined,
           is_pseudo: true, // Enforced
           members: p.members
             .filter((m) => m.name.trim())
@@ -677,13 +675,24 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
             ? {
                 goals: p.properties.goals?.trim() || undefined,
                 timelines: p.properties.timelines?.trim() || undefined,
-                asks: p.properties.asks?.filter((a) => a.title.trim() || a.description.trim()).map((a) => ({
-                  title: a.title.trim(),
-                  description: a.description.trim(),
-                })),
+                asks: p.properties.asks && p.properties.asks.filter((a) => a.title.trim() || a.description.trim()).length > 0
+                  ? p.properties.asks.filter((a) => a.title.trim() || a.description.trim()).map((a) => ({
+                      title: a.title.trim(),
+                      description: a.description.trim(),
+                    }))
+                  : undefined,
               }
             : undefined,
-        })),
+        }))
+
+      const submissionData: CreateHumanPortfolioInput = {
+        name: name.trim(),
+        email: email.trim(),
+        description: description.trim() || undefined,
+        joined_community: '9f4fc0af-8997-494e-945c-d2831eaf258a', // Default admin community
+        is_pseudo: true, // Enforced
+        properties: Object.keys(propertiesEntries).length > 0 ? propertiesEntries : undefined,
+        projects: validProjects.length > 0 ? validProjects : undefined,
       }
 
       const response = await fetch('/api/public-upload-forms', {
@@ -796,14 +805,12 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         <div>
           <label htmlFor="description" className="block mb-1">
             <MarkdownText>{descriptionConfig?.label || 'Description'}</MarkdownText>
-            <UIText> *</UIText>
           </label>
           <textarea
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
-            required
             maxLength={1000}
             className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder={descriptionConfig?.placeholder || 'Tell us about yourself...'}
@@ -1073,13 +1080,13 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
         {/* Activities header */}
         <div className="md:hidden px-4 pt-2 pb-1">
           <div>
-            <Subtitle>Activities</Subtitle>
+            <Subtitle>Activities (Optional)</Subtitle>
           </div>
         </div>
         <div className="hidden md:block">
           <div className="bg-transparent rounded-xl px-6 pt-2 pb-1">
             <div>
-              <Subtitle>Activities</Subtitle>
+              <Subtitle>Activities (Optional)</Subtitle>
             </div>
           </div>
         </div>
@@ -1089,11 +1096,13 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           {/* Mobile: subtle background to distinguish from activity cards */}
           <div className="md:hidden px-4 pt-2 pb-2 bg-gray-50/50">
             <MarkdownContent>{config.activities_section_paragraph}</MarkdownContent>
+            <UIText className="text-sm text-gray-600 mt-2">You can skip this section if you don't have any activities to add.</UIText>
           </div>
           {/* Desktop: transparent card with same padding */}
           <div className="hidden md:block">
             <div className="bg-transparent rounded-xl px-6 pt-2 pb-2">
               <MarkdownContent>{config.activities_section_paragraph}</MarkdownContent>
+              <UIText className="text-sm text-gray-600 mt-2">You can skip this section if you don't have any activities to add.</UIText>
             </div>
           </div>
         </div>
@@ -1114,45 +1123,39 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
             <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <Subtitle>Activity {projectIndex + 1}</Subtitle>
-                  {projects.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="danger"
-                      size="sm"
-                      onClick={() => removeProject(projectIndex)}
-                    >
-                      Remove
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="danger"
+                    size="sm"
+                    onClick={() => removeProject(projectIndex)}
+                  >
+                    Remove
+                  </Button>
                 </div>
 
                 <div className="space-y-4">
                   <div>
                     <label className="block mb-1">
                       <MarkdownText>{projectNameConfig?.label || 'Activity Name'}</MarkdownText>
-                      <UIText> *</UIText>
                     </label>
                     <input
                       type="text"
                       value={project.name}
                       onChange={(e) => updateProject(projectIndex, { name: e.target.value })}
-                      required
                       maxLength={1000}
                       className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder={projectNameConfig?.placeholder || 'Project name'}
+                      placeholder={projectNameConfig?.placeholder || 'Project name (optional)'}
                     />
                   </div>
 
                   <div>
                     <label className="block mb-1">
                       <MarkdownText>{projectDescConfig?.label || 'Description'}</MarkdownText>
-                      <UIText> *</UIText>
                     </label>
                     <textarea
                       value={project.description || ''}
                       onChange={(e) => updateProject(projectIndex, { description: e.target.value })}
                       rows={3}
-                      required
                       maxLength={1000}
                       className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder={projectDescConfig?.placeholder || 'Activity description'}
@@ -1305,7 +1308,6 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                           <div>
                             <label className="block mb-1">
                               <MarkdownText>{memberNameConfig?.label || 'Name'}</MarkdownText>
-                              <UIText> *</UIText>
                             </label>
                             <input
                               type="text"
@@ -1313,10 +1315,9 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                               onChange={(e) =>
                                 updateMember(projectIndex, memberIndex, { name: e.target.value })
                               }
-                              required
                               maxLength={1000}
                               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              placeholder={memberNameConfig?.placeholder || 'Member name'}
+                              placeholder={memberNameConfig?.placeholder || 'Member name (optional)'}
                             />
                           </div>
                           <div>

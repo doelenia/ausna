@@ -147,14 +147,15 @@ export interface CreateHumanPortfolioInput {
     availability?: string
     social_preferences?: string
     preferred_contact_method?: string
+    [key: string]: string | undefined // Allow additional properties from form config
   }
-  projects: Array<{
+  projects?: Array<{
     name: string
     description?: string
-    project_type_general: string
-    project_type_specific: string
+    project_type_general?: string
+    project_type_specific?: string
     is_pseudo?: boolean // defaults to true
-    members: Array<{
+    members?: Array<{
       name: string
       email?: string
       role?: string // max 2 words
@@ -1325,8 +1326,8 @@ export async function createHumanPortfolioWithProjects(
       metadataUpdates.joined_community = joinedCommunity
     }
 
-    // Update properties if provided
-    if (data.properties) {
+    // Update properties if provided and not empty
+    if (data.properties && Object.keys(data.properties).length > 0) {
       metadataUpdates.properties = {
         ...(humanPortfolio.metadata.properties || {}),
         ...data.properties,
@@ -1420,8 +1421,9 @@ export async function createHumanPortfolioWithProjects(
     const existingOwnedProjects = existingMetadata.owned_projects || []
     const newProjectIds: string[] = []
 
-    // Process each project
-    for (const projectData of data.projects) {
+    // Process each project (if any)
+    const projectsToProcess = data.projects || []
+    for (const projectData of projectsToProcess) {
       // Validate project data
       if (!projectData.name || !projectData.name.trim()) {
         continue // Skip invalid projects
@@ -1429,8 +1431,11 @@ export async function createHumanPortfolioWithProjects(
 
       // Project types are optional - allow projects without types
 
+      // Process members if provided
+      const membersToProcess = projectData.members || []
+
       // Validate member roles (max 2 words)
-      const invalidRole = projectData.members.find((m) => {
+      const invalidRole = membersToProcess.find((m) => {
         if (!m.role) return false
         const words = m.role.trim().split(/\s+/)
         return words.length > 2
@@ -1471,7 +1476,7 @@ export async function createHumanPortfolioWithProjects(
       memberRoles[humanPortfolio.user_id] = 'Creator'
 
       // Process each member
-      for (const member of projectData.members) {
+      for (const member of membersToProcess) {
         if (!member.name || !member.name.trim()) {
           continue // Skip invalid members
         }
@@ -2004,6 +2009,697 @@ export async function reprocessApprovedForm(
     return { success: true }
   } catch (error: any) {
     console.error('Exception reprocessing approved form:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+// Match console actions
+interface GetMatchDataResult {
+  success: boolean
+  user?: {
+    id: string
+    email: string
+    username: string | null
+    name: string | null
+    created_at: string
+    is_blocked: boolean
+    human_portfolio_id: string | null
+  }
+  humanPortfolio?: {
+    id: string
+    metadata: any
+    created_at: string
+    updated_at: string
+  }
+  projects?: Array<{
+    id: string
+    name: string
+    metadata: any
+    created_at: string
+    updated_at: string
+    user_id: string
+  }>
+  notes?: Array<{
+    id: string
+    text: string
+    created_at: string
+    assigned_portfolios: string[]
+  }>
+  error?: string
+}
+
+/**
+ * Get match console data for a user
+ */
+export async function getMatchData(userId: string): Promise<GetMatchDataResult> {
+  try {
+    const { user, supabase } = await requireAdmin()
+    const serviceClient = createServiceClient()
+
+    // Get user data from Auth Admin API (not from a users table)
+    const { data: authUserData, error: userError } = await serviceClient.auth.admin.getUserById(userId)
+
+    if (userError || !authUserData?.user) {
+      return {
+        success: false,
+        error: 'User not found',
+      }
+    }
+
+    const userData = authUserData.user
+    const userMetadata = userData.user_metadata || {}
+    const isBlocked = userMetadata.is_blocked === true
+
+    // Get human portfolio (using serviceClient to bypass RLS and access pseudo portfolios)
+    // serviceClient uses service role key which bypasses all RLS policies
+    const { data: humanPortfolio, error: portfolioError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata, created_at, updated_at, is_pseudo')
+      .eq('user_id', userId)
+      .eq('type', 'human')
+      .maybeSingle()
+
+    if (portfolioError) {
+      console.error('Error fetching human portfolio:', portfolioError)
+    }
+
+    // Get all projects where user is owner or member
+    // Using serviceClient to bypass RLS and access pseudo portfolios
+    // serviceClient uses service role key which bypasses all RLS policies
+    const { data: allProjects, error: projectsError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata, created_at, updated_at, user_id, is_pseudo')
+      .eq('type', 'projects')
+
+    if (projectsError) {
+      console.error('Error fetching projects:', projectsError)
+    }
+
+    const userProjects = (allProjects || []).filter((p: any) => {
+      const metadata = p.metadata as any
+      const managers = metadata?.managers || []
+      const members = metadata?.members || []
+      return p.user_id === userId || 
+             (Array.isArray(managers) && managers.includes(userId)) ||
+             (Array.isArray(members) && members.includes(userId))
+    }).map((p: any) => {
+      const metadata = p.metadata as any
+      const basic = metadata?.basic || {}
+      return {
+        id: p.id,
+        name: basic.name || 'Unnamed Project',
+        metadata: p.metadata,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+        user_id: p.user_id,
+      }
+    })
+
+    // Get user's notes (using serviceClient to bypass RLS)
+    // serviceClient uses service role key which bypasses all RLS policies
+    const { data: notes, error: notesError } = await serviceClient
+      .from('notes')
+      .select('id, text, created_at, assigned_portfolios')
+      .eq('owner_account_id', userId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(100)
+
+    if (notesError) {
+      console.error('Error fetching notes:', notesError)
+    }
+
+    return {
+      success: true,
+      user: {
+        id: userData.id,
+        email: userData.email || '',
+        username: userMetadata.username || null,
+        name: userMetadata.name || userMetadata.full_name || null,
+        created_at: userData.created_at || new Date().toISOString(),
+        is_blocked: isBlocked,
+        human_portfolio_id: humanPortfolio?.id || null,
+      },
+      humanPortfolio: humanPortfolio || undefined,
+      projects: userProjects || [],
+      notes: (notes || []).map((n: any) => ({
+        id: n.id,
+        text: n.text,
+        created_at: n.created_at,
+        assigned_portfolios: n.assigned_portfolios || [],
+      })),
+    }
+  } catch (error: any) {
+    console.error('Exception getting match data:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+// Match search actions
+interface SearchMatchesResult {
+  success: boolean
+  matches?: Array<{
+    userId: string
+    email: string
+    username: string | null
+    name: string | null
+    score: number
+    description: string | null
+  }>
+  matchDetails?: {
+    forwardDetails: Record<
+      string,
+      Array<{
+        searchingAsk: string
+        maxSimilarity: number
+        matchedKnowledgeText: string
+      }>
+    >
+    backwardDetails: Record<
+      string,
+      Array<{
+        searchingNonAsk: string
+        maxSimilarity: number
+        matchedAskText: string
+      }>
+    >
+  }
+  specificDetails?: Record<
+    string,
+    Array<{
+      searchingAsk: string
+      maxSimilarity: number
+      matchedKnowledgeText: string
+    }>
+  >
+  error?: string
+}
+
+/**
+ * Search for matching users based on atomic knowledge vectors
+ */
+export async function searchMatches(userId: string, searchKeyword?: string): Promise<SearchMatchesResult> {
+  try {
+    await requireAdmin()
+    const serviceClient = createServiceClient()
+
+    const {
+      performMatchSearch,
+      performSpecificSearch,
+      combineSearchScores,
+    } = await import('@/lib/indexing/match-search')
+
+    let finalScores: Map<string, number>
+    let matchResult: Awaited<ReturnType<typeof performMatchSearch>>
+    let specificResult: Awaited<ReturnType<typeof performSpecificSearch>> | undefined
+
+    if (searchKeyword && searchKeyword.trim().length > 0) {
+      // Specific search: generate asks from keyword
+      specificResult = await performSpecificSearch(userId, searchKeyword.trim())
+      // Also perform match search for combined ranking
+      matchResult = await performMatchSearch(userId)
+      // Combine: 80% specific + 20% match
+      finalScores = combineSearchScores(specificResult.scores, matchResult.scores)
+    } else {
+      // Match search: use all user's asks (forward + backward)
+      matchResult = await performMatchSearch(userId)
+      finalScores = matchResult.scores
+    }
+
+    if (finalScores.size === 0) {
+      return {
+        success: true,
+        matches: [],
+      }
+    }
+
+    // Sort by score (descending) and get top 50
+    const sortedUserIds = Array.from(finalScores.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 50)
+      .map(([userId]) => userId)
+
+    // Fetch user data for matched users
+    const { data: authUsers, error: usersError } = await serviceClient.auth.admin.listUsers()
+
+    if (usersError) {
+      return {
+        success: false,
+        error: `Failed to fetch users: ${usersError.message}`,
+      }
+    }
+
+    // Build user map
+    const userMap = new Map(
+      (authUsers.users || []).map((user) => [
+        user.id,
+        {
+          email: user.email || '',
+          username: user.user_metadata?.username || null,
+          name: user.user_metadata?.name || user.user_metadata?.full_name || null,
+        },
+      ])
+    )
+
+    // Fetch human portfolios for matched users to get descriptions
+    const { data: humanPortfolios, error: portfoliosError } = await serviceClient
+      .from('portfolios')
+      .select('user_id, metadata')
+      .eq('type', 'human')
+      .in('user_id', sortedUserIds)
+
+    if (portfoliosError) {
+      console.error('Error fetching human portfolios for descriptions:', portfoliosError)
+    }
+
+    // Build portfolio map
+    const portfolioMap = new Map(
+      (humanPortfolios || []).map((portfolio: any) => {
+        const metadata = portfolio.metadata || {}
+        const basic = metadata.basic || {}
+        return [
+          portfolio.user_id,
+          basic.description || null,
+        ]
+      })
+    )
+
+    // Build results
+    const matches = sortedUserIds
+      .map((matchedUserId) => {
+        const userInfo = userMap.get(matchedUserId)
+        if (!userInfo) return null
+
+        const score = finalScores.get(matchedUserId) || 0
+        const description = portfolioMap.get(matchedUserId) || null
+        return {
+          userId: matchedUserId,
+          email: userInfo.email,
+          username: userInfo.username,
+          name: userInfo.name,
+          score,
+          description,
+        }
+      })
+      .filter((match): match is NonNullable<typeof match> => match !== null)
+
+    // Convert Maps to plain objects for serialization
+    const forwardDetailsObj: Record<
+      string,
+      Array<{
+        searchingAsk: string
+        maxSimilarity: number
+        matchedKnowledgeText: string
+      }>
+    > = {}
+    matchResult.forwardDetails.forEach((details, userId) => {
+      forwardDetailsObj[userId] = details
+    })
+
+    const backwardDetailsObj: Record<
+      string,
+      Array<{
+        searchingNonAsk: string
+        maxSimilarity: number
+        matchedAskText: string
+      }>
+    > = {}
+    matchResult.backwardDetails.forEach((details, userId) => {
+      backwardDetailsObj[userId] = details
+    })
+
+    const specificDetailsObj: Record<
+      string,
+      Array<{
+        searchingAsk: string
+        maxSimilarity: number
+        matchedKnowledgeText: string
+      }>
+    > | undefined = specificResult?.details
+      ? (() => {
+          const obj: Record<
+            string,
+            Array<{
+              searchingAsk: string
+              maxSimilarity: number
+              matchedKnowledgeText: string
+            }>
+          > = {}
+          specificResult.details.forEach((details, userId) => {
+            obj[userId] = details
+          })
+          return obj
+        })()
+      : undefined
+
+    return {
+      success: true,
+      matches,
+      matchDetails: {
+        forwardDetails: forwardDetailsObj,
+        backwardDetails: backwardDetailsObj,
+      },
+      specificDetails: specificDetailsObj,
+    }
+  } catch (error: any) {
+    console.error('Exception searching matches:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+interface MatchExplanationResult {
+  success: boolean
+  explanation?: {
+    paragraph: string
+    bullets: string[]
+  }
+  error?: string
+}
+
+/**
+ * Generate AI explanation for why two users are a good match
+ */
+export async function getMatchExplanation(
+  searcherId: string,
+  targetId: string,
+  specificAsks?: string[]
+): Promise<MatchExplanationResult> {
+  try {
+    await requireAdmin()
+    const serviceClient = createServiceClient()
+
+    // Fetch searcher's full profile
+    const { data: searcherPortfolio, error: searcherPortfolioError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata')
+      .eq('user_id', searcherId)
+      .eq('type', 'human')
+      .maybeSingle()
+
+    if (searcherPortfolioError) {
+      console.error('Error fetching searcher portfolio:', searcherPortfolioError)
+    }
+
+    // Fetch searcher's projects
+    const { data: searcherProjects, error: searcherProjectsError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata')
+      .eq('type', 'projects')
+
+    if (searcherProjectsError) {
+      console.error('Error fetching searcher projects:', searcherProjectsError)
+    }
+
+    const searcherUserProjects = (searcherProjects || []).filter((p: any) => {
+      const metadata = p.metadata as any
+      const managers = metadata?.managers || []
+      const members = metadata?.members || []
+      return (
+        p.user_id === searcherId ||
+        (Array.isArray(managers) && managers.includes(searcherId)) ||
+        (Array.isArray(members) && members.includes(searcherId))
+      )
+    })
+
+    // Fetch target user's full profile
+    const { data: targetPortfolio, error: targetPortfolioError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata')
+      .eq('user_id', targetId)
+      .eq('type', 'human')
+      .maybeSingle()
+
+    if (targetPortfolioError) {
+      console.error('Error fetching target portfolio:', targetPortfolioError)
+    }
+
+    // Fetch target user's projects
+    const { data: targetProjects, error: targetProjectsError } = await serviceClient
+      .from('portfolios')
+      .select('id, metadata')
+      .eq('type', 'projects')
+
+    if (targetProjectsError) {
+      console.error('Error fetching target projects:', targetProjectsError)
+    }
+
+    const targetUserProjects = (targetProjects || []).filter((p: any) => {
+      const metadata = p.metadata as any
+      const managers = metadata?.managers || []
+      const members = metadata?.members || []
+      return (
+        p.user_id === targetId ||
+        (Array.isArray(managers) && managers.includes(targetId)) ||
+        (Array.isArray(members) && members.includes(targetId))
+      )
+    })
+
+    // Build context for AI
+    const searcherProfile = searcherPortfolio?.metadata || {}
+    const searcherProjectsMetadata = searcherUserProjects.map((p: any) => p.metadata || {})
+    const targetProfile = targetPortfolio?.metadata || {}
+    const targetProjectsMetadata = targetUserProjects.map((p: any) => p.metadata || {})
+
+    const { openai } = await import('@/lib/openai/client')
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert at analyzing professional matches and explaining why two people would be good collaborators or connections.
+
+Generate a match explanation with:
+1. One short paragraph (exactly 50 words) explaining why this is a good match
+2. 3-5 bullet points (total 150 words including emojis) explaining specific reasons, each starting with an emoji
+
+Return a JSON object with:
+- paragraph: string (exactly 50 words)
+- bullets: string[] (array of bullet point strings, each with an emoji at the start, total 150 words across all bullets)
+
+Be specific and reference actual details from their profiles and projects.`,
+        },
+        {
+          role: 'user',
+          content: `Generate a match explanation.
+
+${specificAsks && specificAsks.length > 0 ? `Searcher's specific asks:\n${specificAsks.map((ask) => `- ${ask}`).join('\n')}\n\n` : ''}Searcher's Profile:
+${JSON.stringify(searcherProfile, null, 2)}
+
+Searcher's Projects:
+${JSON.stringify(searcherProjectsMetadata, null, 2)}
+
+Target User's Profile:
+${JSON.stringify(targetProfile, null, 2)}
+
+Target User's Projects:
+${JSON.stringify(targetProjectsMetadata, null, 2)}`,
+        },
+      ],
+      response_format: { type: 'json_object' },
+      max_completion_tokens: 500,
+    })
+
+    const content = completion.choices[0]?.message?.content
+    if (!content) {
+      throw new Error('No response from AI')
+    }
+
+    const result = JSON.parse(content) as {
+      paragraph?: string
+      bullets?: string[]
+    }
+
+    if (!result.paragraph || !Array.isArray(result.bullets)) {
+      throw new Error('Invalid AI response format')
+    }
+
+    return {
+      success: true,
+      explanation: {
+        paragraph: result.paragraph.trim(),
+        bullets: result.bullets.filter((bullet) => bullet && bullet.trim().length > 0),
+      },
+    }
+  } catch (error: any) {
+    console.error('Exception generating match explanation:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+interface MatchBreakdownResult {
+  success: boolean
+  forwardMatches?: Array<{
+    searchingAsk: string
+    maxSimilarity: number
+    matchedKnowledgeText: string
+    projects?: Array<{
+      id: string
+      name: string | null
+      description: string | null
+    }>
+  }>
+  backwardMatches?: Array<{
+    searchingNonAsk: string
+    maxSimilarity: number
+    matchedAskText: string
+    projects?: Array<{
+      id: string
+      name: string | null
+      description: string | null
+    }>
+  }>
+  specificMatches?: Array<{
+    searchingAsk: string
+    maxSimilarity: number
+    matchedKnowledgeText: string
+    projects?: Array<{
+      id: string
+      name: string | null
+      description: string | null
+    }>
+  }>
+  error?: string
+}
+
+/**
+ * Get detailed match breakdown for a specific target user
+ */
+export async function getMatchBreakdown(
+  searcherId: string,
+  targetUserId: string,
+  searchKeyword?: string
+): Promise<MatchBreakdownResult> {
+  try {
+    await requireAdmin()
+    const serviceClient = createServiceClient()
+
+    const {
+      performMatchSearch,
+      performSpecificSearch,
+    } = await import('@/lib/indexing/match-search')
+
+    // Get match search results (forward + backward)
+    const matchResult = await performMatchSearch(searcherId)
+    const forwardDetails = matchResult.forwardDetails.get(targetUserId) || []
+    const backwardDetails = matchResult.backwardDetails.get(targetUserId) || []
+
+    // Get specific search results if keyword provided
+    let specificDetails: Array<{
+      searchingAsk: string
+      maxSimilarity: number
+      matchedKnowledgeText: string
+    }> = []
+
+    if (searchKeyword && searchKeyword.trim().length > 0) {
+      const specificResult = await performSpecificSearch(searcherId, searchKeyword.trim())
+      specificDetails = specificResult.details.get(targetUserId) || []
+    }
+
+    // Enrich matches with project information based on atomic knowledge topics
+    const knowledgeTexts = new Set<string>()
+    forwardDetails.forEach((m) => knowledgeTexts.add(m.matchedKnowledgeText))
+    backwardDetails.forEach((m) => knowledgeTexts.add(m.matchedAskText))
+    specificDetails.forEach((m) => knowledgeTexts.add(m.matchedKnowledgeText))
+
+    let knowledgeProjectsMap = new Map<
+      string,
+      Array<{ id: string; name: string | null; description: string | null }>
+    >()
+
+    if (knowledgeTexts.size > 0) {
+      const { data: akRows } = await serviceClient
+        .from('atomic_knowledge')
+        .select('knowledge_text, assigned_projects')
+        .in('knowledge_text', Array.from(knowledgeTexts))
+
+      const projectIds = new Set<string>()
+      ;(akRows || []).forEach((row: any) => {
+        const assigned = row.assigned_projects as string[] | null
+        if (Array.isArray(assigned)) {
+          assigned.forEach((pid) => pid && projectIds.add(pid))
+        }
+      })
+
+      let projectMap = new Map<string, { id: string; name: string | null; description: string | null }>()
+      if (projectIds.size > 0) {
+        const { data: projects } = await serviceClient
+          .from('portfolios')
+          .select('id, name, metadata')
+          .in('id', Array.from(projectIds))
+          .eq('type', 'projects')
+
+        ;(projects || []).forEach((p: any) => {
+          const meta = (p.metadata as any) || {}
+          const description =
+            meta.basic?.description ||
+            meta.description ||
+            null
+
+          projectMap.set(p.id as string, {
+            id: p.id as string,
+            name: (p.name as string) || null,
+            description,
+          })
+        })
+      }
+
+      const tmpMap = new Map<
+        string,
+        Array<{ id: string; name: string | null; description: string | null }>
+      >()
+      ;(akRows || []).forEach((row: any) => {
+        const assigned = row.assigned_projects as string[] | null
+        const projects: Array<{ id: string; name: string | null; description: string | null }> = []
+        if (Array.isArray(assigned)) {
+          assigned.forEach((pid) => {
+            const proj = projectMap.get(pid)
+            if (proj) {
+              projects.push(proj)
+            }
+          })
+        }
+        tmpMap.set(row.knowledge_text as string, projects)
+      })
+
+      knowledgeProjectsMap = tmpMap
+    }
+
+    const enrichedForward = forwardDetails.map((m) => ({
+      ...m,
+      projects: knowledgeProjectsMap.get(m.matchedKnowledgeText) || [],
+    }))
+
+    const enrichedBackward = backwardDetails.map((m) => ({
+      ...m,
+      projects: knowledgeProjectsMap.get(m.matchedAskText) || [],
+    }))
+
+    const enrichedSpecific = specificDetails.map((m) => ({
+      ...m,
+      projects: knowledgeProjectsMap.get(m.matchedKnowledgeText) || [],
+    }))
+
+    return {
+      success: true,
+      forwardMatches: enrichedForward,
+      backwardMatches: enrichedBackward,
+      specificMatches: enrichedSpecific.length > 0 ? enrichedSpecific : undefined,
+    }
+  } catch (error: any) {
+    console.error('Exception getting match breakdown:', error)
     return {
       success: false,
       error: error.message || 'An unexpected error occurred',

@@ -10,3 +10,4 @@ WHERE deleted_at IS NULL;
 COMMENT ON INDEX idx_notes_mentioned_note_id_deleted_created IS 
 'Composite index for efficiently querying nested replies: filters by mentioned_note_id, excludes deleted notes, and orders by created_at. Optimizes recursive annotation/reply queries.';
 
+

@@ -244,8 +244,8 @@ export function FormSubmissionView({
       </Card>
 
       <div className="space-y-4">
-        <Subtitle>Projects ({data.projects.length})</Subtitle>
-        {data.projects.map((project, projectIndex) => (
+        <Subtitle>Projects ({data.projects?.length || 0})</Subtitle>
+        {(data.projects || []).map((project, projectIndex) => (
           <Card key={projectIndex} variant="default">
             <div className="space-y-4">
               <Subtitle>Project {projectIndex + 1}</Subtitle>
@@ -257,7 +257,7 @@ export function FormSubmissionView({
                       type="text"
                       value={project.name}
                       onChange={(e) => {
-                        const updatedProjects = [...editedData.projects]
+                        const updatedProjects = [...(editedData.projects || [])]
                         updatedProjects[projectIndex] = { ...project, name: e.target.value }
                         setEditedData({ ...editedData, projects: updatedProjects })
                       }}
@@ -273,7 +273,7 @@ export function FormSubmissionView({
                     <textarea
                       value={project.description || ''}
                       onChange={(e) => {
-                        const updatedProjects = [...editedData.projects]
+                        const updatedProjects = [...(editedData.projects || [])]
                         updatedProjects[projectIndex] = { ...project, description: e.target.value }
                         setEditedData({ ...editedData, projects: updatedProjects })
                       }}
@@ -292,7 +292,7 @@ export function FormSubmissionView({
                         generalCategory={project.project_type_general}
                         specificType={project.project_type_specific}
                         onSelect={(general, specific) => {
-                          const updatedProjects = [...editedData.projects]
+                          const updatedProjects = [...(editedData.projects || [])]
                           updatedProjects[projectIndex] = {
                             ...project,
                             project_type_general: general,
@@ -317,7 +317,7 @@ export function FormSubmissionView({
                         type="text"
                         value={project.properties.goals || ''}
                         onChange={(e) => {
-                          const updatedProjects = [...editedData.projects]
+                          const updatedProjects = [...(editedData.projects || [])]
                           updatedProjects[projectIndex] = {
                             ...project,
                             properties: { ...project.properties, goals: e.target.value },
@@ -332,9 +332,9 @@ export function FormSubmissionView({
                   </div>
                 )}
                 <div>
-                  <UIText className="font-semibold">Members ({project.members.length}):</UIText>
+                  <UIText className="font-semibold">Members ({(project.members || []).length}):</UIText>
                   <div className="mt-2 space-y-2">
-                    {project.members.map((member, memberIndex) => (
+                    {(project.members || []).map((member, memberIndex) => (
                       <div key={memberIndex} className="p-2 bg-gray-50 rounded">
                         <Content>
                           {member.name} {member.role && `(${member.role})`} {member.email && `- ${member.email}`}

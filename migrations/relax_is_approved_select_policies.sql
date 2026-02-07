@@ -24,3 +24,4 @@ CREATE POLICY "Portfolios are viewable by everyone except blocked users and pseu
   );
 
 
+

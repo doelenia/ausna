@@ -165,24 +165,19 @@ export function CreateHumanPortfolioForm({
       return 'Invalid email format'
     }
 
-    // Validate projects
+    // Validate projects (only if they exist and have content)
     for (let i = 0; i < projects.length; i++) {
       const project = projects[i]
-      if (!project.name.trim()) {
-        return `Project ${i + 1}: Name is required`
-      }
-      // Project types are optional - no validation needed
-
-      // Validate member roles (max 2 words)
-      for (let j = 0; j < project.members.length; j++) {
-        const member = project.members[j]
-        if (!member.name.trim()) {
-          return `Project ${i + 1}, Member ${j + 1}: Name is required`
-        }
-        if (member.role) {
-          const words = member.role.trim().split(/\s+/)
-          if (words.length > 2) {
-            return `Project ${i + 1}, Member ${j + 1}: Role must be 2 words or less`
+      // Only validate if project has a name (meaning user started filling it)
+      if (project.name.trim()) {
+        // Validate member roles (max 2 words)
+        for (let j = 0; j < project.members.length; j++) {
+          const member = project.members[j]
+          if (member.name.trim() && member.role) {
+            const words = member.role.trim().split(/\s+/)
+            if (words.length > 2) {
+              return `Project ${i + 1}, Member ${j + 1}: Role must be 2 words or less`
+            }
           }
         }
       }
@@ -203,23 +198,29 @@ export function CreateHumanPortfolioForm({
 
     setLoading(true)
     try {
-      const result = await createHumanPortfolioWithProjects({
-        name: name.trim(),
-        email: email.trim(),
-        description: description.trim() || undefined,
-        joined_community: joinedCommunity.trim() || undefined,
-        is_pseudo: isPseudo,
-        properties: {
-          current_location: humanProperties.current_location.trim() || undefined,
-          availability: humanProperties.availability.trim() || undefined,
-          social_preferences: humanProperties.social_preferences.trim() || undefined,
-          preferred_contact_method: humanProperties.preferred_contact_method.trim() || undefined,
-        },
-        projects: projects.map((p) => ({
+      // Build properties object only if there are any values
+      const propertiesEntries: Record<string, string> = {}
+      if (humanProperties.current_location.trim()) {
+        propertiesEntries.current_location = humanProperties.current_location.trim()
+      }
+      if (humanProperties.availability.trim()) {
+        propertiesEntries.availability = humanProperties.availability.trim()
+      }
+      if (humanProperties.social_preferences.trim()) {
+        propertiesEntries.social_preferences = humanProperties.social_preferences.trim()
+      }
+      if (humanProperties.preferred_contact_method.trim()) {
+        propertiesEntries.preferred_contact_method = humanProperties.preferred_contact_method.trim()
+      }
+
+      // Filter out empty projects and build projects array
+      const validProjects = projects
+        .filter((p) => p.name.trim()) // Only include projects with a name
+        .map((p) => ({
           name: p.name.trim(),
           description: p.description?.trim() || undefined,
-          project_type_general: p.project_type_general.trim(),
-          project_type_specific: p.project_type_specific.trim(),
+          project_type_general: p.project_type_general.trim() || undefined,
+          project_type_specific: p.project_type_specific.trim() || undefined,
           is_pseudo: p.is_pseudo,
           members: p.members
             .filter((m) => m.name.trim())
@@ -233,13 +234,24 @@ export function CreateHumanPortfolioForm({
             ? {
                 goals: p.properties.goals?.trim() || undefined,
                 timelines: p.properties.timelines?.trim() || undefined,
-                asks: p.properties.asks?.filter((a) => a.title.trim() || a.description.trim()).map((a) => ({
-                  title: a.title.trim(),
-                  description: a.description.trim(),
-                })),
+                asks: p.properties.asks && p.properties.asks.filter((a) => a.title.trim() || a.description.trim()).length > 0
+                  ? p.properties.asks.filter((a) => a.title.trim() || a.description.trim()).map((a) => ({
+                      title: a.title.trim(),
+                      description: a.description.trim(),
+                    }))
+                  : undefined,
               }
             : undefined,
-        })),
+        }))
+
+      const result = await createHumanPortfolioWithProjects({
+        name: name.trim(),
+        email: email.trim(),
+        description: description.trim() || undefined,
+        joined_community: joinedCommunity.trim() || undefined,
+        is_pseudo: isPseudo,
+        properties: Object.keys(propertiesEntries).length > 0 ? propertiesEntries : undefined,
+        projects: validProjects.length > 0 ? validProjects : undefined,
       })
 
       if (result.success) {
@@ -428,30 +440,27 @@ export function CreateHumanPortfolioForm({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <Subtitle>Project {projectIndex + 1}</Subtitle>
-                {projects.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => removeProject(projectIndex)}
-                  >
-                    Remove
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => removeProject(projectIndex)}
+                >
+                  Remove
+                </Button>
               </div>
 
               <div className="space-y-4">
                 <div>
                   <label className="block mb-1">
-                    <UIText>Project Name *</UIText>
+                    <UIText>Project Name</UIText>
                   </label>
                   <input
                     type="text"
                     value={project.name}
                     onChange={(e) => updateProject(projectIndex, { name: e.target.value })}
-                    required
                     className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Project name"
+                    placeholder="Project name (optional)"
                   />
                 </div>
 
@@ -623,7 +632,7 @@ export function CreateHumanPortfolioForm({
                       <div className="space-y-2">
                         <div>
                           <label className="block mb-1">
-                            <UIText>Name *</UIText>
+                            <UIText>Name</UIText>
                           </label>
                           <input
                             type="text"
@@ -631,9 +640,8 @@ export function CreateHumanPortfolioForm({
                             onChange={(e) =>
                               updateMember(projectIndex, memberIndex, { name: e.target.value })
                             }
-                            required
                             className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Member name"
+                            placeholder="Member name (optional)"
                           />
                         </div>
                         <div>

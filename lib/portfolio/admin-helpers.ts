@@ -335,7 +335,8 @@ export async function updateHumanPortfolioMetadataById(
   portfolioId: string,
   updates: Partial<HumanPortfolioMetadata>
 ): Promise<HumanPortfolio> {
-  const supabase = await createClient()
+  // Use service client to ensure admin helpers bypass RLS consistently
+  const supabase = createServiceClient()
   
   // Get existing portfolio
   const { data: portfolio, error: fetchError } = await supabase
@@ -360,7 +361,7 @@ export async function updateHumanPortfolioMetadataById(
       ...(updates.basic || {}),
     },
   }
-  
+
   // Update metadata (without select to avoid RLS blocking)
   const { error: updateError } = await supabase
     .from('portfolios')
@@ -371,7 +372,7 @@ export async function updateHumanPortfolioMetadataById(
     throw new Error(`Failed to update human portfolio: ${updateError.message}`)
   }
   
-  // Fetch updated portfolio in a separate query (avoids RLS blocking on update chain)
+  // Fetch updated portfolio in a separate query
   const { data, error: selectError } = await supabase
     .from('portfolios')
     .select('*')

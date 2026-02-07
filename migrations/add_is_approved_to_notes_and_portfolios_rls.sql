@@ -84,3 +84,4 @@ CREATE POLICY "Users can delete their own portfolios (approved and not blocked)"
   );
 
 
+
