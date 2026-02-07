@@ -138,7 +138,7 @@ export async function getUserNonAsks(userId: string): Promise<string[]> {
  */
 export async function getUserAskVectors(
   userId: string
-): Promise<Array<{ text: string; embedding: number[]; topicIds: string[] }>> {
+): Promise<Array<{ id: string; text: string; embedding: number[]; topicIds: string[] }>> {
   const supabase = createServiceClient()
 
   const { data: humanPortfolio, error: portfolioError } = await supabase
@@ -152,7 +152,7 @@ export async function getUserAskVectors(
 
   const { data: asks, error: asksError } = await supabase
     .from('atomic_knowledge')
-    .select('knowledge_text, knowledge_vector, topics')
+    .select('id, knowledge_text, knowledge_vector, topics')
     .eq('is_asks', true)
     .contains('assigned_human', [humanPortfolio.id])
     .not('knowledge_vector', 'is', null)
@@ -164,13 +164,14 @@ export async function getUserAskVectors(
 
   const result = (asks || [])
     .map((ask: any) => ({
+      id: ask.id as string,
       text: ask.knowledge_text as string,
       embedding: normalizeVector(ask.knowledge_vector),
       topicIds: Array.isArray(ask.topics) ? (ask.topics as string[]) : [],
     }))
     .filter(
-      (x): x is { text: string; embedding: number[]; topicIds: string[] } =>
-        Boolean(x.text) && Array.isArray(x.embedding)
+      (x): x is { id: string; text: string; embedding: number[]; topicIds: string[] } =>
+        Boolean(x.id) && Boolean(x.text) && Array.isArray(x.embedding)
     )
 
   return result
@@ -181,7 +182,7 @@ export async function getUserAskVectors(
  */
 export async function getUserNonAskVectors(
   userId: string
-): Promise<Array<{ text: string; embedding: number[]; topicIds: string[] }>> {
+): Promise<Array<{ id: string; text: string; embedding: number[]; topicIds: string[] }>> {
   const supabase = createServiceClient()
 
   const { data: humanPortfolio, error: portfolioError } = await supabase
@@ -195,7 +196,7 @@ export async function getUserNonAskVectors(
 
   const { data: nonAsks, error: nonAsksError } = await supabase
     .from('atomic_knowledge')
-    .select('knowledge_text, knowledge_vector, topics')
+    .select('id, knowledge_text, knowledge_vector, topics')
     .eq('is_asks', false)
     .contains('assigned_human', [humanPortfolio.id])
     .not('knowledge_vector', 'is', null)
@@ -207,17 +208,18 @@ export async function getUserNonAskVectors(
 
   return (nonAsks || [])
     .map((nonAsk: any) => ({
+      id: nonAsk.id as string,
       text: nonAsk.knowledge_text as string,
       embedding: normalizeVector(nonAsk.knowledge_vector),
       topicIds: Array.isArray(nonAsk.topics) ? (nonAsk.topics as string[]) : [],
     }))
     .filter(
-      (x): x is { text: string; embedding: number[]; topicIds: string[] } =>
-        Boolean(x.text) && Array.isArray(x.embedding)
+      (x): x is { id: string; text: string; embedding: number[]; topicIds: string[] } =>
+        Boolean(x.id) && Boolean(x.text) && Array.isArray(x.embedding)
     )
 }
 
-type TopicSimilarity = { id: string; similarity: number }
+type TopicSimilarity = { id: string; similarity: number; sourceSearcherTopicId?: string }
 
 async function getExpandedTopicsWithSimilarity(
   assignedTopicIds: string[]
@@ -235,7 +237,7 @@ async function getExpandedTopicsWithSimilarity(
 
   if (error) {
     console.error('Error fetching assigned topics for expansion:', error)
-    return assignedTopicIds.map((id) => ({ id, similarity: 1 }))
+    return assignedTopicIds.map((id) => ({ id, similarity: 1, sourceSearcherTopicId: id }))
   }
 
   const vectors = (topics || [])
@@ -245,18 +247,22 @@ async function getExpandedTopicsWithSimilarity(
     }))
     .filter((t): t is { id: string; embedding: number[] } => Boolean(t.id) && Array.isArray(t.embedding))
 
-  const similarityMap = new Map<string, number>()
+  // Map: topicId -> { similarity, sourceSearcherTopicId }
+  // For each topic, we track the highest similarity and which searcher topic it came from
+  const similarityMap = new Map<string, { similarity: number; sourceSearcherTopicId: string }>()
 
-  // Originals always have similarity 1
+  // Originals always have similarity 1 and come from themselves
   assignedTopicIds.forEach((id) => {
-    similarityMap.set(id, 1)
+    similarityMap.set(id, { similarity: 1, sourceSearcherTopicId: id })
   })
 
   // Call match_topics in parallel for each assigned topic and record similarities
   await Promise.all(
     vectors.map(async (t) => {
+      const searcherTopicId = t.id
       const { data: similar, error: matchError } = await supabase.rpc('match_topics', {
         query_embedding: t.embedding,
+        match_threshold: 0.2, // 80% similarity threshold (1 - 0.2 = 0.8)
         // Take only the top 3 similar topics per original topic
         match_count: 3,
       })
@@ -269,15 +275,20 @@ async function getExpandedTopicsWithSimilarity(
       ;(similar || []).forEach((s: any) => {
         const id = s.id as string
         const sim = typeof s.similarity === 'number' ? s.similarity : 0
-        const existing = similarityMap.get(id) ?? 0
-        if (sim > existing) {
-          similarityMap.set(id, sim)
+        const existing = similarityMap.get(id)
+        // Keep the highest similarity, and track which searcher topic it came from
+        if (!existing || sim > existing.similarity) {
+          similarityMap.set(id, { similarity: sim, sourceSearcherTopicId: searcherTopicId })
         }
       })
     })
   )
 
-  return Array.from(similarityMap.entries()).map(([id, similarity]) => ({ id, similarity }))
+  return Array.from(similarityMap.entries()).map(([id, data]) => ({ 
+    id, 
+    similarity: data.similarity,
+    sourceSearcherTopicId: data.sourceSearcherTopicId
+  }))
 }
 
 /**
@@ -315,6 +326,7 @@ export async function searchMatchesForAsk(
     portfolioId: string
     similarity: number
     matchedKnowledgeText: string
+    matchedKnowledgeId: string
   }>
 > {
   const supabase = createServiceClient()
@@ -374,6 +386,7 @@ export async function searchMatchesForAsk(
       portfolioId: string
       similarity: number
       matchedKnowledgeText: string
+      matchedKnowledgeId: string
     }
   >()
 
@@ -389,6 +402,7 @@ export async function searchMatchesForAsk(
             if (match.similarity > existing.similarity) {
               existing.similarity = match.similarity
               existing.matchedKnowledgeText = match.knowledge_text
+              existing.matchedKnowledgeId = match.id
             }
           } else {
             userMaxScores.set(key, {
@@ -396,6 +410,7 @@ export async function searchMatchesForAsk(
               portfolioId,
               similarity: match.similarity,
               matchedKnowledgeText: match.knowledge_text,
+              matchedKnowledgeId: match.id,
             })
           }
         }
@@ -421,6 +436,7 @@ export async function searchMatchesForNonAsk(
     portfolioId: string
     similarity: number
     matchedAskText: string
+    matchedKnowledgeId: string
   }>
 > {
   const supabase = createServiceClient()
@@ -478,6 +494,7 @@ export async function searchMatchesForNonAsk(
       portfolioId: string
       similarity: number
       matchedAskText: string
+      matchedKnowledgeId: string
     }
   >()
 
@@ -493,6 +510,7 @@ export async function searchMatchesForNonAsk(
             if (match.similarity > existing.similarity) {
               existing.similarity = match.similarity
               existing.matchedAskText = match.knowledge_text
+              existing.matchedKnowledgeId = match.id
             }
           } else {
             userMaxScores.set(key, {
@@ -500,6 +518,7 @@ export async function searchMatchesForNonAsk(
               portfolioId,
               similarity: match.similarity,
               matchedAskText: match.knowledge_text,
+              matchedKnowledgeId: match.id,
             })
           }
         }
@@ -515,7 +534,7 @@ export async function searchMatchesForNonAsk(
  * Returns map of userId -> final score (80% max + 20% average) and detailed match info
  */
 export async function calculateMatchScores(
-  asks: Array<{ text: string; embedding?: number[]; topicIds?: string[] }>,
+  asks: Array<{ id: string; text: string; embedding?: number[]; topicIds?: string[] }>,
   searcherPortfolioId: string
 ): Promise<{
   scores: Map<string, number>
@@ -542,8 +561,10 @@ export async function calculateMatchScores(
     string,
     Array<{
       searchingAsk: string
+      searchingAskId?: string // Atomic knowledge ID for the searching ask
       maxSimilarity: number
       matchedKnowledgeText: string
+      matchedKnowledgeId: string // Atomic knowledge ID for the matched knowledge
     }>
   >()
 
@@ -579,12 +600,15 @@ export async function calculateMatchScores(
         if (match.similarity > existingDetail.maxSimilarity) {
           existingDetail.maxSimilarity = match.similarity
           existingDetail.matchedKnowledgeText = match.matchedKnowledgeText
+          existingDetail.matchedKnowledgeId = match.matchedKnowledgeId
         }
       } else {
         userDetail.push({
           searchingAsk: ask.text,
+          searchingAskId: ask.id || '', // Atomic knowledge ID for the searching ask (empty string if AI-suggested)
           maxSimilarity: match.similarity,
           matchedKnowledgeText: match.matchedKnowledgeText,
+          matchedKnowledgeId: match.matchedKnowledgeId,
         })
         userDetails.set(match.userId, userDetail)
       }
@@ -608,7 +632,7 @@ export async function calculateMatchScores(
  * Returns map of userId -> final score (80% max + 20% average) and detailed match info
  */
 export async function calculateBackwardMatchScores(
-  nonAsks: Array<{ text: string; embedding?: number[]; topicIds?: string[] }>,
+  nonAsks: Array<{ id: string; text: string; embedding?: number[]; topicIds?: string[] }>,
   searcherPortfolioId: string
 ): Promise<{
   scores: Map<string, number>
@@ -616,8 +640,10 @@ export async function calculateBackwardMatchScores(
     string,
     Array<{
       searchingNonAsk: string
+      searchingNonAskId: string // Atomic knowledge ID for the searching non-ask
       maxSimilarity: number
       matchedAskText: string
+      matchedKnowledgeId: string // Atomic knowledge ID for the matched ask
     }>
   >
 }> {
@@ -635,8 +661,10 @@ export async function calculateBackwardMatchScores(
     string,
     Array<{
       searchingNonAsk: string
+      searchingNonAskId: string // Atomic knowledge ID for the searching non-ask
       maxSimilarity: number
       matchedAskText: string
+      matchedKnowledgeId: string // Atomic knowledge ID for the matched ask
     }>
   >()
 
@@ -672,12 +700,15 @@ export async function calculateBackwardMatchScores(
         if (match.similarity > existingDetail.maxSimilarity) {
           existingDetail.maxSimilarity = match.similarity
           existingDetail.matchedAskText = match.matchedAskText
+          existingDetail.matchedKnowledgeId = match.matchedKnowledgeId
         }
       } else {
         userDetail.push({
           searchingNonAsk: nonAsk.text,
+          searchingNonAskId: nonAsk.id || '', // Atomic knowledge ID for the searching non-ask (empty string if AI-suggested)
           maxSimilarity: match.similarity,
           matchedAskText: match.matchedAskText,
+          matchedKnowledgeId: match.matchedKnowledgeId,
         })
         userDetails.set(match.userId, userDetail)
       }
@@ -706,16 +737,31 @@ export async function performMatchSearch(userId: string): Promise<{
     string,
     Array<{
       searchingAsk: string
+      searchingAskId: string
       maxSimilarity: number
       matchedKnowledgeText: string
+      matchedKnowledgeId: string
     }>
   >
   backwardDetails: Map<
     string,
     Array<{
       searchingNonAsk: string
+      searchingNonAskId: string
       maxSimilarity: number
       matchedAskText: string
+      matchedKnowledgeId: string
+    }>
+  >
+  topicDetails: Map<
+    string,
+    Array<{
+      searcherTopicId: string
+      searcherTopicName: string
+      targetTopicId: string
+      targetTopicName: string
+      similarity: number
+      multiplier: number
     }>
   >
 }> {
@@ -854,6 +900,7 @@ ${existingNonAsksText || '(none)'}
           const extras = generatedAsks.filter((text) => !existingAskTexts.has(text))
           asks = asks.concat(
             extras.map((text) => ({
+              id: '', // AI-suggested asks don't have atomic knowledge IDs
               text,
               embedding: undefined as any,
               topicIds: [],
@@ -866,6 +913,7 @@ ${existingNonAsksText || '(none)'}
           const extras = generatedNonAsks.filter((text) => !existingNonAskTexts.has(text))
           nonAsks = nonAsks.concat(
             extras.map((text) => ({
+              id: '', // AI-suggested non-asks don't have atomic knowledge IDs
               text,
               embedding: undefined as any,
               topicIds: [],
@@ -886,6 +934,7 @@ ${existingNonAsksText || '(none)'}
       scores: new Map(),
       forwardDetails: new Map(),
       backwardDetails: new Map(),
+      topicDetails: new Map(),
     }
   }
 
@@ -920,21 +969,74 @@ ${existingNonAsksText || '(none)'}
   asks.forEach((ask) => ask.topicIds.forEach((id) => id && assignedTopicIdsSet.add(id)))
   nonAsks.forEach((nonAsk) => nonAsk.topicIds.forEach((id) => id && assignedTopicIdsSet.add(id)))
 
+  console.log('[Topic Match] Searcher topic IDs:', Array.from(assignedTopicIdsSet))
+  console.log('[Topic Match] Candidate user IDs:', Array.from(allUserIds))
+
   let finalScores = baseScores
+  const topicDetails = new Map<
+    string,
+    Array<{
+      searcherTopicId: string
+      searcherTopicName: string
+      targetTopicId: string
+      targetTopicName: string
+      similarity: number
+      multiplier: number
+    }>
+  >()
 
   if (assignedTopicIdsSet.size > 0 && allUserIds.size > 0) {
+    const supabase = createServiceClient()
+
+    // Fetch searcher's topic names
+    const { data: searcherTopics, error: searcherTopicsError } = await supabase
+      .from('topics')
+      .select('id, name')
+      .in('id', Array.from(assignedTopicIdsSet))
+
+    const searcherTopicNameMap = new Map<string, string>()
+    if (!searcherTopicsError && searcherTopics) {
+      searcherTopics.forEach((t: any) => {
+        searcherTopicNameMap.set(t.id, t.name || 'Unknown Topic')
+      })
+      console.log('[Topic Match] Searcher topics:', Array.from(searcherTopicNameMap.entries()).map(([id, name]) => ({ id, name })))
+    }
+
     const expandedTopics = await getExpandedTopicsWithSimilarity(Array.from(assignedTopicIdsSet))
-    const topicSimilarityMap = new Map<string, number>()
+    console.log('[Topic Match] Expanded topics count:', expandedTopics.length)
+    console.log('[Topic Match] Expanded topics:', expandedTopics.map(t => ({ id: t.id, similarity: t.similarity, sourceSearcherTopicId: t.sourceSearcherTopicId })))
+    
+    // Map: topicId -> { similarity, sourceSearcherTopicId }
+    // This tracks the best similarity for each topic and which searcher topic it came from
+    const topicSimilarityMap = new Map<string, { similarity: number; sourceSearcherTopicId: string }>()
+    const searcherTopicToExpandedMap = new Map<string, Map<string, number>>() // Map searcher topic -> (expanded topic -> similarity)
+
+    // Build mapping from searcher topics to expanded topics with their similarities
+    assignedTopicIdsSet.forEach((searcherTopicId) => {
+      searcherTopicToExpandedMap.set(searcherTopicId, new Map([[searcherTopicId, 1]]))
+    })
+
     expandedTopics.forEach((t) => {
-      const existing = topicSimilarityMap.get(t.id) ?? 0
-      if (t.similarity > existing) {
-        topicSimilarityMap.set(t.id, t.similarity)
+      const existing = topicSimilarityMap.get(t.id)
+      // Keep the highest similarity
+      if (!existing || t.similarity > existing.similarity) {
+        topicSimilarityMap.set(t.id, { 
+          similarity: t.similarity, 
+          sourceSearcherTopicId: t.sourceSearcherTopicId || t.id 
+        })
+      }
+
+      // Track which searcher topic this expanded topic came from
+      const sourceSearcherTopicId = t.sourceSearcherTopicId || t.id
+      if (assignedTopicIdsSet.has(sourceSearcherTopicId)) {
+        const expandedMap = searcherTopicToExpandedMap.get(sourceSearcherTopicId)
+        if (expandedMap) {
+          expandedMap.set(t.id, t.similarity)
+        }
       }
     })
 
     if (topicSimilarityMap.size > 0) {
-      const supabase = createServiceClient()
-
       // Fetch user interests for all candidate users and relevant topics
       const { data: interests, error } = await supabase
         .from('user_interests')
@@ -942,16 +1044,119 @@ ${existingNonAsksText || '(none)'}
         .in('user_id', Array.from(allUserIds))
         .in('topic_id', Array.from(topicSimilarityMap.keys()))
 
+      console.log('[Topic Match] User interests found:', interests?.length || 0)
+      if (interests && interests.length > 0) {
+        console.log('[Topic Match] User interests:', interests.map((r: any) => ({ userId: r.user_id, topicId: r.topic_id })))
+      }
+
+      // Fetch target user topic names
+      const targetTopicIds = new Set<string>()
+      interests?.forEach((row: any) => {
+        targetTopicIds.add(row.topic_id)
+      })
+
+      const { data: targetTopics, error: targetTopicsError } = await supabase
+        .from('topics')
+        .select('id, name')
+        .in('id', Array.from(targetTopicIds))
+
+      const targetTopicNameMap = new Map<string, string>()
+      if (!targetTopicsError && targetTopics) {
+        targetTopics.forEach((t: any) => {
+          targetTopicNameMap.set(t.id, t.name || 'Unknown Topic')
+        })
+        console.log('[Topic Match] Target user topics:', Array.from(targetTopicNameMap.entries()).map(([id, name]) => ({ id, name })))
+      }
+
       if (!error && interests) {
         const interestSums = new Map<string, number>()
+        const userTopicMatches = new Map<
+          string,
+          Map<
+            string,
+            {
+              searcherTopicId: string
+              targetTopicId: string
+              similarity: number
+            }
+          >
+        >()
+
         interests.forEach((row: any) => {
           const uid = row.user_id as string
-          const topicId = row.topic_id as string
-          const sim = topicSimilarityMap.get(topicId) ?? 0
-          if (sim > 0) {
+          const targetTopicId = row.topic_id as string
+          const topicData = topicSimilarityMap.get(targetTopicId)
+          if (topicData && topicData.similarity > 0) {
+            const sim = topicData.similarity
             const prev = interestSums.get(uid) ?? 0
             interestSums.set(uid, prev + sim)
+
+            // Track which searcher topics match this target topic
+            if (!userTopicMatches.has(uid)) {
+              userTopicMatches.set(uid, new Map())
+            }
+            const userMatches = userTopicMatches.get(uid)!
+
+            // Find which searcher topic(s) this target topic matches
+            // Use the expanded map to find which searcher topics have this target topic
+            assignedTopicIdsSet.forEach((searcherTopicId) => {
+              const expandedMap = searcherTopicToExpandedMap.get(searcherTopicId)
+              const topicSimilarity = expandedMap?.get(targetTopicId)
+              if (topicSimilarity !== undefined && topicSimilarity > 0) {
+                const key = `${searcherTopicId}:${targetTopicId}`
+                const existing = userMatches.get(key)
+                // Use the similarity from the expanded map, which is specific to this searcher topic
+                if (!existing || topicSimilarity > existing.similarity) {
+                  userMatches.set(key, {
+                    searcherTopicId,
+                    targetTopicId,
+                    similarity: topicSimilarity,
+                  })
+                }
+              }
+            })
           }
+        })
+
+        // Build topic details for each user
+        userTopicMatches.forEach((matches, uid) => {
+          const userTopicDetails: Array<{
+            searcherTopicId: string
+            searcherTopicName: string
+            targetTopicId: string
+            targetTopicName: string
+            similarity: number
+            multiplier: number
+          }> = []
+
+          matches.forEach((match) => {
+            const searcherTopicName = searcherTopicNameMap.get(match.searcherTopicId) || 'Unknown Topic'
+            const targetTopicName = targetTopicNameMap.get(match.targetTopicId) || 'Unknown Topic'
+            const sumSim = interestSums.get(uid) ?? 0
+            const multiplier = Math.sqrt(sumSim + 1)
+
+            userTopicDetails.push({
+              searcherTopicId: match.searcherTopicId,
+              searcherTopicName,
+              targetTopicId: match.targetTopicId,
+              targetTopicName,
+              similarity: match.similarity,
+              multiplier,
+            })
+          })
+
+          // Sort by similarity descending
+          userTopicDetails.sort((a, b) => b.similarity - a.similarity)
+          topicDetails.set(uid, userTopicDetails)
+          
+          console.log(`[Topic Match] User ${uid} topic matches (${userTopicDetails.length}):`, 
+            userTopicDetails.map(d => ({
+              searcherTopic: d.searcherTopicName,
+              targetTopic: d.targetTopicName,
+              similarity: d.similarity.toFixed(4),
+              multiplier: d.multiplier.toFixed(4)
+            }))
+          )
         })
 
         // Apply multiplier: sqrt(sum(similarity) + 1)
@@ -966,10 +1171,19 @@ ${existingNonAsksText || '(none)'}
     }
   }
 
+  console.log('[Topic Match] Final topic details summary:', {
+    totalUsers: topicDetails.size,
+    usersWithMatches: Array.from(topicDetails.entries()).map(([uid, details]) => ({
+      userId: uid,
+      matchCount: details.length
+    }))
+  })
+
   return {
     scores: finalScores,
     forwardDetails: forwardResult.details,
     backwardDetails: backwardResult.details,
+    topicDetails,
   }
 }
 
@@ -1008,7 +1222,7 @@ export async function performSpecificSearch(
   }
 
   // Keyword-generated asks don't exist in atomic_knowledge yet, so we must generate embeddings
-  const askItems = asks.map((text) => ({ text }))
+  const askItems = asks.map((text) => ({ id: '', text })) // Empty ID for keyword-generated asks
   return await calculateMatchScores(askItems, searcherPortfolioId)
 }
 

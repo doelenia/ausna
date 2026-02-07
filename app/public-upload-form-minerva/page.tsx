@@ -2,6 +2,8 @@ import { PublicUploadForm } from '@/components/public-upload/PublicUploadForm'
 import { PublicUploadFormConfig } from '@/types/public-upload-form'
 import { createClient } from '@/lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
+
 async function getFormConfig(): Promise<PublicUploadFormConfig> {
   try {
     const supabase = await createClient()

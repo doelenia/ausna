@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Card, Title, Subtitle, Content, UIText } from '@/components/ui'
-import { getMatchExplanation, getMatchData, getMatchBreakdown } from '@/app/admin/actions'
+import { getMatchExplanation, getMatchData, getMatchBreakdown, getUserInterests } from '@/app/admin/actions'
 import { SimpleBarChart } from './SimpleBarChart'
 
 interface MatchUserDetailProps {
@@ -20,16 +20,20 @@ interface MatchUserDetailProps {
       string,
       Array<{
         searchingAsk: string
+        searchingAskId: string
         maxSimilarity: number
         matchedKnowledgeText: string
+        matchedKnowledgeId: string
       }>
     >
     backwardDetails?: Record<
       string,
       Array<{
         searchingNonAsk: string
+        searchingNonAskId: string
         maxSimilarity: number
         matchedAskText: string
+        matchedKnowledgeId: string
       }>
     >
     specificDetails?: Record<
@@ -38,13 +42,25 @@ interface MatchUserDetailProps {
         searchingAsk: string
         maxSimilarity: number
         matchedKnowledgeText: string
+        matchedKnowledgeId?: string
+      }>
+    >
+    topicDetails?: Record<
+      string,
+      Array<{
+        searcherTopicId: string
+        searcherTopicName: string
+        targetTopicId: string
+        targetTopicName: string
+        similarity: number
+        multiplier: number
       }>
     >
   }
   onClose: () => void
 }
 
-type Tab = 'forward' | 'backward' | 'specific' | 'profile' | 'projects'
+type Tab = 'forward' | 'backward' | 'specific' | 'topic' | 'profile' | 'projects'
 
 interface MatchExplanation {
   paragraph: string
@@ -68,11 +84,24 @@ export function MatchUserDetail({
     projects: any[]
   } | null>(null)
   const [isLoadingData, setIsLoadingData] = useState(false)
+  const [targetUserInterests, setTargetUserInterests] = useState<
+    Array<{ topicId: string; topicName: string; aggregateScore: number }>
+  >([])
   const [matchBreakdown, setMatchBreakdown] = useState<{
     forwardMatches?: Array<{
       searchingAsk: string
       maxSimilarity: number
       matchedKnowledgeText: string
+      searchingProject?: {
+        id: string
+        name: string | null
+        description: string | null
+      }
+      matchedProject?: {
+        id: string
+        name: string | null
+        description: string | null
+      }
       projects?: Array<{
         id: string
         name: string | null
@@ -83,6 +112,16 @@ export function MatchUserDetail({
       searchingNonAsk: string
       maxSimilarity: number
       matchedAskText: string
+      searchingProject?: {
+        id: string
+        name: string | null
+        description: string | null
+      }
+      matchedProject?: {
+        id: string
+        name: string | null
+        description: string | null
+      }
       projects?: Array<{
         id: string
         name: string | null
@@ -93,26 +132,41 @@ export function MatchUserDetail({
       searchingAsk: string
       maxSimilarity: number
       matchedKnowledgeText: string
+      matchedProject?: {
+        id: string
+        name: string | null
+        description: string | null
+      }
       projects?: Array<{
         id: string
         name: string | null
         description: string | null
       }>
     }>
+    topicMatches?: Array<{
+      searcherTopicId: string
+      searcherTopicName: string
+      targetTopicId: string
+      targetTopicName: string
+      similarity: number
+      multiplier: number
+    }>
   } | null>(null)
 
   // Avoid duplicate explanation generation for the same (searcher, target, keyword) combination
   const explanationKeyRef = useRef<string | null>(null)
+  // Track if enrichment has been completed to prevent multiple calls
+  const enrichmentCompletedRef = useRef<string | null>(null)
 
-  // Load match breakdown immediately from cached details
+  // Step 1: Load match breakdown immediately from cached details (instant display)
   useEffect(() => {
     if (matchDetails) {
-      // Use cached match details from search results - instant!
       const forwardDetails = matchDetails.forwardDetails?.[targetUserId] || []
       const backwardDetails = matchDetails.backwardDetails?.[targetUserId] || []
       const specificDetails = searchKeyword
         ? matchDetails.specificDetails?.[targetUserId] || []
         : undefined
+      const topicDetails = matchDetails.topicDetails?.[targetUserId] || []
 
       setMatchBreakdown({
         forwardMatches: forwardDetails
@@ -125,34 +179,20 @@ export function MatchUserDetail({
           specificDetails && specificDetails.length > 0
             ? specificDetails.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
             : undefined,
+        topicMatches: topicDetails.slice().sort((a, b) => b.similarity - a.similarity),
       })
-    } else {
-      // Fallback: fetch if details not provided (shouldn't happen in normal flow)
-      async function fetchBreakdown() {
-        const breakdownResult = await getMatchBreakdown(searcherId, targetUserId, searchKeyword)
-        if (breakdownResult.success) {
-          setMatchBreakdown({
-            forwardMatches: breakdownResult.forwardMatches
-              ? breakdownResult.forwardMatches.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
-              : undefined,
-            backwardMatches: breakdownResult.backwardMatches
-              ? breakdownResult.backwardMatches.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
-              : undefined,
-            specificMatches: breakdownResult.specificMatches
-              ? breakdownResult.specificMatches.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
-              : undefined,
-          })
-        }
-      }
-      fetchBreakdown()
     }
-  }, [searcherId, targetUserId, searchKeyword, matchDetails])
+  }, [matchDetails, targetUserId, searchKeyword])
 
-  // Load user data separately
+  // Step 2: Load user data first (portfolio, projects, interests) - must complete before enriching matches
   useEffect(() => {
     async function loadUserData() {
       setIsLoadingData(true)
-      const userDataResult = await getMatchData(targetUserId)
+      const [userDataResult, interestsResult] = await Promise.all([
+        getMatchData(targetUserId),
+        getUserInterests(targetUserId),
+      ])
+      
       if (userDataResult.success && userDataResult.user) {
         setTargetUserData({
           user: userDataResult.user,
@@ -160,10 +200,63 @@ export function MatchUserDetail({
           projects: userDataResult.projects || [],
         })
       }
+      
+      if (interestsResult.success && interestsResult.interests) {
+        setTargetUserInterests(interestsResult.interests)
+      }
+      
       setIsLoadingData(false)
     }
     loadUserData()
   }, [targetUserId])
+
+  // Step 3: Load enriched match breakdown AFTER user data is loaded (reuses projects from Step 2)
+  useEffect(() => {
+    // Wait for user data to be loaded before enriching
+    if (isLoadingData || !targetUserData || !matchDetails) return
+
+    // Create a unique key for this enrichment request
+    const enrichmentKey = `${searcherId}:${targetUserId}:${searchKeyword || ''}`
+    
+    // Skip if already enriched for this combination
+    if (enrichmentCompletedRef.current === enrichmentKey) {
+      return
+    }
+
+    async function fetchEnrichedBreakdown() {
+      // Pass projects and matchDetails from already-loaded data to avoid DB calls and rerunning match
+      const projects = targetUserData?.projects || []
+      const breakdownResult = await getMatchBreakdown(
+        searcherId,
+        targetUserId,
+        searchKeyword,
+        projects,
+        matchDetails // Pass cached match details to avoid rerunning the match
+      )
+      
+      if (breakdownResult.success) {
+        // Mark as completed
+        enrichmentCompletedRef.current = enrichmentKey
+        // Update with enriched data (includes project info)
+        setMatchBreakdown({
+          forwardMatches: breakdownResult.forwardMatches
+            ? breakdownResult.forwardMatches.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
+            : undefined,
+          backwardMatches: breakdownResult.backwardMatches
+            ? breakdownResult.backwardMatches.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
+            : undefined,
+          specificMatches: breakdownResult.specificMatches
+            ? breakdownResult.specificMatches.slice().sort((a, b) => b.maxSimilarity - a.maxSimilarity)
+            : undefined,
+          topicMatches: breakdownResult.topicMatches
+            ? breakdownResult.topicMatches.slice().sort((a, b) => b.similarity - a.similarity)
+            : undefined,
+        })
+      }
+    }
+    
+    fetchEnrichedBreakdown()
+  }, [searcherId, targetUserId, searchKeyword, matchDetails, isLoadingData, targetUserData])
 
   // Load AI explanation separately in the background
   useEffect(() => {
@@ -287,6 +380,22 @@ export function MatchUserDetail({
             About
           </Subtitle>
           <Content>{description}</Content>
+          {targetUserInterests.length > 0 && (
+            <div className="mt-4">
+              <UIText className="text-gray-500 text-sm mb-2">Interests:</UIText>
+              <div className="flex flex-wrap gap-2">
+                {targetUserInterests.map((interest) => (
+                  <span
+                    key={interest.topicId}
+                    className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                    title={`Aggregate Score: ${interest.aggregateScore.toFixed(2)}`}
+                  >
+                    {interest.topicName}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
@@ -362,6 +471,19 @@ export function MatchUserDetail({
             <button
               onClick={(e) => {
                 e.preventDefault()
+                setActiveTab('topic')
+              }}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                activeTab === 'topic'
+                  ? 'bg-gray-200 text-gray-700'
+                  : 'text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Topic Match
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault()
                 setActiveTab('profile')
               }}
               className={`px-4 py-2 rounded-lg text-sm transition-colors ${
@@ -398,10 +520,36 @@ export function MatchUserDetail({
                       <div>
                         <UIText className="text-gray-500 text-sm">Searching Ask:</UIText>
                         <Content className="font-medium">{match.searchingAsk}</Content>
+                        {match.searchingProject && (
+                          <div className="mt-1 border-l-2 border-blue-300 pl-3 bg-blue-50 p-2 rounded">
+                            <UIText className="text-blue-700 text-xs font-medium">From Project:</UIText>
+                            <Content className="text-sm font-medium text-blue-900">
+                              {match.searchingProject.name || 'Untitled Project'}
+                            </Content>
+                            {match.searchingProject.description && (
+                              <UIText className="text-blue-600 text-xs mt-1">
+                                {match.searchingProject.description}
+                              </UIText>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <UIText className="text-gray-500 text-sm">Matched Knowledge:</UIText>
                         <Content>{match.matchedKnowledgeText}</Content>
+                        {match.matchedProject && (
+                          <div className="mt-1 border-l-2 border-green-300 pl-3 bg-green-50 p-2 rounded">
+                            <UIText className="text-green-700 text-xs font-medium">From Project:</UIText>
+                            <Content className="text-sm font-medium text-green-900">
+                              {match.matchedProject.name || 'Untitled Project'}
+                            </Content>
+                            {match.matchedProject.description && (
+                              <UIText className="text-green-600 text-xs mt-1">
+                                {match.matchedProject.description}
+                              </UIText>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <UIText className="text-gray-500 text-sm">Similarity:</UIText>
@@ -446,10 +594,36 @@ export function MatchUserDetail({
                       <div>
                         <UIText className="text-gray-500 text-sm">Searching Non-Ask:</UIText>
                         <Content className="font-medium">{match.searchingNonAsk}</Content>
+                        {match.searchingProject && (
+                          <div className="mt-1 border-l-2 border-blue-300 pl-3 bg-blue-50 p-2 rounded">
+                            <UIText className="text-blue-700 text-xs font-medium">From Project:</UIText>
+                            <Content className="text-sm font-medium text-blue-900">
+                              {match.searchingProject.name || 'Untitled Project'}
+                            </Content>
+                            {match.searchingProject.description && (
+                              <UIText className="text-blue-600 text-xs mt-1">
+                                {match.searchingProject.description}
+                              </UIText>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <UIText className="text-gray-500 text-sm">Matched Ask:</UIText>
                         <Content>{match.matchedAskText}</Content>
+                        {match.matchedProject && (
+                          <div className="mt-1 border-l-2 border-green-300 pl-3 bg-green-50 p-2 rounded">
+                            <UIText className="text-green-700 text-xs font-medium">From Project:</UIText>
+                            <Content className="text-sm font-medium text-green-900">
+                              {match.matchedProject.name || 'Untitled Project'}
+                            </Content>
+                            {match.matchedProject.description && (
+                              <UIText className="text-green-600 text-xs mt-1">
+                                {match.matchedProject.description}
+                              </UIText>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         <UIText className="text-gray-500 text-sm">Similarity:</UIText>
@@ -529,6 +703,43 @@ export function MatchUserDetail({
                 ))
               ) : (
                 <Content className="text-gray-500">No specific matches found.</Content>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'topic' && (
+            <div className="space-y-4">
+              {matchBreakdown?.topicMatches && matchBreakdown.topicMatches.length > 0 ? (
+                matchBreakdown.topicMatches.map((match, idx) => (
+                  <Card key={idx} variant="default">
+                    <div className="space-y-2">
+                      <div>
+                        <UIText className="text-gray-500 text-sm">Searcher Topic:</UIText>
+                        <Content className="font-medium">{match.searcherTopicName}</Content>
+                      </div>
+                      <div>
+                        <UIText className="text-gray-500 text-sm">Target User Topic:</UIText>
+                        <Content className="font-medium">{match.targetTopicName}</Content>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                          <UIText className="text-gray-500 text-sm">Similarity:</UIText>
+                          <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm font-medium">
+                            {match.similarity.toFixed(4)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <UIText className="text-gray-500 text-sm">Multiplier:</UIText>
+                          <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-sm font-medium">
+                            {match.multiplier.toFixed(4)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))
+              ) : (
+                <Content className="text-gray-500">No topic matches found.</Content>
               )}
             </div>
           )}

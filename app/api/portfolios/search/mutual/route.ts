@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/portfolios/search/mutual?portfolioId=id - Get mutual friends/communities for a portfolio
  * Requires authentication

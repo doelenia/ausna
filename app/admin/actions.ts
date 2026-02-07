@@ -2177,16 +2177,31 @@ interface SearchMatchesResult {
       string,
       Array<{
         searchingAsk: string
+        searchingAskId: string
         maxSimilarity: number
         matchedKnowledgeText: string
+        matchedKnowledgeId: string
       }>
     >
     backwardDetails: Record<
       string,
       Array<{
         searchingNonAsk: string
+        searchingNonAskId: string
         maxSimilarity: number
         matchedAskText: string
+        matchedKnowledgeId: string
+      }>
+    >
+    topicDetails?: Record<
+      string,
+      Array<{
+        searcherTopicId: string
+        searcherTopicName: string
+        targetTopicId: string
+        targetTopicName: string
+        similarity: number
+        multiplier: number
       }>
     >
   }
@@ -2314,8 +2329,10 @@ export async function searchMatches(userId: string, searchKeyword?: string): Pro
       string,
       Array<{
         searchingAsk: string
+        searchingAskId: string
         maxSimilarity: number
         matchedKnowledgeText: string
+        matchedKnowledgeId: string
       }>
     > = {}
     matchResult.forwardDetails.forEach((details, userId) => {
@@ -2326,8 +2343,10 @@ export async function searchMatches(userId: string, searchKeyword?: string): Pro
       string,
       Array<{
         searchingNonAsk: string
+        searchingNonAskId: string
         maxSimilarity: number
         matchedAskText: string
+        matchedKnowledgeId: string
       }>
     > = {}
     matchResult.backwardDetails.forEach((details, userId) => {
@@ -2358,12 +2377,29 @@ export async function searchMatches(userId: string, searchKeyword?: string): Pro
         })()
       : undefined
 
+    // Convert topic details Map to plain object for serialization
+    const topicDetailsObj: Record<
+      string,
+      Array<{
+        searcherTopicId: string
+        searcherTopicName: string
+        targetTopicId: string
+        targetTopicName: string
+        similarity: number
+        multiplier: number
+      }>
+    > = {}
+    matchResult.topicDetails.forEach((details, userId) => {
+      topicDetailsObj[userId] = details
+    })
+
     return {
       success: true,
       matches,
       matchDetails: {
         forwardDetails: forwardDetailsObj,
         backwardDetails: backwardDetailsObj,
+        topicDetails: topicDetailsObj,
       },
       specificDetails: specificDetailsObj,
     }
@@ -2545,6 +2581,16 @@ interface MatchBreakdownResult {
     searchingAsk: string
     maxSimilarity: number
     matchedKnowledgeText: string
+    searchingProject?: {
+      id: string
+      name: string | null
+      description: string | null
+    }
+    matchedProject?: {
+      id: string
+      name: string | null
+      description: string | null
+    }
     projects?: Array<{
       id: string
       name: string | null
@@ -2555,6 +2601,16 @@ interface MatchBreakdownResult {
     searchingNonAsk: string
     maxSimilarity: number
     matchedAskText: string
+    searchingProject?: {
+      id: string
+      name: string | null
+      description: string | null
+    }
+    matchedProject?: {
+      id: string
+      name: string | null
+      description: string | null
+    }
     projects?: Array<{
       id: string
       name: string | null
@@ -2565,59 +2621,209 @@ interface MatchBreakdownResult {
     searchingAsk: string
     maxSimilarity: number
     matchedKnowledgeText: string
+    matchedProject?: {
+      id: string
+      name: string | null
+      description: string | null
+    }
     projects?: Array<{
       id: string
       name: string | null
       description: string | null
     }>
   }>
+  topicMatches?: Array<{
+    searcherTopicId: string
+    searcherTopicName: string
+    targetTopicId: string
+    targetTopicName: string
+    similarity: number
+    multiplier: number
+  }>
   error?: string
 }
 
 /**
  * Get detailed match breakdown for a specific target user
+ * @param matchDetails - Optional match details already loaded. If provided, will use these instead of rerunning the match.
+ * @param projects - Optional array of projects already loaded (from getMatchData). If provided, will reuse this data instead of fetching from DB.
  */
 export async function getMatchBreakdown(
   searcherId: string,
   targetUserId: string,
-  searchKeyword?: string
+  searchKeyword?: string,
+  projects?: Array<{
+    id: string
+    name: string
+    metadata: any
+    created_at: string
+    updated_at: string
+    user_id: string
+  }>,
+  matchDetails?: {
+    forwardDetails?: Record<
+      string,
+      Array<{
+        searchingAsk: string
+        searchingAskId: string
+        maxSimilarity: number
+        matchedKnowledgeText: string
+        matchedKnowledgeId: string
+      }>
+    >
+    backwardDetails?: Record<
+      string,
+      Array<{
+        searchingNonAsk: string
+        searchingNonAskId: string
+        maxSimilarity: number
+        matchedAskText: string
+        matchedKnowledgeId: string
+      }>
+    >
+    specificDetails?: Record<
+      string,
+      Array<{
+        searchingAsk: string
+        maxSimilarity: number
+        matchedKnowledgeText: string
+        matchedKnowledgeId?: string
+      }>
+    >
+    topicDetails?: Record<
+      string,
+      Array<{
+        searcherTopicId: string
+        searcherTopicName: string
+        targetTopicId: string
+        targetTopicName: string
+        similarity: number
+        multiplier: number
+      }>
+    >
+  }
 ): Promise<MatchBreakdownResult> {
   try {
     await requireAdmin()
     const serviceClient = createServiceClient()
 
-    const {
-      performMatchSearch,
-      performSpecificSearch,
-    } = await import('@/lib/indexing/match-search')
-
-    // Get match search results (forward + backward)
-    const matchResult = await performMatchSearch(searcherId)
-    const forwardDetails = matchResult.forwardDetails.get(targetUserId) || []
-    const backwardDetails = matchResult.backwardDetails.get(targetUserId) || []
-
-    // Get specific search results if keyword provided
+    let forwardDetails: Array<{
+      searchingAsk: string
+      searchingAskId: string
+      maxSimilarity: number
+      matchedKnowledgeText: string
+      matchedKnowledgeId: string
+    }> = []
+    let backwardDetails: Array<{
+      searchingNonAsk: string
+      searchingNonAskId: string
+      maxSimilarity: number
+      matchedAskText: string
+      matchedKnowledgeId: string
+    }> = []
+    let topicDetails: Array<{
+      searcherTopicId: string
+      searcherTopicName: string
+      targetTopicId: string
+      targetTopicName: string
+      similarity: number
+      multiplier: number
+    }> = []
     let specificDetails: Array<{
       searchingAsk: string
       maxSimilarity: number
       matchedKnowledgeText: string
+      matchedKnowledgeId?: string
     }> = []
 
-    if (searchKeyword && searchKeyword.trim().length > 0) {
-      const specificResult = await performSpecificSearch(searcherId, searchKeyword.trim())
-      specificDetails = specificResult.details.get(targetUserId) || []
+    // Use provided match details if available, otherwise rerun the match
+    if (matchDetails) {
+      forwardDetails = matchDetails.forwardDetails?.[targetUserId] || []
+      backwardDetails = matchDetails.backwardDetails?.[targetUserId] || []
+      topicDetails = matchDetails.topicDetails?.[targetUserId] || []
+      if (searchKeyword && searchKeyword.trim().length > 0) {
+        specificDetails = matchDetails.specificDetails?.[targetUserId] || []
+      }
+    } else {
+      // Fallback: rerun match if details not provided (for backward compatibility)
+      const {
+        performMatchSearch,
+        performSpecificSearch,
+      } = await import('@/lib/indexing/match-search')
+
+      const matchResult = await performMatchSearch(searcherId)
+      forwardDetails = matchResult.forwardDetails.get(targetUserId) || []
+      backwardDetails = matchResult.backwardDetails.get(targetUserId) || []
+      topicDetails = matchResult.topicDetails.get(targetUserId) || []
+
+      if (searchKeyword && searchKeyword.trim().length > 0) {
+        const specificResult = await performSpecificSearch(searcherId, searchKeyword.trim())
+        specificDetails = specificResult.details.get(targetUserId) || []
+      }
     }
 
-    // Enrich matches with project information based on atomic knowledge topics
+    // Collect all atomic knowledge IDs (both searching and matched sides)
+    const allKnowledgeIds = new Set<string>()
+    forwardDetails.forEach((m) => {
+      if (m.searchingAskId) allKnowledgeIds.add(m.searchingAskId)
+      if (m.matchedKnowledgeId) allKnowledgeIds.add(m.matchedKnowledgeId)
+    })
+    backwardDetails.forEach((m) => {
+      if (m.searchingNonAskId) allKnowledgeIds.add(m.searchingNonAskId)
+      if (m.matchedKnowledgeId) allKnowledgeIds.add(m.matchedKnowledgeId)
+    })
+    specificDetails.forEach((m) => {
+      if (m.matchedKnowledgeId) allKnowledgeIds.add(m.matchedKnowledgeId)
+    })
+
+    // Fetch source_info for all atomic knowledge
+    const knowledgeSourceInfoMap = new Map<
+      string,
+      {
+        source_type?: string
+        source_id?: string
+        property_name?: string
+      } | null
+    >()
+
+    if (allKnowledgeIds.size > 0) {
+      const { data: akRows, error: akError } = await serviceClient
+        .from('atomic_knowledge')
+        .select('id, source_info')
+        .in('id', Array.from(allKnowledgeIds))
+
+      ;(akRows || []).forEach((row: any) => {
+        const sourceInfoRaw = row.source_info as any
+        // Parse JSON string if it's a string, otherwise use as-is
+        let sourceInfo: any = null
+        if (sourceInfoRaw) {
+          if (typeof sourceInfoRaw === 'string') {
+            try {
+              sourceInfo = JSON.parse(sourceInfoRaw)
+            } catch (e) {
+              sourceInfo = sourceInfoRaw
+            }
+          } else {
+            sourceInfo = sourceInfoRaw
+          }
+        }
+        knowledgeSourceInfoMap.set(row.id as string, sourceInfo || null)
+      })
+    }
+
+    // Collect project IDs from source_info where source_type is 'project_property'
+    const projectIdsFromSource = new Set<string>()
+    knowledgeSourceInfoMap.forEach((sourceInfo) => {
+      if (sourceInfo?.source_type === 'project_property' && sourceInfo.source_id) {
+        projectIdsFromSource.add(sourceInfo.source_id)
+      }
+    })
+
+    // Also collect from assigned_projects (existing logic)
     const knowledgeTexts = new Set<string>()
     forwardDetails.forEach((m) => knowledgeTexts.add(m.matchedKnowledgeText))
     backwardDetails.forEach((m) => knowledgeTexts.add(m.matchedAskText))
     specificDetails.forEach((m) => knowledgeTexts.add(m.matchedKnowledgeText))
-
-    let knowledgeProjectsMap = new Map<
-      string,
-      Array<{ id: string; name: string | null; description: string | null }>
-    >()
 
     if (knowledgeTexts.size > 0) {
       const { data: akRows } = await serviceClient
@@ -2625,81 +2831,208 @@ export async function getMatchBreakdown(
         .select('knowledge_text, assigned_projects')
         .in('knowledge_text', Array.from(knowledgeTexts))
 
-      const projectIds = new Set<string>()
       ;(akRows || []).forEach((row: any) => {
         const assigned = row.assigned_projects as string[] | null
         if (Array.isArray(assigned)) {
-          assigned.forEach((pid) => pid && projectIds.add(pid))
+          assigned.forEach((pid) => pid && projectIdsFromSource.add(pid))
         }
       })
+    }
 
-      let projectMap = new Map<string, { id: string; name: string | null; description: string | null }>()
-      if (projectIds.size > 0) {
-        const { data: projects } = await serviceClient
+    // Build project map from provided projects or fetch from DB
+    const projectMap = new Map<string, { id: string; name: string | null; description: string | null }>()
+    if (projectIdsFromSource.size > 0) {
+      if (projects && projects.length > 0) {
+        // Use provided projects (from getMatchData) - no DB call needed
+        const providedProjectsMap = new Map(projects.map((p) => [p.id, p]))
+        projectIdsFromSource.forEach((projectId) => {
+          const project = providedProjectsMap.get(projectId)
+          if (project) {
+            const meta = (project.metadata as any) || {}
+            const basic = meta.basic || {}
+            const name = project.name || basic.name || null
+            const description = basic.description || meta.description || null
+
+            projectMap.set(projectId, {
+              id: projectId,
+              name,
+              description,
+            })
+          }
+        })
+        // If we still need projects that weren't in the provided list, fetch them
+        const missingProjectIds = Array.from(projectIdsFromSource).filter((id) => !providedProjectsMap.has(id))
+        if (missingProjectIds.length > 0) {
+          const { data: fetchedProjects } = await serviceClient
+            .from('portfolios')
+            .select('id, metadata')
+            .in('id', missingProjectIds)
+            .eq('type', 'projects')
+
+          ;(fetchedProjects || []).forEach((p: any) => {
+            const meta = (p.metadata as any) || {}
+            const basic = meta.basic || {}
+            const name = basic.name || null
+            const description = basic.description || meta.description || null
+
+            projectMap.set(p.id as string, {
+              id: p.id as string,
+              name,
+              description,
+            })
+          })
+        }
+      } else {
+        // No provided projects, fetch from DB
+        const { data: fetchedProjects } = await serviceClient
           .from('portfolios')
-          .select('id, name, metadata')
-          .in('id', Array.from(projectIds))
+          .select('id, metadata')
+          .in('id', Array.from(projectIdsFromSource))
           .eq('type', 'projects')
 
-        ;(projects || []).forEach((p: any) => {
+        ;(fetchedProjects || []).forEach((p: any) => {
           const meta = (p.metadata as any) || {}
-          const description =
-            meta.basic?.description ||
-            meta.description ||
-            null
+          const basic = meta.basic || {}
+          const name = basic.name || null
+          const description = basic.description || meta.description || null
 
           projectMap.set(p.id as string, {
             id: p.id as string,
-            name: (p.name as string) || null,
+            name,
             description,
           })
         })
       }
-
-      const tmpMap = new Map<
-        string,
-        Array<{ id: string; name: string | null; description: string | null }>
-      >()
-      ;(akRows || []).forEach((row: any) => {
-        const assigned = row.assigned_projects as string[] | null
-        const projects: Array<{ id: string; name: string | null; description: string | null }> = []
-        if (Array.isArray(assigned)) {
-          assigned.forEach((pid) => {
-            const proj = projectMap.get(pid)
-            if (proj) {
-              projects.push(proj)
-            }
-          })
-        }
-        tmpMap.set(row.knowledge_text as string, projects)
-      })
-
-      knowledgeProjectsMap = tmpMap
     }
 
-    const enrichedForward = forwardDetails.map((m) => ({
-      ...m,
-      projects: knowledgeProjectsMap.get(m.matchedKnowledgeText) || [],
-    }))
+    // Helper function to get project info from source_info
+    const getProjectFromSourceInfo = (knowledgeId: string): { id: string; name: string | null; description: string | null } | null => {
+      const sourceInfo = knowledgeSourceInfoMap.get(knowledgeId)
+      if (sourceInfo?.source_type === 'project_property' && sourceInfo.source_id) {
+        return projectMap.get(sourceInfo.source_id) || null
+      }
+      return null
+    }
 
-    const enrichedBackward = backwardDetails.map((m) => ({
+    // Enrich forward matches
+    const enrichedForward = forwardDetails.map((m) => {
+      const searchingProject = m.searchingAskId ? getProjectFromSourceInfo(m.searchingAskId) : null
+      const matchedProject = m.matchedKnowledgeId ? getProjectFromSourceInfo(m.matchedKnowledgeId) : null
+      
+      return {
       ...m,
-      projects: knowledgeProjectsMap.get(m.matchedAskText) || [],
-    }))
+        searchingProject: searchingProject || undefined,
+        matchedProject: matchedProject || undefined,
+      }
+    })
 
-    const enrichedSpecific = specificDetails.map((m) => ({
+    // Enrich backward matches
+    const enrichedBackward = backwardDetails.map((m) => {
+      const searchingProject = m.searchingNonAskId ? getProjectFromSourceInfo(m.searchingNonAskId) : null
+      const matchedProject = m.matchedKnowledgeId ? getProjectFromSourceInfo(m.matchedKnowledgeId) : null
+      
+      return {
       ...m,
-      projects: knowledgeProjectsMap.get(m.matchedKnowledgeText) || [],
-    }))
+        searchingProject: searchingProject || undefined,
+        matchedProject: matchedProject || undefined,
+      }
+    })
+
+    // Enrich specific matches
+    const enrichedSpecific = specificDetails.map((m) => {
+      const matchedProject = m.matchedKnowledgeId ? getProjectFromSourceInfo(m.matchedKnowledgeId) : null
+      
+      return {
+      ...m,
+        matchedProject: matchedProject || undefined,
+      }
+    })
 
     return {
       success: true,
       forwardMatches: enrichedForward,
       backwardMatches: enrichedBackward,
       specificMatches: enrichedSpecific.length > 0 ? enrichedSpecific : undefined,
+      topicMatches: topicDetails.length > 0 ? topicDetails : undefined,
     }
   } catch (error: any) {
     console.error('Exception getting match breakdown:', error)
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+interface GetUserInterestsResult {
+  success: boolean
+  interests?: Array<{
+    topicId: string
+    topicName: string
+    aggregateScore: number
+  }>
+  error?: string
+}
+
+/**
+ * Get user interests ordered by aggregate score
+ */
+export async function getUserInterests(userId: string): Promise<GetUserInterestsResult> {
+  try {
+    await requireAdmin()
+    const serviceClient = createServiceClient()
+
+    // Get interests ordered by aggregate_score descending
+    const { data: interests, error } = await serviceClient
+      .from('user_interests')
+      .select('topic_id, aggregate_score')
+      .eq('user_id', userId)
+      .order('aggregate_score', { ascending: false })
+
+    if (error) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch user interests',
+      }
+    }
+
+    if (!interests || interests.length === 0) {
+      return {
+        success: true,
+        interests: [],
+      }
+    }
+
+    // Fetch topic names
+    const topicIds = interests.map((i: any) => i.topic_id)
+    const { data: topics, error: topicsError } = await serviceClient
+      .from('topics')
+      .select('id, name')
+      .in('id', topicIds)
+
+    if (topicsError) {
+      return {
+        success: false,
+        error: topicsError.message || 'Failed to fetch topic names',
+      }
+    }
+
+    // Create topic name map
+    const topicNameMap = new Map((topics || []).map((t: any) => [t.id, t.name || 'Unknown Topic']))
+
+    // Combine interests with topic names, maintaining order by aggregate_score
+    const result = interests.map((interest: any) => ({
+      topicId: interest.topic_id,
+      topicName: topicNameMap.get(interest.topic_id) || 'Unknown Topic',
+      aggregateScore: parseFloat(interest.aggregate_score) || 0,
+    }))
+
+    return {
+      success: true,
+      interests: result,
+    }
+  } catch (error: any) {
+    console.error('Exception getting user interests:', error)
     return {
       success: false,
       error: error.message || 'An unexpected error occurred',

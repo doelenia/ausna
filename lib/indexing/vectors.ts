@@ -21,6 +21,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 
 /**
  * Find similar topic by description or name (80% similarity threshold)
+ * First checks for name matches, then falls back to description similarity
  */
 export async function findSimilarTopic(
   name: string,
@@ -29,6 +30,32 @@ export async function findSimilarTopic(
 ): Promise<Topic | null> {
   const supabase = createServiceClient()
 
+  // First, check for exact or similar name match (case-insensitive)
+  // Try exact match first (most common case)
+  const { data: exactNameMatch } = await supabase
+    .from('topics')
+    .select('*')
+    .ilike('name', name.trim())
+    .limit(1)
+    .maybeSingle()
+
+  if (exactNameMatch) {
+    return exactNameMatch as Topic
+  }
+
+  // Try fuzzy name matching with ILIKE pattern
+  const { data: fuzzyNameMatch } = await supabase
+    .from('topics')
+    .select('*')
+    .or(`name.ilike.%${name.trim()}%,name.ilike.${name.trim()}%`)
+    .limit(1)
+    .maybeSingle()
+
+  if (fuzzyNameMatch) {
+    return fuzzyNameMatch as Topic
+  }
+
+  // No name match found, check description similarity
   // Search by vector similarity (cosine distance)
   // 80% similarity = 0.2 cosine distance
   const { data: similarTopics, error } = await supabase.rpc('match_topics', {
@@ -38,19 +65,12 @@ export async function findSimilarTopic(
   })
 
   if (error) {
-    // If RPC doesn't exist, fall back to name matching
-    console.warn('RPC match_topics not available, falling back to name matching:', error)
-    const { data: nameMatch } = await supabase
-      .from('topics')
-      .select('*')
-      .ilike('name', `%${name}%`)
-      .limit(1)
-      .single()
-
-    return nameMatch as Topic | null
+    // If RPC doesn't exist, return null (name matching already tried above)
+    console.warn('RPC match_topics not available:', error)
+    return null
   }
 
-  // Check if any similar topic matches by name or description similarity
+  // Check if any similar topic matches by description similarity
   if (similarTopics && similarTopics.length > 0) {
     // Return the most similar one
     return similarTopics[0] as Topic

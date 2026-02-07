@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/auth/requireAdmin'
 import { MatchConsole } from '@/components/admin/MatchConsole'
-import { getMatchData } from '@/app/admin/actions'
+import { getMatchData, getUserInterests } from '@/app/admin/actions'
 import { notFound } from 'next/navigation'
 
 interface MatchPageProps {
@@ -25,12 +25,17 @@ export default async function MatchPage({ params }: MatchPageProps) {
       notFound()
     }
 
+    // Fetch searcher's interests server-side so they're available immediately
+    const interestsResult = await getUserInterests(id)
+    const interests = interestsResult.success ? interestsResult.interests || [] : []
+
     return (
       <MatchConsole
         user={result.user}
         humanPortfolio={result.humanPortfolio}
         projects={result.projects || []}
         notes={result.notes || []}
+        searcherInterests={interests}
       />
     )
   } catch (error) {

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Portfolio } from '@/types/portfolio'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * Calculate similarity score between query and text
  * Simple string matching - higher score for exact matches and prefix matches

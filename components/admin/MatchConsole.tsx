@@ -46,11 +46,12 @@ interface MatchConsoleProps {
   humanPortfolio?: HumanPortfolio
   projects: Project[]
   notes: Note[]
+  searcherInterests?: Array<{ topicId: string; topicName: string; aggregateScore: number }>
 }
 
 type Tab = 'profile' | 'projects'
 
-export function MatchConsole({ user, humanPortfolio, projects, notes }: MatchConsoleProps) {
+export function MatchConsole({ user, humanPortfolio, projects, notes, searcherInterests = [] }: MatchConsoleProps) {
   const [activeTab, setActiveTab] = useState<Tab>('profile')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [searchResults, setSearchResults] = useState<
@@ -77,16 +78,31 @@ export function MatchConsole({ user, humanPortfolio, projects, notes }: MatchCon
       string,
       Array<{
         searchingAsk: string
+        searchingAskId: string
         maxSimilarity: number
         matchedKnowledgeText: string
+        matchedKnowledgeId: string
       }>
     >
     backwardDetails?: Record<
       string,
       Array<{
         searchingNonAsk: string
+        searchingNonAskId: string
         maxSimilarity: number
         matchedAskText: string
+        matchedKnowledgeId: string
+      }>
+    >
+    topicDetails?: Record<
+      string,
+      Array<{
+        searcherTopicId: string
+        searcherTopicName: string
+        targetTopicId: string
+        targetTopicName: string
+        similarity: number
+        multiplier: number
       }>
     >
     specificDetails?: Record<
@@ -95,6 +111,7 @@ export function MatchConsole({ user, humanPortfolio, projects, notes }: MatchCon
         searchingAsk: string
         maxSimilarity: number
         matchedKnowledgeText: string
+        matchedKnowledgeId?: string
       }>
     >
   } | null>(null)
@@ -202,6 +219,7 @@ export function MatchConsole({ user, humanPortfolio, projects, notes }: MatchCon
           setMatchDetails({
             forwardDetails: result.matchDetails?.forwardDetails,
             backwardDetails: result.matchDetails?.backwardDetails,
+            topicDetails: result.matchDetails?.topicDetails,
             specificDetails: result.specificDetails,
           })
         } else {
@@ -303,6 +321,22 @@ export function MatchConsole({ user, humanPortfolio, projects, notes }: MatchCon
             About
           </Subtitle>
           <Content>{description}</Content>
+          {searcherInterests.length > 0 && (
+            <div className="mt-4">
+              <UIText className="text-gray-500 text-sm mb-2">Interests:</UIText>
+              <div className="flex flex-wrap gap-2">
+                {searcherInterests.map((interest) => (
+                  <span
+                    key={interest.topicId}
+                    className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                    title={`Aggregate Score: ${interest.aggregateScore.toFixed(2)}`}
+                  >
+                    {interest.topicName}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
