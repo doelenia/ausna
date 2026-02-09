@@ -91,4 +91,3 @@ export type NoteSource =
 export interface NoteWithSource extends Note {
   feedSource?: NoteSource
 }
-

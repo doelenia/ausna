@@ -32,3 +32,4 @@ COMMENT ON FUNCTION is_current_user_admin() IS
   'Check if the current authenticated user is an admin (based on raw_user_meta_data->>is_admin flag)';
 
 
+

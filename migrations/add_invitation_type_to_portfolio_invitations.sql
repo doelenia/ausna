@@ -9,3 +9,4 @@ COMMENT ON COLUMN portfolio_invitations.invitation_type IS 'Type of invitation: 
 
 
 
+

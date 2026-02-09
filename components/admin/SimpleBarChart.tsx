@@ -58,3 +58,4 @@ export function SimpleBarChart({ data, maxValue }: SimpleBarChartProps) {
 }
 
 
+

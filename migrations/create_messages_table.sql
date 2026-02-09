@@ -62,3 +62,4 @@ COMMENT ON COLUMN messages.read_at IS 'Timestamp when receiver read the message,
 
 
 
+

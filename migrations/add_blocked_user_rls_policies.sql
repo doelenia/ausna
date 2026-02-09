@@ -87,3 +87,4 @@ COMMENT ON FUNCTION is_current_user_blocked() IS 'Check if the current authentic
 
 
 
+

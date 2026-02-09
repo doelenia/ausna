@@ -59,3 +59,4 @@ COMMENT ON FUNCTION is_blocked(UUID) IS 'Check if a user is blocked from accessi
 
 
 
+
