@@ -62,9 +62,21 @@ interface MatchUserDetailProps {
 
 type Tab = 'forward' | 'backward' | 'specific' | 'topic' | 'profile' | 'projects'
 
-interface MatchExplanation {
+interface MatchActivitySuggestion {
+  title: string
+  description: string
+}
+
+interface SubjectMatchAnalysis {
+  subjectName: string
+  otherPersonName: string
   paragraph: string
-  bullets: string[]
+  activities: MatchActivitySuggestion[]
+}
+
+interface MatchExplanation {
+  matcher: SubjectMatchAnalysis
+  matchee: SubjectMatchAnalysis
 }
 
 export function MatchUserDetail({
@@ -77,6 +89,9 @@ export function MatchUserDetail({
 }: MatchUserDetailProps) {
   const [activeTab, setActiveTab] = useState<Tab>('forward')
   const [explanation, setExplanation] = useState<MatchExplanation | null>(null)
+  const [activeAnalysisSubject, setActiveAnalysisSubject] = useState<'matcher' | 'matchee'>(
+    'matcher'
+  )
   const [isLoadingExplanation, setIsLoadingExplanation] = useState(false)
   const [targetUserData, setTargetUserData] = useState<{
     user: any
@@ -409,17 +424,60 @@ export function MatchUserDetail({
           <Subtitle as="h3" className="mb-4">
             Why This is a Good Match
           </Subtitle>
-          <Content className="mb-4">{explanation.paragraph}</Content>
-          <div className="flex flex-wrap gap-2">
-            {explanation.bullets.map((bullet, idx) => (
-              <span
-                key={idx}
-                className="px-3 py-2 bg-gray-100 text-gray-800 rounded-full text-sm"
-              >
-                {bullet}
-              </span>
-            ))}
+          {/* Subject toggle tabs */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                setActiveAnalysisSubject('matcher')
+              }}
+              className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                activeAnalysisSubject === 'matcher'
+                  ? 'bg-gray-200 text-gray-700'
+                  : 'text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              For {explanation.matcher.subjectName}
+            </button>
+            <button
+              onClick={(e) => {
+                e.preventDefault()
+                setActiveAnalysisSubject('matchee')
+              }}
+              className={`px-3 py-1 rounded-lg text-sm transition-colors ${
+                activeAnalysisSubject === 'matchee'
+                  ? 'bg-gray-200 text-gray-700'
+                  : 'text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              For {explanation.matchee.subjectName}
+            </button>
           </div>
+
+          {/* Current subject analysis */}
+          {(() => {
+            const current =
+              activeAnalysisSubject === 'matcher' ? explanation.matcher : explanation.matchee
+
+            return (
+              <div className="space-y-4">
+                <Content className="mb-2">{current.paragraph}</Content>
+
+                {current.activities && current.activities.length > 0 && (
+                  <div className="space-y-3">
+                    {current.activities.map((activity, idx) => (
+                      <Card key={idx} variant="subtle">
+                        <div className="space-y-1">
+                          <UIText className="font-medium">{activity.title}</UIText>
+                          <Content>{activity.description}</Content>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </Card>
       ) : null}
 

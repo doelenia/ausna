@@ -2412,12 +2412,26 @@ export async function searchMatches(userId: string, searchKeyword?: string): Pro
   }
 }
 
+interface MatchActivitySuggestion {
+  title: string
+  description: string
+}
+
+interface SubjectMatchAnalysis {
+  subjectName: string
+  otherPersonName: string
+  paragraph: string
+  activities: MatchActivitySuggestion[]
+}
+
+interface MatchExplanationPayload {
+  matcher: SubjectMatchAnalysis
+  matchee: SubjectMatchAnalysis
+}
+
 interface MatchExplanationResult {
   success: boolean
-  explanation?: {
-    paragraph: string
-    bullets: string[]
-  }
+  explanation?: MatchExplanationPayload
   error?: string
 }
 
@@ -2432,6 +2446,16 @@ export async function getMatchExplanation(
   try {
     await requireAdmin()
     const serviceClient = createServiceClient()
+
+    // Fetch auth user data to get reliable display names
+    const { data: searcherAuthData } = await serviceClient.auth.admin.getUserById(searcherId)
+    const { data: targetAuthData } = await serviceClient.auth.admin.getUserById(targetId)
+
+    const searcherAuthUser = searcherAuthData?.user
+    const targetAuthUser = targetAuthData?.user
+
+    const searcherAuthMetadata = searcherAuthUser?.user_metadata || {}
+    const targetAuthMetadata = targetAuthUser?.user_metadata || {}
 
     // Fetch searcher's full profile
     const { data: searcherPortfolio, error: searcherPortfolioError } = await serviceClient
@@ -2505,6 +2529,25 @@ export async function getMatchExplanation(
     const targetProfile = targetPortfolio?.metadata || {}
     const targetProjectsMetadata = targetUserProjects.map((p: any) => p.metadata || {})
 
+    const searcherNameFromProfile =
+      searcherProfile.basic?.name || searcherProfile.full_name || null
+    const targetNameFromProfile =
+      targetProfile.basic?.name || targetProfile.full_name || null
+
+    const matcherDisplayName =
+      searcherNameFromProfile ||
+      searcherAuthMetadata.name ||
+      searcherAuthMetadata.full_name ||
+      searcherAuthUser?.email ||
+      'Matcher'
+
+    const matcheeDisplayName =
+      targetNameFromProfile ||
+      targetAuthMetadata.name ||
+      targetAuthMetadata.full_name ||
+      targetAuthUser?.email ||
+      'Matchee'
+
     const { openai } = await import('@/lib/openai/client')
 
     const completion = await openai.chat.completions.create({
@@ -2512,37 +2555,77 @@ export async function getMatchExplanation(
       messages: [
         {
           role: 'system',
-          content: `You are an expert at analyzing professional matches and explaining why two people would be good collaborators or connections.
+          content: `You are an expert at analyzing professional collaboration matches.
 
-Generate a match explanation with:
-1. One short paragraph (exactly 50 words) explaining why this is a good match
-2. 3-5 bullet points (total 150 words including emojis) explaining specific reasons, each starting with an emoji
+You will receive:
+- A "matcher" (the person searching)
+- A "matchee" (the person who was matched)
+- Both people's profiles, projects, and optionally the matcher’s specific asks.
 
-Return a JSON object with:
-- paragraph: string (exactly 50 words)
-- bullets: string[] (array of bullet point strings, each with an emoji at the start, total 150 words across all bullets)
+Your task:
+1. For EACH subject (first the matcher, then the matchee), write ONE short paragraph (about 60–90 words) that explains:
+   - How the other person can provide resources, skills, or opportunities that the subject is looking for
+   - How this is grounded in their descriptions, experiences, and projects
+2. For EACH subject, propose 3–6 concrete activity suggestions as "cards". Each card must:
+   - Have a title in one of these formats (use the EXACT patterns):
+     - "You should invite [OTHER_PERSON_NAME] to …"  (when the subject initiates or invites to THEIR OWN project / activity)
+     - "Join … with [OTHER_PERSON_NAME]"           (when the subject joins the OTHER person's existing project / activity)
+   - Have a 1–2 sentence description explaining WHY this activity is a good idea for the subject, based on:
+     - The subject’s needs, asks, and goals
+     - Both people’s social preferences and constraints
+     - Relevant projects, skills, or experiences from either side
 
-Be specific and reference actual details from their profiles and projects.`,
+Formatting & JSON:
+- ONLY return valid JSON (no markdown, no commentary).
+- Use this exact JSON shape:
+{
+  "matcher": {
+    "subjectName": string,          // display name for the matcher
+    "otherPersonName": string,      // display name for the matchee
+    "paragraph": string,           // 60–90 words
+    "activities": [
+      { "title": string, "description": string },
+      ...
+    ]
+  },
+  "matchee": {
+    "subjectName": string,          // display name for the matchee
+    "otherPersonName": string,      // display name for the matcher
+    "paragraph": string,           // 60–90 words
+    "activities": [
+      { "title": string, "description": string },
+      ...
+    ]
+  }
+}
+
+Constraints:
+- Titles MUST strictly start with either "You should invite [OTHER_PERSON_NAME] to" or "Join" and MUST include [OTHER_PERSON_NAME] exactly once.
+- Descriptions MUST clearly mention how the activity ties to their projects, skills, or social preferences whenever possible.
+- Avoid generic networking advice; be concrete and grounded in the provided data.`,
         },
         {
           role: 'user',
-          content: `Generate a match explanation.
+          content: `Generate a two-sided match analysis for:
 
-${specificAsks && specificAsks.length > 0 ? `Searcher's specific asks:\n${specificAsks.map((ask) => `- ${ask}`).join('\n')}\n\n` : ''}Searcher's Profile:
+Matcher (subject A): ${matcherDisplayName}
+Matchee (subject B): ${matcheeDisplayName}
+
+${specificAsks && specificAsks.length > 0 ? `Matcher's specific asks:\n${specificAsks.map((ask) => `- ${ask}`).join('\n')}\n\n` : ''}Matcher's Profile:
 ${JSON.stringify(searcherProfile, null, 2)}
 
-Searcher's Projects:
+Matcher's Projects:
 ${JSON.stringify(searcherProjectsMetadata, null, 2)}
 
-Target User's Profile:
+Matchee's Profile:
 ${JSON.stringify(targetProfile, null, 2)}
 
-Target User's Projects:
+Matchee's Projects:
 ${JSON.stringify(targetProjectsMetadata, null, 2)}`,
         },
       ],
       response_format: { type: 'json_object' },
-      max_completion_tokens: 500,
+      max_completion_tokens: 1000,
     })
 
     const content = completion.choices[0]?.message?.content
@@ -2550,21 +2633,30 @@ ${JSON.stringify(targetProjectsMetadata, null, 2)}`,
       throw new Error('No response from AI')
     }
 
-    const result = JSON.parse(content) as {
-      paragraph?: string
-      bullets?: string[]
-    }
+    let result: MatchExplanationPayload
+    try {
+      // The OpenAI client is instructed to return a JSON object, but we still
+      // defensively parse and handle any malformed output to avoid throwing.
+      const jsonStart = content.indexOf('{')
+      const jsonEnd = content.lastIndexOf('}')
+      const jsonString =
+        jsonStart !== -1 && jsonEnd !== -1 ? content.slice(jsonStart, jsonEnd + 1) : content
 
-    if (!result.paragraph || !Array.isArray(result.bullets)) {
-      throw new Error('Invalid AI response format')
+      result = JSON.parse(jsonString) as MatchExplanationPayload
+    } catch (parseError: any) {
+      console.error(
+        'Failed to parse match explanation JSON:',
+        parseError?.message || String(parseError)
+      )
+      return {
+        success: false,
+        error: 'Failed to parse AI match explanation',
+      }
     }
 
     return {
       success: true,
-      explanation: {
-        paragraph: result.paragraph.trim(),
-        bullets: result.bullets.filter((bullet) => bullet && bullet.trim().length > 0),
-      },
+      explanation: result,
     }
   } catch (error: any) {
     console.error('Exception generating match explanation:', error)
