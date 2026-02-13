@@ -26,12 +26,7 @@ export function TopNav() {
   useEffect(() => {
     isMountedRef.current = true
     const checkUser = async () => {
-      const getUserStartTime = Date.now();
-      const runId = `tn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const isSafari = typeof navigator !== 'undefined' && /safari/.test(navigator.userAgent.toLowerCase()) && !/chrome/.test(navigator.userAgent.toLowerCase()) && !/chromium/.test(navigator.userAgent.toLowerCase());
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:checkUser',message:'checkUser started',data:{runId,getUserStartTime,isSafari,sharedAlready:!!sharedGetUserPromise},timestamp:Date.now(),hypothesisId:'H2,H4'})}).catch(()=>{});
-      // #endregion
       try {
         // Debug: Check cookies before getUser
         const cookies = document.cookie.split(';').map(c => c.trim())
@@ -57,16 +52,8 @@ export function TopNav() {
         if (!sharedGetUserPromise) {
           sharedGetUserPromise = (async (): Promise<{ user: any; error: any }> => {
             const getUserPromise = supabase.auth.getUser();
-            // #region agent log
-            getUserPromise.then((r: any) => { const d = Date.now() - getUserStartTime; fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:getUser',message:'getUser resolved',data:{runId,durationMs:d,hasUser:!!r?.data?.user},timestamp:Date.now(),hypothesisId:'H3,H5'})}).catch(()=>{}); }).catch((e: any) => { const d = Date.now() - getUserStartTime; fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:getUser',message:'getUser rejected',data:{runId,durationMs:d,err:String(e?.message)},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{}); });
-            // #endregion
             const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(() => {
-                // #region agent log
-                fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:timeout',message:'timeout fired after 10s',data:{runId},timestamp:Date.now(),hypothesisId:'H1,H3,H5'})}).catch(()=>{});
-                // #endregion
-                reject(new Error('getUser timeout after 10s'));
-              }, 10000)
+              setTimeout(() => reject(new Error('getUser timeout after 10s')), 10000)
             );
             try {
               const result = await Promise.race([getUserPromise, timeoutPromise]) as any;
@@ -83,11 +70,6 @@ export function TopNav() {
 
         const { user: resolvedUser, error } = await sharedGetUserPromise;
 
-        const getUserDuration = Date.now() - getUserStartTime;
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:afterRace',message:'race ended (winner)',data:{runId,getUserDurationMs:getUserDuration,hasUser:!!resolvedUser,authError:error?.message},timestamp:Date.now(),hypothesisId:'H1,H5'})}).catch(()=>{});
-        // #endregion
-
         if (error) {
           console.error('[TopNav] Error getting user:', error.message)
           if (isSafari) {
@@ -99,10 +81,6 @@ export function TopNav() {
           setUser(resolvedUser)
         }
       } catch (error: any) {
-        const getUserDuration = Date.now() - getUserStartTime;
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:checkUserCatch',message:'checkUser catch',data:{runId,errorMessage:error?.message,getUserDurationMs:getUserDuration,isTimeout:error?.message==='getUser timeout after 10s'},timestamp:Date.now(),hypothesisId:'H1,H3,H4,H5'})}).catch(()=>{});
-        // #endregion
         console.error('[TopNav] Error in checkUser:', error)
       } finally {
         if (isMountedRef.current) {
