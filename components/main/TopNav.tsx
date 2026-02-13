@@ -64,9 +64,18 @@ export function TopNav() {
             } catch (raceError: any) {
               if (raceError?.message === 'getUser timeout after 10s') {
                 console.log('[TopNav] getUser timeout, falling back to getSession')
-                const { data: { session } } = await supabase.auth.getSession();
-                console.log('[TopNav] getSession done, hasUser=', !!session?.user)
-                return { user: session?.user ?? null, error: null };
+                try {
+                  const getSessionPromise = supabase.auth.getSession();
+                  const sessionTimeout = new Promise<never>((_, rej) =>
+                    setTimeout(() => rej(new Error('getSession timeout after 5s')), 5000)
+                  );
+                  const { data: { session } } = await Promise.race([getSessionPromise, sessionTimeout]) as any;
+                  console.log('[TopNav] getSession done, hasUser=', !!session?.user)
+                  return { user: session?.user ?? null, error: null };
+                } catch (sessionErr: any) {
+                  console.warn('[TopNav] getSession failed or timed out:', sessionErr?.message)
+                  return { user: null, error: null };
+                }
               }
               throw raceError;
             }
