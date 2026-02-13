@@ -27,6 +27,7 @@ export function TopNav() {
     isMountedRef.current = true
     const checkUser = async () => {
       const isSafari = typeof navigator !== 'undefined' && /safari/.test(navigator.userAgent.toLowerCase()) && !/chrome/.test(navigator.userAgent.toLowerCase()) && !/chromium/.test(navigator.userAgent.toLowerCase());
+      console.log('[TopNav] checkUser start, sharedAlready=', !!sharedGetUserPromise)
       try {
         // Debug: Check cookies before getUser
         const cookies = document.cookie.split(';').map(c => c.trim())
@@ -50,6 +51,7 @@ export function TopNav() {
         }
 
         if (!sharedGetUserPromise) {
+          console.log('[TopNav] creating shared getUser promise (race)')
           sharedGetUserPromise = (async (): Promise<{ user: any; error: any }> => {
             const getUserPromise = supabase.auth.getUser();
             const timeoutPromise = new Promise<never>((_, reject) =>
@@ -57,10 +59,13 @@ export function TopNav() {
             );
             try {
               const result = await Promise.race([getUserPromise, timeoutPromise]) as any;
+              console.log('[TopNav] getUser won race, hasUser=', !!result?.data?.user)
               return { user: result?.data?.user ?? null, error: result?.error ?? null };
             } catch (raceError: any) {
               if (raceError?.message === 'getUser timeout after 10s') {
+                console.log('[TopNav] getUser timeout, falling back to getSession')
                 const { data: { session } } = await supabase.auth.getSession();
+                console.log('[TopNav] getSession done, hasUser=', !!session?.user)
                 return { user: session?.user ?? null, error: null };
               }
               throw raceError;
@@ -68,7 +73,9 @@ export function TopNav() {
           })().finally(() => { sharedGetUserPromise = null; });
         }
 
+        console.log('[TopNav] awaiting sharedGetUserPromise')
         const { user: resolvedUser, error } = await sharedGetUserPromise;
+        console.log('[TopNav] shared promise resolved, hasUser=', !!resolvedUser, 'error=', error?.message ?? null)
 
         if (error) {
           console.error('[TopNav] Error getting user:', error.message)
@@ -83,6 +90,7 @@ export function TopNav() {
       } catch (error: any) {
         console.error('[TopNav] Error in checkUser:', error)
       } finally {
+        console.log('[TopNav] finally, setLoading(false), mounted=', isMountedRef.current)
         if (isMountedRef.current) {
           setLoading(false)
         }
