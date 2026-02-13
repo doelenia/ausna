@@ -9,6 +9,9 @@ import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/
 import { Home, MessageCircle, Pen, Search } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
+/** Shared in-flight getUser so both desktop and mobile TopNav instances reuse one request. */
+let sharedGetUserPromise: Promise<{ user: any; error: any }> | null = null
+
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -24,6 +27,11 @@ export function TopNav() {
     isMountedRef.current = true
     const checkUser = async () => {
       const getUserStartTime = Date.now();
+      const runId = `tn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const isSafari = typeof navigator !== 'undefined' && /safari/.test(navigator.userAgent.toLowerCase()) && !/chrome/.test(navigator.userAgent.toLowerCase()) && !/chromium/.test(navigator.userAgent.toLowerCase());
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:checkUser',message:'checkUser started',data:{runId,getUserStartTime,isSafari,sharedAlready:!!sharedGetUserPromise},timestamp:Date.now(),hypothesisId:'H2,H4'})}).catch(()=>{});
+      // #endregion
       try {
         // Debug: Check cookies before getUser
         const cookies = document.cookie.split(';').map(c => c.trim())
@@ -32,11 +40,6 @@ export function TopNav() {
           c.includes('supabase') ||
           c.startsWith('sb-')
         )
-        
-        // Safari-specific debugging
-        const isSafari = /safari/.test(navigator.userAgent.toLowerCase()) && 
-                        !/chrome/.test(navigator.userAgent.toLowerCase()) &&
-                        !/chromium/.test(navigator.userAgent.toLowerCase())
         
         if (authCookies.length === 0) {
           console.warn('[TopNav] No auth cookies found. Available cookies:', cookies.length)
@@ -51,16 +54,39 @@ export function TopNav() {
           }
         }
 
-        // Use getUser() for security - it authenticates with the server
-        // getSession() reads from storage and may not be authentic
-        const getUserPromise = supabase.auth.getUser();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('getUser timeout after 10s')), 10000));
-        const {
-          data: { user },
-          error,
-        } = await Promise.race([getUserPromise, timeoutPromise]) as any;
+        if (!sharedGetUserPromise) {
+          sharedGetUserPromise = (async (): Promise<{ user: any; error: any }> => {
+            const getUserPromise = supabase.auth.getUser();
+            // #region agent log
+            getUserPromise.then((r: any) => { const d = Date.now() - getUserStartTime; fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:getUser',message:'getUser resolved',data:{runId,durationMs:d,hasUser:!!r?.data?.user},timestamp:Date.now(),hypothesisId:'H3,H5'})}).catch(()=>{}); }).catch((e: any) => { const d = Date.now() - getUserStartTime; fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:getUser',message:'getUser rejected',data:{runId,durationMs:d,err:String(e?.message)},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{}); });
+            // #endregion
+            const timeoutPromise = new Promise<never>((_, reject) =>
+              setTimeout(() => {
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:timeout',message:'timeout fired after 10s',data:{runId},timestamp:Date.now(),hypothesisId:'H1,H3,H5'})}).catch(()=>{});
+                // #endregion
+                reject(new Error('getUser timeout after 10s'));
+              }, 10000)
+            );
+            try {
+              const result = await Promise.race([getUserPromise, timeoutPromise]) as any;
+              return { user: result?.data?.user ?? null, error: result?.error ?? null };
+            } catch (raceError: any) {
+              if (raceError?.message === 'getUser timeout after 10s') {
+                const { data: { session } } = await supabase.auth.getSession();
+                return { user: session?.user ?? null, error: null };
+              }
+              throw raceError;
+            }
+          })().finally(() => { sharedGetUserPromise = null; });
+        }
+
+        const { user: resolvedUser, error } = await sharedGetUserPromise;
 
         const getUserDuration = Date.now() - getUserStartTime;
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:afterRace',message:'race ended (winner)',data:{runId,getUserDurationMs:getUserDuration,hasUser:!!resolvedUser,authError:error?.message},timestamp:Date.now(),hypothesisId:'H1,H5'})}).catch(()=>{});
+        // #endregion
 
         if (error) {
           console.error('[TopNav] Error getting user:', error.message)
@@ -69,15 +95,16 @@ export function TopNav() {
           }
         }
         
-        // Only update state if component is still mounted
         if (isMountedRef.current) {
-          setUser(user)
+          setUser(resolvedUser)
         }
       } catch (error: any) {
         const getUserDuration = Date.now() - getUserStartTime;
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TopNav.tsx:checkUserCatch',message:'checkUser catch',data:{runId,errorMessage:error?.message,getUserDurationMs:getUserDuration,isTimeout:error?.message==='getUser timeout after 10s'},timestamp:Date.now(),hypothesisId:'H1,H3,H4,H5'})}).catch(()=>{});
+        // #endregion
         console.error('[TopNav] Error in checkUser:', error)
       } finally {
-        // Only update state if component is still mounted
         if (isMountedRef.current) {
           setLoading(false)
         }
