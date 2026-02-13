@@ -14,6 +14,10 @@ import {
 } from '@/lib/portfolio/admin-helpers'
 import { generateSlug } from '@/lib/portfolio/helpers'
 import { HumanPortfolioMetadata, ProjectPortfolioMetadata } from '@/types/portfolio'
+import {
+  getDemoDisplayName,
+  maskDescription,
+} from '@/lib/admin/demoAnonymization'
 
 // Waitlist actions
 interface ApproveWaitlistResult {
@@ -2016,6 +2020,63 @@ export async function reprocessApprovedForm(
   }
 }
 
+// Admin demo anonymization preference (stored in current user's user_metadata)
+interface GetAdminDemoPreferenceResult {
+  success: boolean
+  enabled?: boolean
+  error?: string
+}
+
+/**
+ * Get the current admin's demo anonymization preference for the match console.
+ * Stored in auth user_metadata.admin_demo_anonymization.
+ */
+export async function getAdminDemoPreference(): Promise<GetAdminDemoPreferenceResult> {
+  try {
+    const { user } = await requireAdmin()
+    const enabled = user?.user_metadata?.admin_demo_anonymization === true
+    return { success: true, enabled: !!enabled }
+  } catch (error: any) {
+    return {
+      success: false,
+      enabled: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+interface SetAdminDemoPreferenceResult {
+  success: boolean
+  error?: string
+}
+
+/**
+ * Set the current admin's demo anonymization preference for the match console.
+ * Persists in auth user_metadata.admin_demo_anonymization.
+ */
+export async function setAdminDemoPreference(enabled: boolean): Promise<SetAdminDemoPreferenceResult> {
+  try {
+    const { user } = await requireAdmin()
+    const serviceClient = createServiceClient()
+    const currentMetadata = user?.user_metadata || {}
+    const { error } = await serviceClient.auth.admin.updateUserById(user.id, {
+      user_metadata: {
+        ...currentMetadata,
+        admin_demo_anonymization: enabled,
+      },
+    })
+    if (error) {
+      return { success: false, error: error.message }
+    }
+    return { success: true }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
 // Match console actions
 interface GetMatchDataResult {
   success: boolean
@@ -2444,8 +2505,9 @@ export async function getMatchExplanation(
   specificAsks?: string[]
 ): Promise<MatchExplanationResult> {
   try {
-    await requireAdmin()
+    const { user: adminUser } = await requireAdmin()
     const serviceClient = createServiceClient()
+    const demoEnabled = adminUser?.user_metadata?.admin_demo_anonymization === true
 
     // Fetch auth user data to get reliable display names
     const { data: searcherAuthData } = await serviceClient.auth.admin.getUserById(searcherId)
@@ -2534,19 +2596,49 @@ export async function getMatchExplanation(
     const targetNameFromProfile =
       targetProfile.basic?.name || targetProfile.full_name || null
 
-    const matcherDisplayName =
-      searcherNameFromProfile ||
-      searcherAuthMetadata.name ||
-      searcherAuthMetadata.full_name ||
-      searcherAuthUser?.email ||
-      'Matcher'
+    const matcherDisplayName = demoEnabled
+      ? getDemoDisplayName(searcherId, true, true)
+      : searcherNameFromProfile ||
+        searcherAuthMetadata.name ||
+        searcherAuthMetadata.full_name ||
+        searcherAuthUser?.email ||
+        'Matcher'
 
-    const matcheeDisplayName =
-      targetNameFromProfile ||
-      targetAuthMetadata.name ||
-      targetAuthMetadata.full_name ||
-      targetAuthUser?.email ||
-      'Matchee'
+    const matcheeDisplayName = demoEnabled
+      ? getDemoDisplayName(targetId, false, true)
+      : targetNameFromProfile ||
+        targetAuthMetadata.name ||
+        targetAuthMetadata.full_name ||
+        targetAuthUser?.email ||
+        'Matchee'
+
+    // When demo anonymization is enabled, overwrite names and descriptions
+    // in the profile metadata we send to the model so that the AI
+    // only ever sees mock names and masked descriptions.
+    if (demoEnabled) {
+      if (!searcherProfile.basic) {
+        searcherProfile.basic = {}
+      }
+      if (!targetProfile.basic) {
+        targetProfile.basic = {}
+      }
+      searcherProfile.basic.name = matcherDisplayName
+      targetProfile.basic.name = matcheeDisplayName
+
+      if (searcherProfile.full_name) {
+        searcherProfile.full_name = matcherDisplayName
+      }
+      if (targetProfile.full_name) {
+        targetProfile.full_name = matcheeDisplayName
+      }
+
+      if (searcherProfile.basic.description) {
+        searcherProfile.basic.description = maskDescription(searcherProfile.basic.description, true)
+      }
+      if (targetProfile.basic.description) {
+        targetProfile.basic.description = maskDescription(targetProfile.basic.description, true)
+      }
+    }
 
     const { openai } = await import('@/lib/openai/client')
 

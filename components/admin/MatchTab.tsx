@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getUsers } from '@/app/admin/actions'
+import { getUsers, getAdminDemoPreference, setAdminDemoPreference } from '@/app/admin/actions'
 import Link from 'next/link'
 import { UIText, Subtitle } from '@/components/ui'
 
@@ -48,6 +48,30 @@ export function MatchTab() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [demoEnabled, setDemoEnabled] = useState(false)
+  const [isTogglingDemo, setIsTogglingDemo] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    getAdminDemoPreference().then((res) => {
+      if (!cancelled && res.success && res.enabled !== undefined) {
+        setDemoEnabled(res.enabled)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleDemoToggle = async () => {
+    setIsTogglingDemo(true)
+    const next = !demoEnabled
+    const res = await setAdminDemoPreference(next)
+    if (res.success) {
+      setDemoEnabled(next)
+    }
+    setIsTogglingDemo(false)
+  }
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -72,10 +96,31 @@ export function MatchTab() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Subtitle as="h2" className="mb-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <Subtitle as="h2" className="mb-0">
           Users ({users.length})
         </Subtitle>
+        <div className="flex items-center gap-3">
+          <UIText>Demo mode (anonymize in match console)</UIText>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={demoEnabled}
+            onClick={handleDemoToggle}
+            disabled={isTogglingDemo}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+              demoEnabled ? 'bg-blue-600' : 'bg-gray-200'
+            } ${isTogglingDemo ? 'opacity-60' : ''}`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                demoEnabled ? 'translate-x-5' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+      <div>
         {error && (
           <div className="p-4 bg-red-50 border border-red-200 rounded-md text-red-700 text-sm mb-4">
             {error}

@@ -4,6 +4,10 @@ import { useState, useEffect, useRef } from 'react'
 import { Card, Title, Subtitle, Content, UIText } from '@/components/ui'
 import { getMatchExplanation, getMatchData, getMatchBreakdown, getUserInterests } from '@/app/admin/actions'
 import { SimpleBarChart } from './SimpleBarChart'
+import {
+  getDemoDisplayName,
+  maskDescription,
+} from '@/lib/admin/demoAnonymization'
 
 interface MatchUserDetailProps {
   searcherId: string
@@ -58,6 +62,8 @@ interface MatchUserDetailProps {
     >
   }
   onClose: () => void
+  /** When true, names and descriptions are anonymized (demo mode). Stored in admin user metadata. */
+  demoEnabled?: boolean
 }
 
 type Tab = 'forward' | 'backward' | 'specific' | 'topic' | 'profile' | 'projects'
@@ -86,6 +92,7 @@ export function MatchUserDetail({
   targetUserSummary,
   matchDetails,
   onClose,
+  demoEnabled = false,
 }: MatchUserDetailProps) {
   const [activeTab, setActiveTab] = useState<Tab>('forward')
   const [explanation, setExplanation] = useState<MatchExplanation | null>(null)
@@ -320,9 +327,11 @@ export function MatchUserDetail({
   const profileMetadata = humanPortfolio?.metadata || {}
   const basic = profileMetadata.basic || {}
   // Extract description - check both string and ensure it's not just whitespace
-  const description = basic.description && typeof basic.description === 'string' && basic.description.trim()
-    ? basic.description.trim()
-    : null
+  const rawDescription =
+    basic.description && typeof basic.description === 'string' && basic.description.trim()
+      ? basic.description.trim()
+      : null
+  const description = demoEnabled ? maskDescription(rawDescription, true) : rawDescription
   const skills = profileMetadata.skills || []
   const experience = profileMetadata.experience || []
   const education = profileMetadata.education || []
@@ -370,6 +379,8 @@ export function MatchUserDetail({
       value,
     }))
 
+  const anonymizedDisplayName = demoEnabled ? getDemoDisplayName(targetUserId, false, true) : displayName
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -383,7 +394,7 @@ export function MatchUserDetail({
           </button>
           <Title as="h2">Match Details</Title>
           <Content as="p" className="mt-2">
-            {displayName}
+            {anonymizedDisplayName}
           </Content>
         </div>
       </div>
@@ -437,7 +448,7 @@ export function MatchUserDetail({
                   : 'text-gray-700 hover:bg-gray-200'
               }`}
             >
-              For {explanation.matcher.subjectName}
+              For {demoEnabled ? getDemoDisplayName(searcherId, true, true) : explanation.matcher.subjectName}
             </button>
             <button
               onClick={(e) => {
@@ -450,7 +461,7 @@ export function MatchUserDetail({
                   : 'text-gray-700 hover:bg-gray-200'
               }`}
             >
-              For {explanation.matchee.subjectName}
+              For {anonymizedDisplayName}
             </button>
           </div>
 

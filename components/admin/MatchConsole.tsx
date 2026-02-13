@@ -1,12 +1,17 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import { Title, Subtitle, Content, UIText, Card } from '@/components/ui'
 import { SimpleBarChart } from './SimpleBarChart'
 import { MatchSearchResults } from './MatchSearchResults'
 import { MatchUserDetail } from './MatchUserDetail'
-import { searchMatches } from '@/app/admin/actions'
+import { searchMatches, getAdminDemoPreference } from '@/app/admin/actions'
+import {
+  getDemoDisplayName,
+  maskDescription,
+  maskEmail,
+} from '@/lib/admin/demoAnonymization'
 
 interface User {
   id: string
@@ -73,6 +78,8 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
     name: string | null
   } | null>(null)
   const [hasSearched, setHasSearched] = useState(false)
+  const [demoEnabled, setDemoEnabled] = useState(false)
+  const [preferenceLoaded, setPreferenceLoaded] = useState(false)
   const [matchDetails, setMatchDetails] = useState<{
     forwardDetails?: Record<
       string,
@@ -116,6 +123,22 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
     >
   } | null>(null)
 
+  // Load admin's demo anonymization preference first so list is censored from first paint
+  useEffect(() => {
+    let cancelled = false
+    getAdminDemoPreference().then((res) => {
+      if (!cancelled) {
+        if (res.success && res.enabled !== undefined) {
+          setDemoEnabled(res.enabled)
+        }
+        setPreferenceLoaded(true)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   // Avoid duplicate searches (e.g., React Strict Mode double effects or redundant calls)
   const lastSearchKeywordRef = useRef<string | null>(null)
   const inFlightKeywordRef = useRef<string | null>(null)
@@ -124,9 +147,11 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
   // Extract profile metadata for charts
   const profileMetadata = humanPortfolio?.metadata || {}
   const basic = profileMetadata.basic || {}
-  const description = basic.description && typeof basic.description === 'string' && basic.description.trim()
-    ? basic.description.trim()
-    : null
+  const rawDescription =
+    basic.description && typeof basic.description === 'string' && basic.description.trim()
+      ? basic.description.trim()
+      : null
+  const description = demoEnabled ? maskDescription(rawDescription, true) : rawDescription
   const skills = profileMetadata.skills || []
   const experience = profileMetadata.experience || []
   const education = profileMetadata.education || []
@@ -255,23 +280,35 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
     return () => clearTimeout(timer)
   }, [searchKeyword, performSearch])
 
-  // Initial search on mount (match search with no keyword)
+  // Run initial search only after preference has loaded so displayed list uses correct demo mode
   useEffect(() => {
+    if (!preferenceLoaded) return
     performSearch('')
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [preferenceLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Derive displayed list so it updates when demoEnabled loads (after getAdminDemoPreference)
+  const displayedMatches = useMemo(
+    () =>
+      demoEnabled
+        ? searchResults.map((m) => ({
+            ...m,
+            name: getDemoDisplayName(m.userId, false, true),
+            email: maskEmail(m.email, true),
+            description: maskDescription(m.description, true),
+          }))
+        : searchResults,
+    [searchResults, demoEnabled]
+  )
 
   const handleUserClick = (userId: string) => {
-    const summary = searchResults.find((r) => r.userId === userId)
-    setSelectedUserSummary(
-      summary
-        ? {
-            userId: summary.userId,
-            email: summary.email,
-            username: summary.username,
-            name: summary.name,
-          }
-        : null
-    )
+    const match = searchResults.find((r) => r.userId === userId)
+    if (!match) return
+    setSelectedUserSummary({
+      userId: match.userId,
+      email: demoEnabled ? maskEmail(match.email, true) : match.email,
+      username: match.username,
+      name: demoEnabled ? getDemoDisplayName(match.userId, false, true) : match.name,
+    })
     setSelectedUserId(userId)
   }
 
@@ -290,6 +327,7 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
         matchDetails={matchDetails || undefined}
         targetUserSummary={selectedUserSummary}
         onClose={handleCloseDetail}
+        demoEnabled={demoEnabled}
       />
     )
   }
@@ -309,7 +347,7 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
           </div>
           <Title as="h1">Match Console</Title>
           <Content as="p" className="mt-2">
-            {user.name || user.username || user.email}
+            {demoEnabled ? getDemoDisplayName(user.id, true, true) : user.name || user.username || user.email}
           </Content>
         </div>
       </div>
@@ -345,11 +383,11 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>
             <UIText className="text-gray-500 mb-1">Email</UIText>
-            <Content>{user.email}</Content>
+            <Content>{demoEnabled ? maskEmail(user.email, true) : user.email}</Content>
           </div>
           <div>
             <UIText className="text-gray-500 mb-1">Username</UIText>
-            <Content>{user.username || '-'}</Content>
+            <Content>{demoEnabled ? '████████████' : user.username || '-'}</Content>
           </div>
           <div>
             <UIText className="text-gray-500 mb-1">Status</UIText>
@@ -430,7 +468,7 @@ export function MatchConsole({ user, humanPortfolio, projects, notes, searcherIn
                   </UIText>
                 </div>
                 <MatchSearchResults
-                  matches={searchResults}
+                  matches={displayedMatches}
                   onUserClick={handleUserClick}
                   isLoading={isSearching}
                 />
