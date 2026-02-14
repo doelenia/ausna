@@ -17,7 +17,8 @@ export type SharedAuthResult = { user: any } | null
 /** Event dispatched when we gave up on stuck auth and cleared storage; UI should show "Session expired. Please sign in again." */
 export const AUTH_SESSION_EXPIRED_EVENT = 'auth-session-expired'
 
-const TOTAL_AUTH_TIMEOUT_MS = 28000 // 28s hard cap (10s getUser + 20s getSession - 2s buffer)
+// Must be longer than getUser (10s) + getSession (20s) so a slow-but-successful auth after login can complete
+const TOTAL_AUTH_TIMEOUT_MS = 40000 // 40s
 
 let cachedAuth: SharedAuthResult | undefined = undefined
 let inFlightPromise: Promise<SharedAuthResult> | null = null
@@ -260,9 +261,13 @@ export function getSharedAuth(): Promise<SharedAuthResult> {
     }, TOTAL_AUTH_TIMEOUT_MS)
   })
   inFlightPromise = Promise.race([runSingleAuthFlow(), totalTimeoutPromise])
-  inFlightPromise.then((result) => {
-    cachedAuth = result ?? null
-  })
+  inFlightPromise
+    .then((result) => {
+      cachedAuth = result ?? null
+    })
+    .catch(() => {
+      // Rejection (e.g. total timeout) is handled by callers; avoid unhandled rejection
+    })
   return inFlightPromise
 }
 
