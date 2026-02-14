@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Note, NoteReference, ImageReference, UrlReference, NoteSource } from '@/types/note'
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
@@ -89,24 +90,20 @@ export function NoteCard({
       try {
         const supabase = createClient()
         
-        // Wait for auth with a short timeout so we don't block feed when getUser() hangs (e.g. Safari)
+        // Use app-wide shared auth (single in-flight request) so we don't add more load in Safari
         let sessionReady = false
-        const authTimeoutMs = 1500
+        const authTimeoutMs = 3000
         try {
-          const userPromise = supabase.auth.getUser()
+          const authPromise = getSharedAuth()
           const timeoutPromise = new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('auth timeout')), authTimeoutMs)
           )
-          const { data: { user }, error: userError } = await Promise.race([userPromise, timeoutPromise]) as any
-          if (userError) {
-            console.warn('[NoteCard] Auth error while waiting:', userError.message)
-          }
-          if (user) {
+          const auth = await Promise.race([authPromise, timeoutPromise])
+          if (auth?.user) {
             sessionReady = true
           }
         } catch (_) {
-          // Timeout or other error: proceed anyway so portfolio fetch can use cookie session
-          console.warn('[NoteCard] Auth wait timed out or failed, proceeding with portfolio fetch')
+          // Timeout or other error: proceed anyway; session-recovered event will trigger retry
         }
         
         // Fetch owner's human portfolio with error checking

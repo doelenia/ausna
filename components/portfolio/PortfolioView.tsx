@@ -13,6 +13,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar } from '@/components/ui'
 import { Apple, ChevronRight, BadgeCheck } from 'lucide-react'
 
@@ -62,24 +63,18 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     
     const checkOwnership = async () => {
       try {
-        // Add timeout to prevent hanging (5 seconds)
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Auth check timeout')), 5000)
-        })
-        
-        // getUser() automatically refreshes expired tokens
-        // This is critical for long-term sessions
-        const getUserPromise = supabase.auth.getUser()
-        
-        const {
-          data: { user },
-          error,
-        } = await Promise.race([getUserPromise, timeoutPromise]) as any
-        
+        // Use app-wide shared auth so only one auth call runs (fixes Safari serialization timeouts)
+        const authTimeout = 15000 // 15s to allow shared auth flow to complete
+        const authPromise = getSharedAuth()
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Auth check timeout')), authTimeout)
+        )
+        const auth = await Promise.race([authPromise, timeoutPromise])
+        const user = auth?.user ?? null
+
         if (!isMounted) return
         
-        // If there's an error or no user, user is not authenticated
-        if (error || !user) {
+        if (!user) {
           setIsAuthenticated(false)
           setIsOwner(false)
           setAuthChecked(true)

@@ -2,73 +2,13 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getSharedAuth } from '@/lib/auth/browser-auth'
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
 import { Home, MessageCircle, Pen, Search } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
-
-/** Shared in-flight getUser so both desktop and mobile TopNav instances reuse one request. */
-let sharedGetUserPromise: Promise<{ user: any; error: any }> | null = null
-
-/**
- * When getSession() hangs (e.g. Safari), try to read user id from auth cookie so we can show signed-in state.
- * Returns a minimal { id } user object or null.
- */
-function getUserIdFromAuthCookie(): { id: string } | null {
-  if (typeof document === 'undefined') return null
-  try {
-    const cookies = document.cookie.split(';').map((c) => c.trim())
-    const pairs = cookies.map((c) => {
-      const eq = c.indexOf('=')
-      const name = c.slice(0, eq).trim()
-      let val = c.slice(eq + 1).trim()
-      try {
-        val = decodeURIComponent(val)
-      } catch {
-        // keep raw value
-      }
-      return [name, val]
-    }) as [string, string][]
-    const authPairs = pairs.filter(([name]) => name.startsWith('sb-') && name.includes('auth-token'))
-    if (authPairs.length === 0) return null
-    const byName = new Map(authPairs)
-    const baseKey = authPairs.find(([name]) => !/\.\d+$/.test(name))?.[0] ?? authPairs[0][0].replace(/\.\d+$/, '')
-    let raw = byName.get(baseKey)
-    if (raw == null) {
-      const chunks: string[] = []
-      for (let i = 0; ; i++) {
-        const v = byName.get(`${baseKey}.${i}`)
-        if (v == null) break
-        chunks.push(v)
-      }
-      raw = chunks.length > 0 ? chunks.join('') : ''
-    }
-    if (!raw) return null
-    let decoded = raw
-    if (raw.startsWith('base64-')) {
-      try {
-        const base64 = raw.slice(7).replace(/-/g, '+').replace(/_/g, '/')
-        decoded = decodeURIComponent(escape(atob(base64)))
-      } catch {
-        return null
-      }
-    }
-    const parsed = JSON.parse(decoded) as any
-    if (parsed?.user?.id) return { id: parsed.user.id }
-    if (parsed?.access_token) {
-      const payload = parsed.access_token.split('.')[1]
-      if (payload) {
-        const payloadJson = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))))
-        if (payloadJson?.sub) return { id: payloadJson.sub }
-      }
-    }
-    return null
-  } catch {
-    return null
-  }
-}
 
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
@@ -83,143 +23,47 @@ export function TopNav() {
 
   useEffect(() => {
     isMountedRef.current = true
-    const checkUser = async () => {
-      const isSafari = typeof navigator !== 'undefined' && /safari/.test(navigator.userAgent.toLowerCase()) && !/chrome/.test(navigator.userAgent.toLowerCase()) && !/chromium/.test(navigator.userAgent.toLowerCase());
-      console.log('[TopNav] checkUser start, sharedAlready=', !!sharedGetUserPromise)
-      try {
-        // Debug: Check cookies before getUser
-        const cookies = document.cookie.split(';').map(c => c.trim())
-        const authCookies = cookies.filter(c => 
-          c.includes('auth-token') || 
-          c.includes('supabase') ||
-          c.startsWith('sb-')
-        )
-        
-        if (authCookies.length === 0) {
-          console.warn('[TopNav] No auth cookies found. Available cookies:', cookies.length)
-          if (isSafari) {
-            console.warn('[TopNav] Safari detected - cookies may be blocked by ITP')
-            console.warn('[TopNav] Available cookie names:', cookies.map(c => c.split('=')[0]).join(', ') || 'NONE')
-          }
-        } else {
-          console.log('[TopNav] Found auth cookies:', authCookies.length)
-          if (isSafari) {
-            console.log('[TopNav] Safari: Cookie names found:', authCookies.map(c => c.split('=')[0]).join(', '))
-          }
+    getSharedAuth()
+      .then((auth) => {
+        if (isMountedRef.current && auth?.user) {
+          setUser(auth.user)
         }
-
-        if (!sharedGetUserPromise) {
-          console.log('[TopNav] creating shared getUser promise (race)')
-          sharedGetUserPromise = (async (): Promise<{ user: any; error: any }> => {
-            const getUserPromise = supabase.auth.getUser();
-            const timeoutPromise = new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('getUser timeout after 10s')), 10000)
-            );
-            try {
-              const result = await Promise.race([getUserPromise, timeoutPromise]) as any;
-              console.log('[TopNav] getUser won race, hasUser=', !!result?.data?.user)
-              return { user: result?.data?.user ?? null, error: result?.error ?? null };
-            } catch (raceError: any) {
-              if (raceError?.message === 'getUser timeout after 10s') {
-                console.log('[TopNav] getUser timeout, falling back to getSession')
-                try {
-                  const getSessionPromise = supabase.auth.getSession();
-                  const sessionTimeout = new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('getSession timeout after 20s')), 20000)
-                  );
-                  const { data: { session } } = await Promise.race([getSessionPromise, sessionTimeout]) as any;
-                  console.log('[TopNav] getSession done, hasUser=', !!session?.user)
-                  return { user: session?.user ?? null, error: null };
-                } catch (sessionErr: any) {
-                  console.warn('[TopNav] getSession failed or timed out:', sessionErr?.message)
-                  const cookieUser = getUserIdFromAuthCookie()
-                  if (cookieUser) {
-                    console.log('[TopNav] Using user id from auth cookie (session API timed out)')
-                    return { user: cookieUser, error: null }
-                  }
-                  return { user: null, error: null };
-                }
-              }
-              throw raceError;
-            }
-          })().finally(() => { sharedGetUserPromise = null; });
-        }
-
-        console.log('[TopNav] awaiting sharedGetUserPromise')
-        const { user: resolvedUser, error } = await sharedGetUserPromise;
-        console.log('[TopNav] shared promise resolved, hasUser=', !!resolvedUser, 'error=', error?.message ?? null)
-
-        if (error) {
-          console.error('[TopNav] Error getting user:', error.message)
-          if (isSafari) {
-            console.error('[TopNav] Safari: This may be a cookie/ITP issue')
-          }
-        }
-        
-        if (isMountedRef.current) {
-          setUser(resolvedUser)
-          // If we only have minimal user from cookie fallback, try to load full session in background
-          // so avatar, feed, and portfolio queries can use the session and stop timing out.
-          const isMinimalCookieUser = resolvedUser && typeof resolvedUser === 'object' && 'id' in resolvedUser && Object.keys(resolvedUser).length === 1
-          if (isMinimalCookieUser) {
-            const sessionRecoveryTimeout = 45000 // 45s to give slow Safari time to complete
-            const sessionPromise = supabase.auth.getSession()
-            const timeoutPromise = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('recovery timeout')), sessionRecoveryTimeout))
-            Promise.race([sessionPromise, timeoutPromise])
-              .then((result: any) => {
-                const session = result?.data?.session
-                if (session?.user && isMountedRef.current) {
-                  setUser(session.user)
-                  window.dispatchEvent(new CustomEvent('supabase-session-recovered'))
-                }
-              })
-              .catch(() => {})
-          }
-        }
-      } catch (error: any) {
-        console.error('[TopNav] Error in checkUser:', error)
-      } finally {
-        console.log('[TopNav] finally, setLoading(false), mounted=', isMountedRef.current)
-        if (isMountedRef.current) {
-          setLoading(false)
-        }
-      }
-    }
-
-    checkUser()
-
-    // Listen for auth changes - this will catch session updates and token refreshes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event: string, session: any) => {
-      // Only process auth state changes if component is still mounted
-      if (!isMountedRef.current) return
-      
-      // Handle all auth state changes
-      if (event === 'TOKEN_REFRESHED') {
-        // When token is refreshed, get updated user data
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-        if (isMountedRef.current) {
-          setUser(user ?? null)
-        }
-      } else if (event === 'SIGNED_OUT') {
+      })
+      .catch(() => {
         if (isMountedRef.current) {
           setUser(null)
         }
-      } else {
-        // For other events (SIGNED_IN, USER_UPDATED, etc.), use session user
+      })
+      .finally(() => {
         if (isMountedRef.current) {
-          setUser(session?.user ?? null)
+          setLoading(false)
         }
+      })
+
+    const onRecovered = () => {
+      if (!isMountedRef.current) return
+      getSharedAuth().then((auth) => {
+        if (isMountedRef.current && auth?.user) setUser(auth.user)
+      })
+    }
+    window.addEventListener('supabase-session-recovered', onRecovered)
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: string, session: any) => {
+      if (!isMountedRef.current) return
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+      } else if (session?.user) {
+        setUser(session.user)
       }
     })
     return () => {
       isMountedRef.current = false
+      window.removeEventListener('supabase-session-recovered', onRecovered)
       subscription.unsubscribe()
     }
-  }, []) // Removed supabase dependency - it's now memoized and stable
+  }, [])
 
   // Load current user's approval status for gating creation actions.
   // This now uses the is_current_user_approved() helper on the database,
