@@ -15,7 +15,10 @@ let cachedAuth: SharedAuthResult | undefined = undefined
 let inFlightPromise: Promise<SharedAuthResult> | null = null
 let authStateUnsubscribe: (() => void) | null = null
 
-function getUserIdFromAuthCookie(): { id: string } | null {
+/** Parsed session-like object we can read from the auth cookie */
+type CookieSession = { access_token?: string; refresh_token?: string; user?: any }
+
+function getAuthCookieRaw(): string | null {
   if (typeof document === 'undefined') return null
   try {
     const cookies = document.cookie.split(';').map((c) => c.trim())
@@ -44,7 +47,16 @@ function getUserIdFromAuthCookie(): { id: string } | null {
       }
       raw = chunks.length > 0 ? chunks.join('') : ''
     }
-    if (!raw) return null
+    return raw || null
+  } catch {
+    return null
+  }
+}
+
+function getSessionFromAuthCookie(): CookieSession | null {
+  const raw = getAuthCookieRaw()
+  if (!raw) return null
+  try {
     let decoded = raw
     if (raw.startsWith('base64-')) {
       try {
@@ -55,8 +67,19 @@ function getUserIdFromAuthCookie(): { id: string } | null {
       }
     }
     const parsed = JSON.parse(decoded) as any
-    if (parsed?.user?.id) return { id: parsed.user.id }
-    if (parsed?.access_token) {
+    if (parsed?.access_token) return parsed
+    return null
+  } catch {
+    return null
+  }
+}
+
+function getUserIdFromAuthCookie(): { id: string } | null {
+  const parsed = getSessionFromAuthCookie()
+  if (!parsed) return null
+  if (parsed?.user?.id) return { id: parsed.user.id }
+  if (parsed?.access_token) {
+    try {
       const payload = parsed.access_token.split('.')[1]
       if (payload) {
         const payloadJson = JSON.parse(
@@ -64,11 +87,11 @@ function getUserIdFromAuthCookie(): { id: string } | null {
         )
         if (payloadJson?.sub) return { id: payloadJson.sub }
       }
+    } catch {
+      /* ignore */
     }
-    return null
-  } catch {
-    return null
   }
+  return null
 }
 
 function runSingleAuthFlow(): Promise<SharedAuthResult> {
@@ -96,7 +119,23 @@ function runSingleAuthFlow(): Promise<SharedAuthResult> {
       const user = session?.user ?? null
       return user ? { user } : null
     } catch (_sessionErr) {
+      const cookieSession = getSessionFromAuthCookie()
       const cookieUser = getUserIdFromAuthCookie()
+
+      if (cookieSession?.access_token && cookieSession?.refresh_token) {
+        try {
+          const { data: { session }, error } = await supabase.auth.setSession({
+            access_token: cookieSession.access_token,
+            refresh_token: cookieSession.refresh_token,
+          })
+          if (!error && session?.user) {
+            return { user: session.user }
+          }
+        } catch {
+          /* setSession failed, fall through to minimal user */
+        }
+      }
+
       if (cookieUser) {
         const result: SharedAuthResult = { user: cookieUser }
         cachedAuth = result
