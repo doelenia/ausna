@@ -112,23 +112,57 @@ function getAuthCookieNames(): string[] {
     .filter((name) => name.startsWith('sb-') && name.includes('auth-token'))
 }
 
+/** Returns all cookie names visible to JS on this origin (so we can clear them for a full reset). */
+function getAllCookieNames(): string[] {
+  if (typeof document === 'undefined') return []
+  const raw = document.cookie
+  if (!raw) return []
+  const names: string[] = []
+  for (const part of raw.split(';')) {
+    const eq = part.indexOf('=')
+    const name = (eq >= 0 ? part.slice(0, eq) : part).trim()
+    if (name) names.push(name)
+  }
+  return names
+}
+
 export type ClearStuckAuthOptions = {
   /** If true, do a full page reload after clearing so the next load has no in-memory state and the next login is guaranteed fresh. */
   reload?: boolean
+  /** If true, clear all same-origin cookies, sessionStorage, and Supabase auth localStorage (and optionally caches) for a full reset. Default true when reload is true. */
+  fullReset?: boolean
 }
 
 /**
- * Clears auth cookies and any Supabase auth localStorage so the next load
- * starts fresh. Call when auth is stuck (total timeout) so the user can sign in again.
- * Use reload: true to force a full reload so the next sign-in works like a normal first visit.
+ * Clears auth state when auth is stuck (e.g. session timeout, cannot load auth).
+ * By default with reload: true we do a full reset: all same-origin cookies, sessionStorage,
+ * Supabase auth localStorage, and in-memory cache, then reload so the next sign-in is guaranteed fresh.
  */
 export function clearStuckAuthStorage(options?: ClearStuckAuthOptions): void {
   if (typeof document === 'undefined') return
+  const doFullReset = options?.fullReset ?? Boolean(options?.reload)
   const expires = 'Thu, 01 Jan 1970 00:00:00 GMT'
   const path = '; path=/'
-  for (const name of getAuthCookieNames()) {
-    document.cookie = `${name}=${path}; expires=${expires}`
+  const maxAge = '; max-age=0'
+
+  if (doFullReset) {
+    for (const name of getAllCookieNames()) {
+      document.cookie = `${name}=${path}${maxAge}`
+    }
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.clear()
+    } catch {
+      /* ignore */
+    }
+    if (typeof caches !== 'undefined' && caches.keys) {
+      caches.keys().then((keys) => keys.forEach((k) => caches.delete(k))).catch(() => {})
+    }
+  } else {
+    for (const name of getAuthCookieNames()) {
+      document.cookie = `${name}=${path}; expires=${expires}`
+    }
   }
+
   try {
     if (typeof localStorage !== 'undefined') {
       const keysToRemove: string[] = []
