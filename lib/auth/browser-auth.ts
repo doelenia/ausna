@@ -254,18 +254,29 @@ export function getSharedAuth(): Promise<SharedAuthResult> {
   if (inFlightPromise) {
     return inFlightPromise
   }
+  let totalTimeoutId: ReturnType<typeof setTimeout> | null = null
   const totalTimeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => {
+    totalTimeoutId = setTimeout(() => {
+      totalTimeoutId = null
       clearStuckAuthStorage()
       reject(new Error('Auth total timeout'))
     }, TOTAL_AUTH_TIMEOUT_MS)
   })
-  inFlightPromise = Promise.race([runSingleAuthFlow(), totalTimeoutPromise])
+  const flowPromise = runSingleAuthFlow()
+  inFlightPromise = Promise.race([flowPromise, totalTimeoutPromise])
   inFlightPromise
     .then((result) => {
+      if (totalTimeoutId != null) {
+        clearTimeout(totalTimeoutId)
+        totalTimeoutId = null
+      }
       cachedAuth = result ?? null
     })
     .catch(() => {
+      if (totalTimeoutId != null) {
+        clearTimeout(totalTimeoutId)
+        totalTimeoutId = null
+      }
       // Rejection (e.g. total timeout) is handled by callers; avoid unhandled rejection
     })
   return inFlightPromise

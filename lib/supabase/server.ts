@@ -24,14 +24,15 @@ export async function createClient() {
         },
         setAll(cookiesToSet) {
           try {
-            // In server actions, we can set cookies
+            const isProduction = process.env.NODE_ENV === 'production'
+            const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? ''
+            const isSecure = isProduction || siteUrl.startsWith('https:')
             cookiesToSet.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, {
                 ...options,
-                // Ensure SameSite is set to 'lax' for server actions to work
-                sameSite: options?.sameSite || 'lax',
-                // Ensure path is set
+                sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') || 'lax',
                 path: options?.path || '/',
+                secure: options?.secure ?? isSecure,
               })
             })
           } catch (error) {

@@ -14,6 +14,7 @@ export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
+  const [safariCookieHint, setSafariCookieHint] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
@@ -49,6 +50,11 @@ export function TopNav() {
     }
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
 
+    const onSafariCookieBlocked = () => {
+      if (isMountedRef.current) setSafariCookieHint(true)
+    }
+    window.addEventListener('safari-auth-cookies-blocked', onSafariCookieBlocked)
+
     const onRecovered = () => {
       if (!isMountedRef.current) return
       getSharedAuth().then((auth) => {
@@ -71,6 +77,7 @@ export function TopNav() {
       isMountedRef.current = false
       window.removeEventListener('supabase-session-recovered', onRecovered)
       window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
+      window.removeEventListener('safari-auth-cookies-blocked', onSafariCookieBlocked)
       subscription.unsubscribe()
     }
   }, [])
@@ -200,6 +207,21 @@ export function TopNav() {
 
   return (
     <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
+      {safariCookieHint && (
+        <div className="w-full bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between gap-2">
+          <UIText className="text-blue-900">
+            Sign-in may not work in Safari when tracking prevention is on. Try: Safari → Settings for this Website → turn off Prevent Cross-Site Tracking, or use another browser.
+          </UIText>
+          <button
+            type="button"
+            onClick={() => setSafariCookieHint(false)}
+            className="text-blue-800 hover:text-blue-900 underline shrink-0"
+            aria-label="Dismiss"
+          >
+            <UIText>Dismiss</UIText>
+          </button>
+        </div>
+      )}
       {sessionExpiredMessage && (
         <div className="w-full bg-amber-100 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-2">
           <UIText className="text-amber-900">Session expired. Please sign in again.</UIText>

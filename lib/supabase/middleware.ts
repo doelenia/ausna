@@ -12,6 +12,7 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
+  const isSecure = request.nextUrl.protocol === 'https:'
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     apiKey,
@@ -21,12 +22,17 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({
             request,
           })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, {
+              ...options,
+              path: options?.path ?? '/',
+              sameSite: (options?.sameSite as 'lax' | 'strict' | 'none') ?? 'lax',
+              secure: options?.secure ?? isSecure,
+            })
           )
         },
       },
