@@ -112,11 +112,17 @@ function getAuthCookieNames(): string[] {
     .filter((name) => name.startsWith('sb-') && name.includes('auth-token'))
 }
 
+export type ClearStuckAuthOptions = {
+  /** If true, do a full page reload after clearing so the next load has no in-memory state and the next login is guaranteed fresh. */
+  reload?: boolean
+}
+
 /**
  * Clears auth cookies and any Supabase auth localStorage so the next load
  * starts fresh. Call when auth is stuck (total timeout) so the user can sign in again.
+ * Use reload: true to force a full reload so the next sign-in works like a normal first visit.
  */
-export function clearStuckAuthStorage(): void {
+export function clearStuckAuthStorage(options?: ClearStuckAuthOptions): void {
   if (typeof document === 'undefined') return
   const expires = 'Thu, 01 Jan 1970 00:00:00 GMT'
   const path = '; path=/'
@@ -139,9 +145,12 @@ export function clearStuckAuthStorage(): void {
   }
   cachedAuth = undefined
   inFlightPromise = null
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT))
+  if (typeof window === 'undefined') return
+  if (options?.reload) {
+    window.location.reload()
+    return
   }
+  window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT))
 }
 
 function runSingleAuthFlow(): Promise<SharedAuthResult> {
@@ -258,7 +267,7 @@ export function getSharedAuth(): Promise<SharedAuthResult> {
   const totalTimeoutPromise = new Promise<never>((_, reject) => {
     totalTimeoutId = setTimeout(() => {
       totalTimeoutId = null
-      clearStuckAuthStorage()
+      clearStuckAuthStorage({ reload: true })
       reject(new Error('Auth total timeout'))
     }, TOTAL_AUTH_TIMEOUT_MS)
   })

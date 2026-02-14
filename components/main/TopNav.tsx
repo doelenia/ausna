@@ -109,14 +109,15 @@ export function TopNav() {
     checkApproval()
   }, [user, supabase])
 
-  // Fetch unread message count from active conversations
+  // Fetch unread message count from active conversations.
+  // Delay first fetch briefly so session cookies are available on the server (avoids "Load failed" right after login).
   useEffect(() => {
     if (!user) {
       setUnreadCount(0)
       return
     }
 
-    const fetchUnreadCount = async () => {
+    const fetchUnreadCount = async (retry = false): Promise<void> => {
       try {
         const response = await fetch('/api/messages?tab=active')
         if (response.ok) {
@@ -125,25 +126,26 @@ export function TopNav() {
           const totalUnread = conversations.reduce((sum: number, conv: any) => {
             return sum + (conv.unread_count || 0)
           }, 0)
-          setUnreadCount(totalUnread)
+          if (isMountedRef.current) setUnreadCount(totalUnread)
         }
       } catch (error) {
-        console.error('Error fetching unread count:', error)
+        if (!retry && isMountedRef.current) {
+          setTimeout(() => fetchUnreadCount(true), 1500)
+        }
       }
     }
 
-    fetchUnreadCount()
+    const t = setTimeout(() => fetchUnreadCount(), 1200)
 
-    // Listen for custom event to refresh count immediately when messages are marked as read
     const handleMessagesRead = () => {
       fetchUnreadCount()
     }
     window.addEventListener('messagesMarkedAsRead', handleMessagesRead)
 
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000)
+    const interval = setInterval(() => fetchUnreadCount(), 30000)
 
     return () => {
+      clearTimeout(t)
       clearInterval(interval)
       window.removeEventListener('messagesMarkedAsRead', handleMessagesRead)
     }
