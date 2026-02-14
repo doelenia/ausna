@@ -83,8 +83,8 @@ export function NoteView({
             const collectUserIds = (items: AnnotationWithReplies[]) => {
               items.forEach((item: AnnotationWithReplies) => {
                 userIds.add(item.annotation.owner_account_id)
-                if (item.replies && item.replies.length > 0) {
-                  collectUserIds(item.replies)
+                if (item.replies?.length) {
+                  item.replies.forEach((reply: Note) => userIds.add(reply.owner_account_id))
                 }
               })
             }
@@ -148,8 +148,8 @@ export function NoteView({
           const collectUserIds = (items: AnnotationWithReplies[]) => {
             items.forEach((item: AnnotationWithReplies) => {
               userIds.add(item.annotation.owner_account_id)
-              if (item.replies && item.replies.length > 0) {
-                collectUserIds(item.replies)
+              if (item.replies?.length) {
+                item.replies.forEach((reply: Note) => userIds.add(reply.owner_account_id))
               }
             })
           }
@@ -221,8 +221,8 @@ export function NoteView({
             const collectUserIds = (items: AnnotationWithReplies[]) => {
               items.forEach((item: AnnotationWithReplies) => {
                 userIds.add(item.annotation.owner_account_id)
-                if (item.replies && item.replies.length > 0) {
-                  collectUserIds(item.replies)
+                if (item.replies?.length) {
+                  item.replies.forEach((reply: Note) => userIds.add(reply.owner_account_id))
                 }
               })
             }

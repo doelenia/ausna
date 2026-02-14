@@ -5,7 +5,7 @@ import { Note } from '@/types/note'
 import { UserAvatar } from '@/components/ui'
 import { UIText, Content, Button } from '@/components/ui'
 import { AnnotationComposer } from './AnnotationComposer'
-import { deleteNote } from '@/app/notes/actions'
+import { deleteNote, type AnnotationWithReplies } from '@/app/notes/actions'
 import Link from 'next/link'
 
 interface CommentThreadProps {

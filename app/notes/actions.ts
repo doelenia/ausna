@@ -36,7 +36,7 @@ interface GetNotesResult {
   error?: string
 }
 
-interface AnnotationWithReplies {
+export interface AnnotationWithReplies {
   annotation: Note
   // Direct replies only (two-level thread: top-level annotation + direct replies)
   replies: Note[]

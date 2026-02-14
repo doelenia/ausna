@@ -4,6 +4,7 @@ import { canCreateNoteInPortfolio } from '@/lib/notes/helpers'
 import { NotePageClient } from './NotePageClient'
 import { notFound } from 'next/navigation'
 import { UIText } from '@/components/ui'
+import type { Note } from '@/types/note'
 
 interface NotePageProps {
   params: {
