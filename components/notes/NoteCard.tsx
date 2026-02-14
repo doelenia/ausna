@@ -53,6 +53,7 @@ export function NoteCard({
   const [ownerPortfolio, setOwnerPortfolio] = useState<Portfolio | null>(null)
   const [assignedProjects, setAssignedProjects] = useState<Portfolio[]>([])
   const [loadingPortfolios, setLoadingPortfolios] = useState(true)
+  const [sessionRecoveryTrigger, setSessionRecoveryTrigger] = useState(0)
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
@@ -262,7 +263,14 @@ export function NoteCard({
     }
 
     fetchPortfolios()
-  }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id])
+  }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id, sessionRecoveryTrigger])
+
+  // When TopNav recovers session after timeout (e.g. Safari), retry loading user/project so they can show
+  useEffect(() => {
+    const onRecovered = () => setSessionRecoveryTrigger((t) => t + 1)
+    window.addEventListener('supabase-session-recovered', onRecovered)
+    return () => window.removeEventListener('supabase-session-recovered', onRecovered)
+  }, [])
 
   const renderReference = (ref: NoteReference, index: number) => {
     if (ref.type === 'image') {

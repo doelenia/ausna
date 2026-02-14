@@ -125,7 +125,7 @@ export function TopNav() {
                 try {
                   const getSessionPromise = supabase.auth.getSession();
                   const sessionTimeout = new Promise<never>((_, rej) =>
-                    setTimeout(() => rej(new Error('getSession timeout after 5s')), 5000)
+                    setTimeout(() => rej(new Error('getSession timeout after 20s')), 20000)
                   );
                   const { data: { session } } = await Promise.race([getSessionPromise, sessionTimeout]) as any;
                   console.log('[TopNav] getSession done, hasUser=', !!session?.user)
@@ -158,6 +158,23 @@ export function TopNav() {
         
         if (isMountedRef.current) {
           setUser(resolvedUser)
+          // If we only have minimal user from cookie fallback, try to load full session in background
+          // so avatar, feed, and portfolio queries can use the session and stop timing out.
+          const isMinimalCookieUser = resolvedUser && typeof resolvedUser === 'object' && 'id' in resolvedUser && Object.keys(resolvedUser).length === 1
+          if (isMinimalCookieUser) {
+            const sessionRecoveryTimeout = 45000 // 45s to give slow Safari time to complete
+            const sessionPromise = supabase.auth.getSession()
+            const timeoutPromise = new Promise<never>((_, rej) => setTimeout(() => rej(new Error('recovery timeout')), sessionRecoveryTimeout))
+            Promise.race([sessionPromise, timeoutPromise])
+              .then((result: any) => {
+                const session = result?.data?.session
+                if (session?.user && isMountedRef.current) {
+                  setUser(session.user)
+                  window.dispatchEvent(new CustomEvent('supabase-session-recovered'))
+                }
+              })
+              .catch(() => {})
+          }
         }
       } catch (error: any) {
         console.error('[TopNav] Error in checkUser:', error)
