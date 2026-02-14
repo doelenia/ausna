@@ -12,6 +12,64 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 /** Shared in-flight getUser so both desktop and mobile TopNav instances reuse one request. */
 let sharedGetUserPromise: Promise<{ user: any; error: any }> | null = null
 
+/**
+ * When getSession() hangs (e.g. Safari), try to read user id from auth cookie so we can show signed-in state.
+ * Returns a minimal { id } user object or null.
+ */
+function getUserIdFromAuthCookie(): { id: string } | null {
+  if (typeof document === 'undefined') return null
+  try {
+    const cookies = document.cookie.split(';').map((c) => c.trim())
+    const pairs = cookies.map((c) => {
+      const eq = c.indexOf('=')
+      const name = c.slice(0, eq).trim()
+      let val = c.slice(eq + 1).trim()
+      try {
+        val = decodeURIComponent(val)
+      } catch {
+        // keep raw value
+      }
+      return [name, val]
+    }) as [string, string][]
+    const authPairs = pairs.filter(([name]) => name.startsWith('sb-') && name.includes('auth-token'))
+    if (authPairs.length === 0) return null
+    const byName = new Map(authPairs)
+    const baseKey = authPairs.find(([name]) => !/\.\d+$/.test(name))?.[0] ?? authPairs[0][0].replace(/\.\d+$/, '')
+    let raw = byName.get(baseKey)
+    if (raw == null) {
+      const chunks: string[] = []
+      for (let i = 0; ; i++) {
+        const v = byName.get(`${baseKey}.${i}`)
+        if (v == null) break
+        chunks.push(v)
+      }
+      raw = chunks.length > 0 ? chunks.join('') : ''
+    }
+    if (!raw) return null
+    let decoded = raw
+    if (raw.startsWith('base64-')) {
+      try {
+        const base64 = raw.slice(7).replace(/-/g, '+').replace(/_/g, '/')
+        decoded = decodeURIComponent(escape(atob(base64)))
+      } catch {
+        return null
+      }
+    }
+    const parsed = JSON.parse(decoded) as any
+    if (parsed?.user?.id) return { id: parsed.user.id }
+    if (parsed?.access_token) {
+      const payload = parsed.access_token.split('.')[1]
+      if (payload) {
+        const payloadJson = JSON.parse(decodeURIComponent(escape(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))))
+        if (payloadJson?.sub) return { id: payloadJson.sub }
+      }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -74,6 +132,11 @@ export function TopNav() {
                   return { user: session?.user ?? null, error: null };
                 } catch (sessionErr: any) {
                   console.warn('[TopNav] getSession failed or timed out:', sessionErr?.message)
+                  const cookieUser = getUserIdFromAuthCookie()
+                  if (cookieUser) {
+                    console.log('[TopNav] Using user id from auth cookie (session API timed out)')
+                    return { user: cookieUser, error: null }
+                  }
                   return { user: null, error: null };
                 }
               }

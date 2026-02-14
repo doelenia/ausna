@@ -69,7 +69,6 @@ export function NoteCard({
     const fetchPortfolios = async (retryCount = 0) => {
       const MAX_RETRIES = 2
       const RETRY_DELAY = 1000 // 1 second
-      const AUTH_WAIT_MAX = 3000 // Max 3 seconds to wait for auth
 
       // Check cache first
       const cachedData = getCachedPortfolioData(note.id)
@@ -89,32 +88,24 @@ export function NoteCard({
       try {
         const supabase = createClient()
         
-        // CRITICAL: Wait for auth session to be ready before fetching
-        // This fixes issues where portfolio queries fail due to stale/expired tokens
+        // Wait for auth with a short timeout so we don't block feed when getUser() hangs (e.g. Safari)
         let sessionReady = false
-        let authWaitTime = 0
-        const authCheckInterval = 100 // Check every 100ms
-        
-        while (!sessionReady && authWaitTime < AUTH_WAIT_MAX) {
-          // Use getUser() for security - it authenticates with the server
-          const { data: { user }, error: userError } = await supabase.auth.getUser()
-          
+        const authTimeoutMs = 1500
+        try {
+          const userPromise = supabase.auth.getUser()
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('auth timeout')), authTimeoutMs)
+          )
+          const { data: { user }, error: userError } = await Promise.race([userPromise, timeoutPromise]) as any
           if (userError) {
             console.warn('[NoteCard] Auth error while waiting:', userError.message)
           }
-          
           if (user) {
             sessionReady = true
-            break
           }
-          
-          // Wait a bit before checking again
-          await new Promise(resolve => setTimeout(resolve, authCheckInterval))
-          authWaitTime += authCheckInterval
-        }
-        
-        if (!sessionReady && authWaitTime >= AUTH_WAIT_MAX) {
-          console.warn('[NoteCard] Auth session not ready after waiting, proceeding anyway (may fail)')
+        } catch (_) {
+          // Timeout or other error: proceed anyway so portfolio fetch can use cookie session
+          console.warn('[NoteCard] Auth wait timed out or failed, proceeding with portfolio fetch')
         }
         
         // Fetch owner's human portfolio with error checking
