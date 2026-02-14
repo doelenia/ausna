@@ -5,11 +5,19 @@
  *
  * Use getSharedAuth() from TopNav, NoteCard, PortfolioView, etc. instead of
  * calling supabase.auth.getUser() directly.
+ *
+ * If auth is stuck (e.g. corrupted cookie/storage), a total timeout triggers
+ * clearStuckAuthStorage() and "Session expired" so the user can sign in again.
  */
 
 import { createClient } from '@/lib/supabase/client'
 
 export type SharedAuthResult = { user: any } | null
+
+/** Event dispatched when we gave up on stuck auth and cleared storage; UI should show "Session expired. Please sign in again." */
+export const AUTH_SESSION_EXPIRED_EVENT = 'auth-session-expired'
+
+const TOTAL_AUTH_TIMEOUT_MS = 28000 // 28s hard cap (10s getUser + 20s getSession - 2s buffer)
 
 let cachedAuth: SharedAuthResult | undefined = undefined
 let inFlightPromise: Promise<SharedAuthResult> | null = null
@@ -92,6 +100,47 @@ function getUserIdFromAuthCookie(): { id: string } | null {
     }
   }
   return null
+}
+
+/** Returns cookie names that store Supabase auth so we can clear them when stuck. */
+function getAuthCookieNames(): string[] {
+  if (typeof document === 'undefined') return []
+  const cookies = document.cookie.split(';').map((c) => c.trim())
+  return cookies
+    .map((c) => c.slice(0, c.indexOf('=')).trim())
+    .filter((name) => name.startsWith('sb-') && name.includes('auth-token'))
+}
+
+/**
+ * Clears auth cookies and any Supabase auth localStorage so the next load
+ * starts fresh. Call when auth is stuck (total timeout) so the user can sign in again.
+ */
+export function clearStuckAuthStorage(): void {
+  if (typeof document === 'undefined') return
+  const expires = 'Thu, 01 Jan 1970 00:00:00 GMT'
+  const path = '; path=/'
+  for (const name of getAuthCookieNames()) {
+    document.cookie = `${name}=${path}; expires=${expires}`
+  }
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.includes('supabase') && key.includes('auth'))) {
+          keysToRemove.push(key)
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k))
+    }
+  } catch {
+    /* ignore */
+  }
+  cachedAuth = undefined
+  inFlightPromise = null
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(AUTH_SESSION_EXPIRED_EVENT))
+  }
 }
 
 function runSingleAuthFlow(): Promise<SharedAuthResult> {
@@ -189,6 +238,9 @@ function ensureAuthStateListener() {
  * Returns a promise that resolves with { user } or null. Only one auth flow
  * runs at a time for the whole app; all callers share the same promise/cache.
  * Call this instead of supabase.auth.getUser() in client components.
+ *
+ * If the flow doesn't complete within TOTAL_AUTH_TIMEOUT_MS, we clear auth
+ * storage and reject so the UI can show "Session expired. Please sign in again."
  */
 export function getSharedAuth(): Promise<SharedAuthResult> {
   if (typeof window === 'undefined') {
@@ -201,7 +253,13 @@ export function getSharedAuth(): Promise<SharedAuthResult> {
   if (inFlightPromise) {
     return inFlightPromise
   }
-  inFlightPromise = runSingleAuthFlow()
+  const totalTimeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      clearStuckAuthStorage()
+      reject(new Error('Auth total timeout'))
+    }, TOTAL_AUTH_TIMEOUT_MS)
+  })
+  inFlightPromise = Promise.race([runSingleAuthFlow(), totalTimeoutPromise])
   inFlightPromise.then((result) => {
     cachedAuth = result ?? null
   })

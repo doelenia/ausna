@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { getSharedAuth } from '@/lib/auth/browser-auth'
+import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-auth'
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
@@ -13,6 +13,7 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
@@ -40,6 +41,14 @@ export function TopNav() {
         }
       })
 
+    const onSessionExpired = () => {
+      if (isMountedRef.current) {
+        setUser(null)
+        setSessionExpiredMessage(true)
+      }
+    }
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
+
     const onRecovered = () => {
       if (!isMountedRef.current) return
       getSharedAuth().then((auth) => {
@@ -61,6 +70,7 @@ export function TopNav() {
     return () => {
       isMountedRef.current = false
       window.removeEventListener('supabase-session-recovered', onRecovered)
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
       subscription.unsubscribe()
     }
   }, [])
@@ -190,6 +200,19 @@ export function TopNav() {
 
   return (
     <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
+      {sessionExpiredMessage && (
+        <div className="w-full bg-amber-100 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-2">
+          <UIText className="text-amber-900">Session expired. Please sign in again.</UIText>
+          <button
+            type="button"
+            onClick={() => setSessionExpiredMessage(false)}
+            className="text-amber-800 hover:text-amber-900 underline"
+            aria-label="Dismiss"
+          >
+            <UIText>Dismiss</UIText>
+          </button>
+        </div>
+      )}
       <div className="w-full px-0 md:px-4 lg:px-8">
         <div className="flex justify-between md:justify-between items-center h-16 px-2 md:px-0">
           {/* Mobile: All items spread from end to end, Desktop: Left side */}
