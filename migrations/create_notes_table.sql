@@ -63,3 +63,5 @@ COMMENT ON COLUMN notes.assigned_portfolios IS 'Array of portfolio IDs where thi
 
 
 
+
+

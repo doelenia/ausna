@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { UserAvatar } from '@/components/ui'
@@ -10,10 +10,13 @@ import { HumanPortfolio } from '@/types/portfolio'
 export function AuthNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
+  const isMountedRef = useRef(true)
 
   useEffect(() => {
+    isMountedRef.current = true
     const checkUser = async () => {
+      const getUserStartTime = Date.now();
       try {
         // Debug: Check cookies before getUser
         const cookies = document.cookie.split(';').map(c => c.trim())
@@ -39,11 +42,15 @@ export function AuthNav() {
 
         // Use getUser() for security - it authenticates with the server
         // getSession() reads from storage and may not be authentic
+        const getUserPromise = supabase.auth.getUser();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('getUser timeout after 10s')), 10000));
         const {
           data: { user },
           error,
-        } = await supabase.auth.getUser()
+        } = await Promise.race([getUserPromise, timeoutPromise]) as any;
         
+        const getUserDuration = Date.now() - getUserStartTime;
+
         if (error) {
           console.error('[AuthNav] Error getting user:', error.message)
           if (isSafari) {
@@ -51,11 +58,17 @@ export function AuthNav() {
           }
         }
         
-        setUser(user)
-      } catch (error) {
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setUser(user)
+        }
+      } catch (error: any) {
         console.error('[AuthNav] Error in checkUser:', error)
       } finally {
-        setLoading(false)
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setLoading(false)
+        }
       }
     }
 
@@ -64,24 +77,36 @@ export function AuthNav() {
     // Listen for auth changes - this will catch session updates and token refreshes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event: string, session: any) => {
+      // Only process auth state changes if component is still mounted
+      if (!isMountedRef.current) return
+      
       // Handle all auth state changes
       if (event === 'TOKEN_REFRESHED') {
         // When token is refreshed, get updated user data
         const {
           data: { user },
         } = await supabase.auth.getUser()
-        setUser(user ?? null)
+        if (isMountedRef.current) {
+          setUser(user ?? null)
+        }
       } else if (event === 'SIGNED_OUT') {
-        setUser(null)
+        if (isMountedRef.current) {
+          setUser(null)
+        }
       } else {
         // For other events (SIGNED_IN, USER_UPDATED, etc.), use session user
-        setUser(session?.user ?? null)
+        if (isMountedRef.current) {
+          setUser(session?.user ?? null)
+        }
       }
     })
 
-    return () => subscription.unsubscribe()
-  }, [supabase])
+    return () => {
+      isMountedRef.current = false
+      subscription.unsubscribe()
+    }
+  }, []) // Removed supabase dependency - it's now memoized and stable
 
   if (loading) {
     return (

@@ -9,12 +9,13 @@ import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
 import { CommunityMembersGrid } from './CommunityMembersGrid'
 import { Topic } from '@/types/indexing'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar } from '@/components/ui'
-import { Apple, ChevronRight } from 'lucide-react'
+import { Apple, ChevronRight, BadgeCheck } from 'lucide-react'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -49,7 +50,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [totalMutualCommunities, setTotalMutualCommunities] = useState<number>(0)
   const involvementScrollRef = useRef<HTMLDivElement | null>(null)
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
   
   // Determine if user can create notes (for projects, user must be owner or member)
   const canCreateNote = isProjectPortfolio(portfolio) && (isOwner || isMember)
@@ -62,24 +63,18 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     
     const checkOwnership = async () => {
       try {
-        // Add timeout to prevent hanging (5 seconds)
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Auth check timeout')), 5000)
-        })
-        
-        // getUser() automatically refreshes expired tokens
-        // This is critical for long-term sessions
-        const getUserPromise = supabase.auth.getUser()
-        
-        const {
-          data: { user },
-          error,
-        } = await Promise.race([getUserPromise, timeoutPromise]) as any
-        
+        // Use app-wide shared auth so only one auth call runs (fixes Safari serialization timeouts)
+        const authTimeout = 15000 // 15s to allow shared auth flow to complete
+        const authPromise = getSharedAuth()
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Auth check timeout')), authTimeout)
+        )
+        const auth = await Promise.race([authPromise, timeoutPromise])
+        const user = auth?.user ?? null
+
         if (!isMounted) return
         
-        // If there's an error or no user, user is not authenticated
-        if (error || !user) {
+        if (!user) {
           setIsAuthenticated(false)
           setIsOwner(false)
           setAuthChecked(true)
@@ -125,7 +120,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     // This ensures buttons hide/show immediately when auth state changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    } = supabase.auth.onAuthStateChange((event: string, session: any) => {
       if (event === 'SIGNED_OUT' || !session) {
         setIsAuthenticated(false)
         setIsOwner(false)
@@ -142,7 +137,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [portfolio.user_id, supabase, serverIsOwner])
+  }, [portfolio.user_id, serverIsOwner]) // Removed supabase dependency - it's now memoized and stable
 
   // Fetch projects for human portfolios (for all visitors)
   // Note: Projects should be visible to all visitors, not just authenticated users
@@ -176,7 +171,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               id: p.id,
               name: p.name,
               avatar: p.avatar,
-              emoji: projectMap.get(p.id),
+              emoji: projectMap.get(p.id) as string | undefined,
               role: p.role,
               projectType: p.projectType,
             }))
@@ -580,9 +575,31 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )}
             </div>
 
-            {/* Name and Project Type */}
+            {/* Name, Verified Badge, and Project Type */}
             <div className="flex items-baseline gap-3 mb-2 flex-wrap">
-              <Title as="h1">{basic.name}</Title>
+              <div className="flex items-center gap-2">
+                <Title as="h1">{basic.name}</Title>
+                {(() => {
+                  const meta = portfolio.metadata as any
+                  const isPseudo: boolean | null | undefined = (portfolio as any).is_pseudo
+                  const isApprovedFromMeta = meta?.is_approved === true
+                  const isVerified =
+                    isPseudo === false ? true :
+                    isPseudo === true ? false :
+                    isApprovedFromMeta
+
+                  if (isVerified) {
+                    return (
+                      <BadgeCheck
+                        aria-label="Verified user"
+                        className="w-5 h-5 text-blue-500"
+                        strokeWidth={2}
+                      />
+                    )
+                  }
+                  return null
+                })()}
+              </div>
               {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
                 const metadata = portfolio.metadata as any
                 const projectTypeSpecific = metadata?.project_type_specific

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Portfolio } from '@/types/portfolio'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * Calculate similarity score between query and text
  * Simple string matching - higher score for exact matches and prefix matches
@@ -39,6 +41,12 @@ function calculateSimilarity(query: string, text: string | null | undefined): nu
  * Query params:
  *   - q: search query (optional - if not provided, returns initial results)
  *   - limit: number of results (default: 50)
+ * 
+ * Pseudo Portfolio Behavior:
+ * - Portfolios with is_pseudo = true are automatically excluded from results for non-admin users
+ * - This filtering happens at the database level via RLS policies
+ * - Admin users will see all portfolios including pseudo ones
+ * - No explicit filtering is needed in this code as RLS handles it automatically
  */
 export async function GET(request: NextRequest) {
   try {
@@ -73,6 +81,7 @@ export async function GET(request: NextRequest) {
         }
         
         // Get human portfolios of friends
+        // Note: RLS automatically excludes pseudo portfolios for non-admin users
         let friendPortfolios: any[] = []
         if (friendIds.size > 0) {
           const { data } = await supabase
@@ -85,6 +94,7 @@ export async function GET(request: NextRequest) {
         }
         
         // Get projects/communities user is a member of
+        // Note: RLS automatically excludes pseudo portfolios for non-admin users
         const { data: allPortfolios } = await supabase
           .from('portfolios')
           .select('*')
@@ -103,6 +113,7 @@ export async function GET(request: NextRequest) {
         ]
       } else {
         // For visitors: show recent portfolios
+        // Note: RLS automatically excludes pseudo portfolios for non-admin users
         const { data: recentPortfolios } = await supabase
           .from('portfolios')
           .select('*')
@@ -117,6 +128,8 @@ export async function GET(request: NextRequest) {
       
       // Fetch all portfolios and filter in JavaScript
       // This is necessary because Supabase doesn't support ilike on JSONB paths directly
+      // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users
+      // Admin users will see all portfolios including pseudo ones
       const { data: allPortfolios, error } = await supabase
         .from('portfolios')
         .select('*')
@@ -174,6 +187,17 @@ export async function GET(request: NextRequest) {
     const results = portfolios.map((p: any) => {
       const metadata = p.metadata as any
       const basic = metadata?.basic || {}
+
+      // Derive verification from is_pseudo column first, with metadata.is_approved as a legacy fallback:
+      // - if is_pseudo === false -> verified
+      // - if is_pseudo === true  -> not verified
+      // - if is_pseudo is null/undefined -> fall back to metadata.is_approved
+      const isPseudo: boolean | null | undefined = (p as any).is_pseudo
+      const isApprovedFromMeta = metadata?.is_approved === true
+      const isApproved =
+        isPseudo === false ? true :
+        isPseudo === true ? false :
+        isApprovedFromMeta
       
       return {
         id: p.id,
@@ -186,6 +210,8 @@ export async function GET(request: NextRequest) {
         projectType: metadata?.project_type_specific || null,
         user_id: p.user_id,
         created_at: p.created_at,
+        // Kept name is_approved for backwards compatibility, but it's now is_pseudo-derived
+        is_approved: isApproved,
       }
     })
     

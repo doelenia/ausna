@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-auth'
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
@@ -12,95 +13,111 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 export function TopNav() {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
+  const [safariCookieHint, setSafariCookieHint] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [userProjectsLoading, setUserProjectsLoading] = useState(false)
-  const supabase = createClient()
+  const [isApproved, setIsApproved] = useState<boolean | null>(null)
+  const supabase = useMemo(() => createClient(), [])
+  const isMountedRef = useRef(true)
 
   useEffect(() => {
-    const checkUser = async () => {
-      try {
-        // Debug: Check cookies before getUser
-        const cookies = document.cookie.split(';').map(c => c.trim())
-        const authCookies = cookies.filter(c => 
-          c.includes('auth-token') || 
-          c.includes('supabase') ||
-          c.startsWith('sb-')
-        )
-        
-        // Safari-specific debugging
-        const isSafari = /safari/.test(navigator.userAgent.toLowerCase()) && 
-                        !/chrome/.test(navigator.userAgent.toLowerCase()) &&
-                        !/chromium/.test(navigator.userAgent.toLowerCase())
-        
-        if (authCookies.length === 0) {
-          console.warn('[TopNav] No auth cookies found. Available cookies:', cookies.length)
-          if (isSafari) {
-            console.warn('[TopNav] Safari detected - cookies may be blocked by ITP')
-            console.warn('[TopNav] Available cookie names:', cookies.map(c => c.split('=')[0]).join(', ') || 'NONE')
-          }
-        } else {
-          console.log('[TopNav] Found auth cookies:', authCookies.length)
-          if (isSafari) {
-            console.log('[TopNav] Safari: Cookie names found:', authCookies.map(c => c.split('=')[0]).join(', '))
-          }
+    isMountedRef.current = true
+    getSharedAuth()
+      .then((auth) => {
+        if (isMountedRef.current && auth?.user) {
+          setUser(auth.user)
         }
+      })
+      .catch(() => {
+        if (isMountedRef.current) {
+          setUser(null)
+        }
+      })
+      .finally(() => {
+        if (isMountedRef.current) {
+          setLoading(false)
+        }
+      })
 
-        // Use getUser() for security - it authenticates with the server
-        // getSession() reads from storage and may not be authentic
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser()
-        
+    const onSessionExpired = () => {
+      if (isMountedRef.current) {
+        setUser(null)
+        setSessionExpiredMessage(true)
+      }
+    }
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
+
+    const onSafariCookieBlocked = () => {
+      if (isMountedRef.current) setSafariCookieHint(true)
+    }
+    window.addEventListener('safari-auth-cookies-blocked', onSafariCookieBlocked)
+
+    const onRecovered = () => {
+      if (!isMountedRef.current) return
+      getSharedAuth().then((auth) => {
+        if (isMountedRef.current && auth?.user) setUser(auth.user)
+      })
+    }
+    window.addEventListener('supabase-session-recovered', onRecovered)
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event: string, session: any) => {
+      if (!isMountedRef.current) return
+      if (event === 'SIGNED_OUT') {
+        setUser(null)
+      } else if (session?.user) {
+        setUser(session.user)
+      }
+    })
+    return () => {
+      isMountedRef.current = false
+      window.removeEventListener('supabase-session-recovered', onRecovered)
+      window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
+      window.removeEventListener('safari-auth-cookies-blocked', onSafariCookieBlocked)
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  // Load current user's approval status for gating creation actions.
+  // This now uses the is_current_user_approved() helper on the database,
+  // which derives approval from non-pseudo human portfolios (is_pseudo = false).
+  useEffect(() => {
+    if (!user) {
+      setIsApproved(null)
+      return
+    }
+
+    const checkApproval = async () => {
+      try {
+        const { data, error } = await supabase.rpc('is_current_user_approved')
         if (error) {
-          console.error('[TopNav] Error getting user:', error.message)
-          if (isSafari) {
-            console.error('[TopNav] Safari: This may be a cookie/ITP issue')
-          }
+          console.error('[TopNav] Error checking approval status:', error)
+          setIsApproved(false)
+          return
         }
-        
-        setUser(user)
-      } catch (error) {
-        console.error('[TopNav] Error in checkUser:', error)
-      } finally {
-        setLoading(false)
+        setIsApproved(Boolean(data))
+      } catch (err) {
+        console.error('[TopNav] Exception checking approval status:', err)
+        setIsApproved(false)
       }
     }
 
-    checkUser()
+    checkApproval()
+  }, [user, supabase])
 
-    // Listen for auth changes - this will catch session updates and token refreshes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Handle all auth state changes
-      if (event === 'TOKEN_REFRESHED') {
-        // When token is refreshed, get updated user data
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-        setUser(user ?? null)
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null)
-      } else {
-        // For other events (SIGNED_IN, USER_UPDATED, etc.), use session user
-        setUser(session?.user ?? null)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase])
-
-  // Fetch unread message count from active conversations
+  // Fetch unread message count from active conversations.
+  // Delay first fetch briefly so session cookies are available on the server (avoids "Load failed" right after login).
   useEffect(() => {
     if (!user) {
       setUnreadCount(0)
       return
     }
 
-    const fetchUnreadCount = async () => {
+    const fetchUnreadCount = async (retry = false): Promise<void> => {
       try {
         const response = await fetch('/api/messages?tab=active')
         if (response.ok) {
@@ -109,25 +126,26 @@ export function TopNav() {
           const totalUnread = conversations.reduce((sum: number, conv: any) => {
             return sum + (conv.unread_count || 0)
           }, 0)
-          setUnreadCount(totalUnread)
+          if (isMountedRef.current) setUnreadCount(totalUnread)
         }
       } catch (error) {
-        console.error('Error fetching unread count:', error)
+        if (!retry && isMountedRef.current) {
+          setTimeout(() => fetchUnreadCount(true), 1500)
+        }
       }
     }
 
-    fetchUnreadCount()
+    const t = setTimeout(() => fetchUnreadCount(), 1200)
 
-    // Listen for custom event to refresh count immediately when messages are marked as read
     const handleMessagesRead = () => {
       fetchUnreadCount()
     }
     window.addEventListener('messagesMarkedAsRead', handleMessagesRead)
 
-    // Poll for updates every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000)
+    const interval = setInterval(() => fetchUnreadCount(), 30000)
 
     return () => {
+      clearTimeout(t)
       clearInterval(interval)
       window.removeEventListener('messagesMarkedAsRead', handleMessagesRead)
     }
@@ -191,6 +209,34 @@ export function TopNav() {
 
   return (
     <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
+      {safariCookieHint && (
+        <div className="w-full bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between gap-2">
+          <UIText className="text-blue-900">
+            Sign-in may not work in Safari when tracking prevention is on. Try: Safari → Settings for this Website → turn off Prevent Cross-Site Tracking, or use another browser.
+          </UIText>
+          <button
+            type="button"
+            onClick={() => setSafariCookieHint(false)}
+            className="text-blue-800 hover:text-blue-900 underline shrink-0"
+            aria-label="Dismiss"
+          >
+            <UIText>Dismiss</UIText>
+          </button>
+        </div>
+      )}
+      {sessionExpiredMessage && (
+        <div className="w-full bg-amber-100 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-2">
+          <UIText className="text-amber-900">Session expired. Please sign in again.</UIText>
+          <button
+            type="button"
+            onClick={() => setSessionExpiredMessage(false)}
+            className="text-amber-800 hover:text-amber-900 underline"
+            aria-label="Dismiss"
+          >
+            <UIText>Dismiss</UIText>
+          </button>
+        </div>
+      )}
       <div className="w-full px-0 md:px-4 lg:px-8">
         <div className="flex justify-between md:justify-between items-center h-16 px-2 md:px-0">
           {/* Mobile: All items spread from end to end, Desktop: Left side */}
@@ -345,29 +391,31 @@ export function TopNav() {
                       </UIText>
                     </Link>
                   ))}
-                  {/* Create Project Button */}
-                  <Link
-                    href="/portfolio/create/projects"
-                    className="flex flex-col items-center gap-4 py-4 px-4 hover:opacity-80 transition-opacity"
-                    onClick={() => setShowProjectSelector(false)}
-                  >
-                    <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
-                      <svg
-                        className="h-12 w-12 text-gray-600"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 4v16m8-8H4"
-                        />
-                      </svg>
-                    </div>
-                    <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
-                  </Link>
+                  {/* Create Project Button - only for approved users */}
+                  {isApproved && (
+                    <Link
+                      href="/portfolio/create/projects"
+                      className="flex flex-col items-center gap-4 py-4 px-4 hover:opacity-80 transition-opacity"
+                      onClick={() => setShowProjectSelector(false)}
+                    >
+                      <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
+                        <svg
+                          className="h-12 w-12 text-gray-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 4v16m8-8H4"
+                          />
+                        </svg>
+                      </div>
+                      <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
+                    </Link>
+                  )}
                 </div>
               )}
               

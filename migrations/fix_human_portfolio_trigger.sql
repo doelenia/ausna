@@ -65,3 +65,5 @@ COMMENT ON FUNCTION create_human_portfolio_for_new_user() IS
 
 
 
+
+

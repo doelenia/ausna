@@ -7,8 +7,9 @@ import {
   storeNoteVectors,
   storeAtomicKnowledge,
   createOrUpdateTopic,
-  createOrUpdateIntention,
+  extractAdditionalTopicsFromAsks,
 } from '@/lib/indexing/vectors'
+import { cleanupPropertyIndexes } from '@/lib/indexing/property-processing'
 
 /**
  * Background API route for indexing notes
@@ -47,27 +48,48 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      // 1. Build compound text
+      // 1. Cleanup existing indexes for this note
+      await cleanupPropertyIndexes('note', noteId)
+
+      // 2. Build compound text
       const compoundText = await buildCompoundText(note)
 
-      // 2. Extract summary, atomic knowledge, topics, and intentions
+      // 3. Extract summary, atomic knowledge, topics, and asks
       const extraction = await extractFromCompoundText(compoundText)
 
-      // 3. Generate embeddings
+      // 4. Generate embeddings
       const summaryVector = extraction.summary
         ? await generateEmbedding(extraction.summary)
         : null
       const compoundTextVector = await generateEmbedding(compoundText)
 
-      // 4. Store note vectors
+      // 5. Store note vectors
       await storeNoteVectors(noteId, summaryVector, compoundTextVector)
 
-      // 5. Store atomic knowledge
-      if (extraction.atomicKnowledge && extraction.atomicKnowledge.length > 0) {
-        await storeAtomicKnowledge(noteId, extraction.atomicKnowledge)
-      }
+      // 6. Get assigned projects and human portfolio
+      const assignedPortfolios = note.assigned_portfolios || []
+      
+      // Filter to only project portfolios
+      const { data: portfolios } = await supabase
+        .from('portfolios')
+        .select('id, type')
+        .in('id', assignedPortfolios)
+      
+      const assignedProjectIds = (portfolios || [])
+        .filter((p) => p.type === 'projects')
+        .map((p) => p.id)
 
-      // 6. Process topics
+      // Get human portfolio of note owner
+      const { data: humanPortfolio } = await supabase
+        .from('portfolios')
+        .select('id')
+        .eq('type', 'human')
+        .eq('user_id', note.owner_account_id)
+        .single()
+
+      const humanPortfolioId = humanPortfolio?.id
+
+      // 7. Process topics
       const topicIds: string[] = []
       if (extraction.topics && extraction.topics.length > 0) {
         for (const topic of extraction.topics) {
@@ -81,32 +103,74 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // 7. Process intentions
-      const intentionIds: string[] = []
-      if (extraction.intentions && extraction.intentions.length > 0) {
-        for (const intention of extraction.intentions) {
-          try {
-            const intentionId = await createOrUpdateIntention(
-              intention.name,
-              intention.description,
-              noteId
-            )
-            intentionIds.push(intentionId)
-          } catch (error) {
-            console.error(`Failed to process intention ${intention.name}:`, error)
-            // Continue with other intentions
-          }
-        }
+      // 8. Store atomic knowledge (not asks)
+      const allKnowledge = extraction.atomicKnowledge || []
+      if (allKnowledge.length > 0) {
+        await storeAtomicKnowledge(allKnowledge, {
+          noteId,
+          isAsks: new Array(allKnowledge.length).fill(false),
+          assignedHuman: humanPortfolioId ? [humanPortfolioId] : [],
+          assignedProjects: assignedProjectIds,
+          topics: topicIds,
+          sourceInfo: {
+            source_type: 'note',
+            source_id: noteId,
+          },
+        })
       }
 
-      // 8. Update note with summary, compound_text, topics, intentions, and status
+      // 9. Store asks
+      const allAsks = extraction.asks || []
+      if (allAsks.length > 0) {
+        // First, extract additional topics from asks
+        const asksWithTopics = allAsks.map((ask) => ({
+          ask,
+          topics: extraction.topics || [],
+        }))
+
+        let additionalTopics: Array<{ name: string; description: string }> = []
+        try {
+          additionalTopics = await extractAdditionalTopicsFromAsks(asksWithTopics)
+        } catch (error) {
+          console.error('Failed to extract additional topics from asks:', error)
+          // Continue without additional topics
+        }
+
+        // Process additional topics
+        const additionalTopicIds: string[] = []
+        for (const topic of additionalTopics) {
+          try {
+            const topicId = await createOrUpdateTopic(topic.name, topic.description, noteId)
+            additionalTopicIds.push(topicId)
+          } catch (error) {
+            console.error(`Failed to process additional topic ${topic.name}:`, error)
+            // Continue with other topics
+          }
+        }
+
+        // Combine original topics with additional topics
+        const allTopicIds = [...topicIds, ...additionalTopicIds]
+
+        await storeAtomicKnowledge(allAsks, {
+          noteId,
+          isAsks: new Array(allAsks.length).fill(true),
+          assignedHuman: humanPortfolioId ? [humanPortfolioId] : [],
+          assignedProjects: assignedProjectIds,
+          topics: allTopicIds,
+          sourceInfo: {
+            source_type: 'note',
+            source_id: noteId,
+          },
+        })
+      }
+
+      // 10. Update note with summary, compound_text, topics, and status
       const { error: updateError } = await supabase
         .from('notes')
         .update({
           summary: extraction.summary || null,
           compound_text: compoundText,
           topics: topicIds,
-          intentions: intentionIds,
           indexing_status: 'completed',
         })
         .eq('id', noteId)
@@ -115,21 +179,12 @@ export async function POST(request: NextRequest) {
         throw new Error(`Failed to update note: ${updateError.message}`)
       }
 
-      // 9. Process interest tracking for note topics
+      // 11. Process interest tracking for note topics
       if (topicIds.length > 0) {
         try {
           const { updateUserInterests } = await import('@/lib/indexing/interest-tracking')
-          // Get note owner
-          const { data: noteData } = await supabase
-            .from('notes')
-            .select('owner_account_id')
-            .eq('id', noteId)
-            .single()
-
-          if (noteData?.owner_account_id) {
-            // Update user interests with weight 0.1 for posting a note
-            await updateUserInterests(noteData.owner_account_id, topicIds, 0.1)
-          }
+          // Update user interests with weight 0.1 for posting a note
+          await updateUserInterests(note.owner_account_id, topicIds, 0.1)
         } catch (interestError: any) {
           // Log error but don't fail indexing
           console.error('Failed to process interest tracking for note:', interestError)

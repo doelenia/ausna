@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getFeedNotes } from '@/app/main/actions'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/feed - Get feed notes
  * Query params:

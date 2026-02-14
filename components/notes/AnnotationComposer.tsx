@@ -194,11 +194,11 @@ export function AnnotationComposer({
     try {
       const formData = new FormData()
       formData.append('text', text.trim())
-      
+
       if (referenceType === 'url' && url.trim()) {
         formData.append('url', url.trim())
       }
-      
+
       if (referenceType === 'image') {
         images.forEach((image, index) => {
           formData.append(`image_${index}`, image)
@@ -210,7 +210,6 @@ export function AnnotationComposer({
       const result = await createAnnotation(targetId, formData)
 
       if (result.success) {
-        // Reset form
         setText('')
         setUrl('')
         setImages([])
@@ -380,6 +379,7 @@ export function AnnotationComposer({
           <Button
             type="button"
             variant="secondary"
+            size="sm"
             onClick={onCancel}
             disabled={isSubmitting}
           >
@@ -397,4 +397,3 @@ export function AnnotationComposer({
     </form>
   )
 }
-

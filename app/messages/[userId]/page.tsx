@@ -120,7 +120,7 @@ function ConversationViewContent() {
           table: 'messages',
           filter: `or(sender_id.eq.${userId},receiver_id.eq.${userId})`,
         },
-        async (payload) => {
+        async (payload: any) => {
           const newMessage = payload.new as any
           const { data: { user } } = await supabase.auth.getUser()
           if (!user) return
@@ -675,7 +675,7 @@ function ConversationViewContent() {
 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getUser().then(({ data: { user } }: { data: { user: any } }) => {
       setCurrentUserId(user?.id || null)
     })
   }, [supabase])

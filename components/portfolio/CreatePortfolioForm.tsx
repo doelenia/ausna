@@ -98,11 +98,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       return
     }
 
-    // Require type
-    if (!projectTypeGeneral || !projectTypeSpecific) {
-      setError(`Please select a ${type === 'projects' ? 'project' : 'community'} type`)
-      return
-    }
+    // Project types are optional - no validation needed
 
     // Validate creator role (max 2 words)
     if (creatorRole.trim()) {
@@ -128,8 +124,10 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       if (selectedEmoji) {
         formData.append('emoji', selectedEmoji)
       }
-      formData.append('project_type_general', projectTypeGeneral)
-      formData.append('project_type_specific', projectTypeSpecific)
+      if (projectTypeGeneral && projectTypeSpecific) {
+        formData.append('project_type_general', projectTypeGeneral)
+        formData.append('project_type_specific', projectTypeSpecific)
+      }
       formData.append('creator_role', creatorRole.trim() || 'Creator')
 
       const result = await createPortfolio(formData)
@@ -331,7 +329,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           type="submit"
           variant="primary"
           fullWidth
-          disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji) || !projectTypeGeneral || !projectTypeSpecific}
+          disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji)}
         >
           <UIText>{loading ? 'Creating...' : 'Create Portfolio'}</UIText>
         </Button>

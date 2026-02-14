@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Note, NoteReference, ImageReference, UrlReference, NoteSource } from '@/types/note'
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
@@ -59,6 +60,7 @@ export function NoteCard({
   const [ownerPortfolio, setOwnerPortfolio] = useState<Portfolio | null>(null)
   const [assignedProjects, setAssignedProjects] = useState<Portfolio[]>([])
   const [loadingPortfolios, setLoadingPortfolios] = useState(true)
+  const [sessionRecoveryTrigger, setSessionRecoveryTrigger] = useState(0)
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
@@ -80,7 +82,6 @@ export function NoteCard({
     const fetchPortfolios = async (retryCount = 0) => {
       const MAX_RETRIES = 2
       const RETRY_DELAY = 1000 // 1 second
-      const AUTH_WAIT_MAX = 3000 // Max 3 seconds to wait for auth
 
       // Check cache first
       const cachedData = getCachedPortfolioData(note.id)
@@ -100,32 +101,20 @@ export function NoteCard({
       try {
         const supabase = createClient()
         
-        // CRITICAL: Wait for auth session to be ready before fetching
-        // This fixes issues where portfolio queries fail due to stale/expired tokens
+        // Use app-wide shared auth (single in-flight request) so we don't add more load in Safari
         let sessionReady = false
-        let authWaitTime = 0
-        const authCheckInterval = 100 // Check every 100ms
-        
-        while (!sessionReady && authWaitTime < AUTH_WAIT_MAX) {
-          // Use getUser() for security - it authenticates with the server
-          const { data: { user }, error: userError } = await supabase.auth.getUser()
-          
-          if (userError) {
-            console.warn('[NoteCard] Auth error while waiting:', userError.message)
-          }
-          
-          if (user) {
+        const authTimeoutMs = 3000
+        try {
+          const authPromise = getSharedAuth()
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('auth timeout')), authTimeoutMs)
+          )
+          const auth = await Promise.race([authPromise, timeoutPromise])
+          if (auth?.user) {
             sessionReady = true
-            break
           }
-          
-          // Wait a bit before checking again
-          await new Promise(resolve => setTimeout(resolve, authCheckInterval))
-          authWaitTime += authCheckInterval
-        }
-        
-        if (!sessionReady && authWaitTime >= AUTH_WAIT_MAX) {
-          console.warn('[NoteCard] Auth session not ready after waiting, proceeding anyway (may fail)')
+        } catch (_) {
+          // Timeout or other error: proceed anyway; session-recovered event will trigger retry
         }
         
         // Fetch owner's human portfolio with error checking
@@ -282,7 +271,14 @@ export function NoteCard({
     }
 
     fetchPortfolios()
-  }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id])
+  }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id, sessionRecoveryTrigger])
+
+  // When TopNav recovers session after timeout (e.g. Safari), retry loading user/project so they can show
+  useEffect(() => {
+    const onRecovered = () => setSessionRecoveryTrigger((t) => t + 1)
+    window.addEventListener('supabase-session-recovered', onRecovered)
+    return () => window.removeEventListener('supabase-session-recovered', onRecovered)
+  }, [])
 
   // Lazy load comments when showComments=true and card is in viewport
   useEffect(() => {

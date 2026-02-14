@@ -20,9 +20,18 @@ export interface NoteVector {
  */
 export interface AtomicKnowledge {
   id: string
-  note_id: string
+  note_id: string | null // Nullable for property-based knowledge
   knowledge_text: string
   knowledge_vector: number[] | null
+  is_asks: boolean
+  assigned_human: string[] // Array of human portfolio IDs
+  assigned_projects: string[] // Array of project portfolio IDs
+  topics: string[] // Array of topic IDs
+  source_info: {
+    source_type: 'note' | 'human_description' | 'project_description' | 'project_property'
+    source_id: string
+    property_name?: 'goals' | 'timelines' | 'asks' // Only for project_property
+  } | null
   created_at: string
 }
 
@@ -41,27 +50,13 @@ export interface Topic {
 }
 
 /**
- * Intention detected in notes
- */
-export interface Intention {
-  id: string
-  name: string
-  description: string
-  description_vector: number[] | null
-  mention_count: number
-  mentions: string[] // Array of note IDs
-  created_at: string
-  updated_at: string
-}
-
-/**
  * Extraction result from ChatGPT
  */
 export interface ExtractionResult {
   summary?: string
   atomicKnowledge?: string[]
+  asks?: string[] // Asks extracted (same format as atomic knowledge but flagged as asks)
   topics?: Array<{ name: string; description: string }>
-  intentions?: Array<{ name: string; description: string }>
 }
 
 /**

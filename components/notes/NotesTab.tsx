@@ -5,6 +5,7 @@ import { Note } from '@/types/note'
 import { getNotesByPortfolio } from '@/app/notes/actions'
 import { NotesList } from './NotesList'
 import Link from 'next/link'
+import { Button, UIText } from '@/components/ui'
 
 interface NotesTabProps {
   portfolioId: string
@@ -83,12 +84,9 @@ export function NotesTab({
       {/* Create Note Button */}
       {canCreateNote && (
         <div>
-          <Link
-            href={`/notes/create?portfolio=${portfolioId}`}
-            className="inline-block px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            Create Note
-          </Link>
+          <Button asLink href={`/notes/create?portfolio=${portfolioId}`} variant="primary">
+            <UIText>Create Note</UIText>
+          </Button>
         </div>
       )}
 

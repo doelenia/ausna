@@ -5,8 +5,10 @@ import { UsersTab } from './UsersTab'
 import { NotesTab } from './NotesTab'
 import { ProjectsTab } from './ProjectsTab'
 import { CommunitiesTab } from './CommunitiesTab'
+import { UploadFormsTab } from './UploadFormsTab'
+import { MatchTab } from './MatchTab'
 
-type Tab = 'users' | 'notes' | 'projects' | 'communities'
+type Tab = 'users' | 'notes' | 'projects' | 'communities' | 'upload-forms' | 'match'
 
 export function AdminTabs() {
   const [activeTab, setActiveTab] = useState<Tab>('users')
@@ -16,6 +18,8 @@ export function AdminTabs() {
     { id: 'notes', label: 'Notes' },
     { id: 'projects', label: 'Projects' },
     { id: 'communities', label: 'Communities' },
+    { id: 'upload-forms', label: 'Upload Forms' },
+    { id: 'match', label: 'Match' },
   ]
 
   return (
@@ -48,6 +52,8 @@ export function AdminTabs() {
         {activeTab === 'notes' && <NotesTab />}
         {activeTab === 'projects' && <ProjectsTab />}
         {activeTab === 'communities' && <CommunitiesTab />}
+        {activeTab === 'upload-forms' && <UploadFormsTab />}
+        {activeTab === 'match' && <MatchTab />}
       </div>
     </div>
   )

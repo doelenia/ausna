@@ -39,3 +39,5 @@ export type { SkeletonProps, SkeletonAvatarProps, SkeletonTextProps, SkeletonCar
 export { LazyLoad } from './LazyLoad'
 export type { LazyLoadProps } from './LazyLoad'
 
+export { MarkdownText, MarkdownContent } from './MarkdownText'
+
