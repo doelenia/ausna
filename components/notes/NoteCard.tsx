@@ -1515,11 +1515,13 @@ export function NoteCard({
                 {comments.length > 0 && (() => {
                   const comment = comments[0]
                   const isCommentAuthorSelf = currentUserId && comment.owner_account_id === currentUserId
-                  const commentAuthorBasic = isCommentAuthorSelf
-                    ? { name: 'You' as string, avatar: undefined as string | undefined }
-                    : (newestCommentAuthorPortfolio ? getPortfolioBasic(newestCommentAuthorPortfolio) : null)
-                  const commentAuthorName = commentAuthorBasic?.name ?? `User ${comment.owner_account_id.slice(0, 8)}`
-                  const commentAuthorAvatar = commentAuthorBasic?.avatar
+                  const commentAuthorPortfolioBasic = newestCommentAuthorPortfolio
+                    ? getPortfolioBasic(newestCommentAuthorPortfolio)
+                    : null
+                  const commentAuthorName = isCommentAuthorSelf
+                    ? 'You'
+                    : (commentAuthorPortfolioBasic?.name ?? `User ${comment.owner_account_id.slice(0, 8)}`)
+                  const commentAuthorAvatar = commentAuthorPortfolioBasic?.avatar
                   return (
                     <Link
                       href={`/notes/${note.id}#comments`}
