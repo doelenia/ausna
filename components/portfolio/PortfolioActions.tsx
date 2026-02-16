@@ -45,7 +45,10 @@ export function PortfolioActions({
   const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [userProjectsLoading, setUserProjectsLoading] = useState(false)
   
-  // Get friend status for human portfolios (always call hook, but only use result when needed)
+  // Get friend status for human portfolios (always call hook, but only use result when needed).
+  // IMPORTANT: when we pass an id into friend-related APIs/components it is always the
+  // auth user id (never a human portfolio id). For human portfolios that user id lives
+  // on `portfolio.user_id`, while `portfolio.id` is the portfolio row id.
   const friendStatus = useFriendStatus(
     isHumanPortfolio(portfolio) && currentUserId && !isOwner ? portfolio.user_id : ''
   )
@@ -305,7 +308,9 @@ export function PortfolioActions({
     const dropdownItems: DropdownItem[] = []
     const isFriend = currentUserId && friendStatus === 'accepted'
     
-    // If friend, show Share and Message buttons, with Unfriend in dropdown
+    // If friend, show Share and Message buttons, with Unfriend in dropdown.
+    // NOTE: `/messages` and `/api/friends` both expect auth user ids;
+    // we therefore always use `portfolio.user_id` here.
     if (isFriend) {
       dropdownItems.push({
         label: 'Unfriend',
@@ -333,7 +338,8 @@ export function PortfolioActions({
       )
     }
 
-    // If not friend, show Share button and FriendButton
+    // If not friend, show Share button and FriendButton. FriendButton's `friendId`
+    // prop is also always an auth user id.
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={handleShare}>

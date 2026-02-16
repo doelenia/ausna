@@ -4,6 +4,11 @@ import { getHumanPortfolio } from '@/lib/portfolio/human'
 
 /**
  * POST /api/messages - Send a message
+ *
+ * Both `sender_id` and `receiver_id` are auth user IDs. We verify the
+ * receiver by checking they have a human portfolio (`portfolios.user_id`)
+ * but we never store portfolio IDs in the `messages` or
+ * `conversation_completions` tables.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -204,18 +209,10 @@ export async function GET(request: NextRequest) {
         .in('user_id', partnerIds)
         .eq('partner_id', user.id)
 
-      console.log('[DEBUG] Partner completions found:', {
-        partnerIds,
-        completions: partnerCompletions,
-      })
-
       partnerCompletions?.forEach((completion) => {
         partnerCompletionMap.set(completion.user_id, completion.completed_at)
-        console.log(`[DEBUG] Added partner completion: ${completion.user_id} completed at ${completion.completed_at}`)
       })
     }
-    
-    console.log('[DEBUG] Partner completion map:', Array.from(partnerCompletionMap.entries()))
 
     // Group messages by conversation partner
     const conversationsMap = new Map<string, any>()
@@ -234,12 +231,12 @@ export async function GET(request: NextRequest) {
         // Determine if my side is active
         // Active = not completed (completion record doesn't exist)
         // Inactive = completed (completion record exists)
-        const mySideActive = !myCompletedAt
+        let mySideActive = !myCompletedAt
 
         // Determine if partner's side is active
         // Active = not completed (completion record doesn't exist)
         // Inactive = completed (completion record exists)
-        const partnerSideActive = !partnerCompletedAt
+        let partnerSideActive = !partnerCompletedAt
         
 
         // Determine status message
@@ -250,17 +247,24 @@ export async function GET(request: NextRequest) {
           const partnerCompletedTime = new Date(partnerCompletedAt)
           const isLastMessageFromMe = message.sender_id === user.id
           
-          
           if (lastMessageTime <= partnerCompletedTime) {
             // Last message was before or at partner's completion
             // Partner completed, I haven't sent a new message
             statusMessage = 'partner_completed'
-            
           } else if (isLastMessageFromMe) {
             // I sent a message after partner completed
             statusMessage = 'waiting_for_accept'
           }
         }
+
+        // For friends, we always treat the conversation as active on both sides
+        // and never show waiting/archived banners based on completion records.
+        if (isFriend) {
+          mySideActive = true
+          partnerSideActive = true
+          statusMessage = null
+        }
+
         conversationsMap.set(partnerId, {
           partner_id: partnerId,
           last_message: message,
@@ -314,6 +318,14 @@ export async function GET(request: NextRequest) {
         } else {
           conversation.status_message = null
         }
+
+        // For friends, we always override the completion-derived state and keep
+        // both sides active with no waiting banner.
+        if (conversation.is_friend) {
+          conversation.my_side_active = true
+          conversation.partner_side_active = true
+          conversation.status_message = null
+        }
       }
 
       // Count unread messages
@@ -363,8 +375,8 @@ export async function GET(request: NextRequest) {
       
       // Recalculate active states (based on completion records, not time)
       // Active = not completed (completion record doesn't exist)
-      const mySideActive = !myCompletedAt
-      const partnerSideActive = !partnerCompletedAt
+      let mySideActive = !myCompletedAt
+      let partnerSideActive = !partnerCompletedAt
       
       
       // Update active states
@@ -394,6 +406,14 @@ export async function GET(request: NextRequest) {
         // No partner completion - clear status message
         conv.status_message = null
 
+      }
+
+      // For friends, conversations are always treated as active for both sides with
+      // no waiting/archived banner, regardless of completion rows.
+      if (conv.is_friend) {
+        conv.my_side_active = true
+        conv.partner_side_active = true
+        conv.status_message = null
       }
       
     }

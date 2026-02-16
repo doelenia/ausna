@@ -9,7 +9,7 @@ import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitat
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { CommentPreviewCard } from '@/components/notes/CommentPreviewCard'
-import { Content, UIText, Button, Dropdown, Card } from '@/components/ui'
+import { Content, UIText, UIButtonText, Button, Dropdown, Card } from '@/components/ui'
 import { Archive } from 'lucide-react'
 
 interface PartnerInfo {
@@ -886,17 +886,13 @@ function ConversationViewContent() {
                           </svg>
                         )}
                       </div>
-                      <p
-                        className={`text-xs mt-1 ${
-                          isSent ? 'text-blue-100' : 'text-gray-500'
-                        }`}
-                      >
+                      <UIButtonText as="p" className="text-xs mt-1 text-gray-500">
                         {(message as any).isOptimistic ? (
                           <span className="italic">Sending...</span>
                         ) : (
                           new Date(message.created_at).toLocaleTimeString()
                         )}
-                      </p>
+                      </UIButtonText>
                       {isReceivedFriendRequest && (
                         <div className="mt-2 pt-2 border-t border-gray-300">
                           <Button
@@ -960,17 +956,13 @@ function ConversationViewContent() {
                   )}
                   
                   {message.note_id && (!message.text || !message.text.trim()) && (
-                    <p
-                      className={`text-xs mt-1 ${
-                        isSent ? 'text-blue-100' : 'text-gray-500'
-                      }`}
-                    >
+                    <UIButtonText as="p" className="text-xs mt-1 text-gray-500">
                       {(message as any).isOptimistic ? (
                         <span className="italic">Sending...</span>
                       ) : (
                         new Date(message.created_at).toLocaleTimeString()
                       )}
-                    </p>
+                    </UIButtonText>
                   )}
                 </div>
               )

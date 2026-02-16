@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getNoteById } from '@/app/notes/actions'
 import { canAnnotateNote } from '@/lib/notes/helpers'
 import { NotePageClient } from './NotePageClient'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { UIText } from '@/components/ui'
 import type { Note } from '@/types/note'
 
@@ -20,15 +20,28 @@ export default async function NotePage({ params }: NotePageProps) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Get the note (allow deleted notes if this is an annotation being viewed individually)
+  // Get the note (allow deleted notes initially so we can handle annotation redirects)
   const noteResult = await getNoteById(params.id, true) // Include deleted to check if referenced note is deleted
   if (!noteResult.success || !noteResult.notes || noteResult.notes.length === 0) {
     notFound()
   }
 
-  const note = noteResult.notes[0]
+  const rawNote = noteResult.notes[0] as Note
 
-  // If note is deleted, show 404 (can't view deleted notes directly)
+  const isAnnotationOrReaction = !!rawNote.mentioned_note_id
+
+  if (isAnnotationOrReaction) {
+    // For annotations and reactions, parent_note_id should be the root note of the thread.
+    // Fallback to mentioned_note_id if parent_note_id is missing for older data.
+    const rootNoteId = rawNote.parent_note_id ?? rawNote.mentioned_note_id!
+
+    redirect(`/notes/${rootNoteId}#annotation-${rawNote.id}`)
+  }
+
+  let note: Note = rawNote
+  let initialAnnotationId: string | null = null
+
+  // If primary note is deleted, show 404 (can't view deleted notes directly)
   if (note.deleted_at) {
     notFound()
   }
@@ -108,7 +121,7 @@ export default async function NotePage({ params }: NotePageProps) {
 
   return (
     <NotePageClient
-      noteId={params.id}
+      noteId={note.id}
       serverNote={note}
       annotations={annotations}
       portfolios={portfolios || []}
@@ -117,6 +130,7 @@ export default async function NotePage({ params }: NotePageProps) {
       canAnnotate={canAnnotate}
       annotatePortfolioId={firstPortfolio?.id}
       referencedNoteDeleted={referencedNoteDeleted}
+      initialAnnotationId={initialAnnotationId}
     />
   )
 }

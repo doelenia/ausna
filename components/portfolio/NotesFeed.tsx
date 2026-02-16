@@ -70,6 +70,7 @@ export function NotesFeed({
               topics: noteData.topics || [],
               intentions: noteData.intentions || [],
               indexing_status: noteData.indexing_status || null,
+              type: (noteData as any).type || 'post',
             }
           })
 
@@ -327,6 +328,7 @@ export function NotesFeed({
         topics: item.note!.topics || [],
         intentions: item.note!.intentions || [],
         indexing_status: item.note!.indexing_status || null,
+        type: (item.note as any).type || 'post',
       }))
       const newPinnedIds = new Set(pinnedNotesData.map(n => n.id))
       setPinnedNotes(pinnedNotesData)

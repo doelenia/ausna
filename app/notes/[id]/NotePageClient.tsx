@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Note } from '@/types/note'
 import { Portfolio } from '@/types/portfolio'
 import { NoteView } from '@/components/notes/NoteView'
@@ -16,6 +17,12 @@ interface NotePageClientProps {
   canAnnotate: boolean
   annotatePortfolioId?: string
   referencedNoteDeleted: boolean
+  /**
+   * When navigating directly to an annotation/reaction note ID, the server
+   * resolves the root note and passes the original annotation ID here so
+   * the client can redirect to /notes/[rootId]#annotation-[annotationId].
+   */
+  initialAnnotationId?: string | null
 }
 
 export function NotePageClient({
@@ -28,6 +35,7 @@ export function NotePageClient({
   canAnnotate,
   annotatePortfolioId,
   referencedNoteDeleted,
+  initialAnnotationId,
 }: NotePageClientProps) {
   const { 
     getCachedNote, 
@@ -40,9 +48,42 @@ export function NotePageClient({
   const cachedNote = useMemo(() => getCachedNote(noteId), [noteId, getCachedNote])
   const [note, setNote] = useState<Note | null>(() => cachedNote || serverNote)
   const initializedRef = useRef(false)
+  const router = useRouter()
 
-  // Scroll to top when navigating to note page (prevents scroll position from feed)
+  // If this page was reached via an annotation/reaction ID, redirect client-side
+  // to the root note with an appropriate #annotation-<id> hash. If the original
+  // URL already has a #annotation-... hash, prefer that target instead.
   useEffect(() => {
+    if (!initialAnnotationId) return
+    if (typeof window === 'undefined') return
+
+    const currentHash = window.location.hash
+    let targetAnnotationId = initialAnnotationId
+    if (currentHash && currentHash.startsWith('#annotation-')) {
+      targetAnnotationId = currentHash.replace('#annotation-', '')
+    }
+
+    const targetUrl = `/notes/${serverNote.id}#annotation-${targetAnnotationId}`
+
+    // Avoid infinite replace loops by only replacing when URL differs
+    const currentPath = window.location.pathname + window.location.search + window.location.hash
+    if (currentPath !== targetUrl) {
+      router.replace(targetUrl)
+    }
+  }, [initialAnnotationId, router, serverNote.id])
+
+  // Scroll to top when navigating to note page (prevents scroll position from feed),
+  // BUT do not override targeted hash navigations (comments / annotations).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash
+
+    // If we're navigating directly to comments or an annotation, let NoteView
+    // handle the scroll instead of forcing the container back to top.
+    if (hash === '#comments' || hash.startsWith('#annotation-')) {
+      return
+    }
+
     // Find the scrollable container (the div with h-full overflow-auto in layout)
     // Use requestAnimationFrame to ensure DOM is ready
     requestAnimationFrame(() => {
@@ -117,6 +158,7 @@ export function NotePageClient({
       canAnnotate={canAnnotate}
       annotatePortfolioId={annotatePortfolioId}
       referencedNoteDeleted={referencedNoteDeleted}
+      initialAnnotationId={initialAnnotationId}
     />
   )
 }

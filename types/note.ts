@@ -33,6 +33,13 @@ import { IndexingStatus } from './indexing'
  */
 export interface Note {
   id: string
+  /**
+   * Type of note:
+   * - 'post': regular top-level note
+   * - 'annotation': comment/annotation on another note
+   * - 'reaction': lightweight reaction (e.g. like) on another note
+   */
+  type: 'post' | 'annotation' | 'reaction'
   owner_account_id: string
   text: string
   references: NoteReference[]
@@ -71,6 +78,7 @@ export interface Note {
  */
 export interface CreateNoteInput {
   text: string
+  type?: 'post' | 'annotation' | 'reaction'
   references?: NoteReference[]
   assigned_portfolios?: string[]
   mentioned_note_id?: string | null
@@ -81,6 +89,7 @@ export interface CreateNoteInput {
  */
 export interface UpdateNoteInput {
   text?: string
+  type?: 'post' | 'annotation' | 'reaction'
   references?: NoteReference[]
   assigned_portfolios?: string[]
   mentioned_note_id?: string | null

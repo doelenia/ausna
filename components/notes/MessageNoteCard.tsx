@@ -9,6 +9,7 @@ import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo } from '@/lib/notes/url-helpers'
 import { NoteReference, ImageReference, UrlReference } from '@/types/note'
+import { UIButtonText } from '@/components/ui'
 
 interface MessageNoteCardProps {
   noteId: string
@@ -162,9 +163,9 @@ export function MessageNoteCard({ noteId, isSent, currentUserId }: MessageNoteCa
         {/* Header */}
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xs font-medium text-gray-700">{ownerName}</span>
-          <span className="text-xs text-gray-500">
+          <UIButtonText as="span" className="text-xs text-gray-500">
             {new Date(note.created_at).toLocaleDateString()}
-          </span>
+          </UIButtonText>
         </div>
 
         {/* Text content - truncated */}
