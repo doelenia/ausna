@@ -1,11 +1,12 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import { Note, CreateNoteInput, NoteReference, UrlReference } from '@/types/note'
 import { uploadNoteImage } from '@/lib/storage/note-images-server'
 import { fetchUrlMetadata } from '@/lib/notes/url-metadata'
-import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio } from '@/lib/notes/helpers'
+import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio, canAnnotateNote } from '@/lib/notes/helpers'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
 import { isHumanPortfolio, Portfolio } from '@/types/portfolio'
 
@@ -36,6 +37,20 @@ interface GetNotesResult {
   error?: string
 }
 
+export interface AnnotationWithReplies {
+  annotation: Note
+  // Direct replies only (two-level thread: top-level annotation + direct replies)
+  replies: Note[]
+}
+
+interface GetAnnotationsResult {
+  success: boolean
+  annotations?: AnnotationWithReplies[]
+  hasMore?: boolean
+  totalCount?: number
+  error?: string
+}
+
 /**
  * Create a new note
  */
@@ -47,9 +62,16 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     const text = formData.get('text') as string
     const assignedPortfolios = formData.get('assigned_portfolios') as string | null
     const mentionedNoteId = formData.get('mentioned_note_id') as string | null
+    const parentNoteId = formData.get('parent_note_id') as string | null
     const url = formData.get('url') as string | null
     const collectionIds = formData.get('collection_ids') as string | null
     const shouldPin = formData.get('should_pin') === 'true'
+    const annotationPrivacyRaw = formData.get('annotation_privacy') as string | null
+    const primaryAnnotationValue = formData.get('primary_annotation')
+    const primaryAnnotation =
+      typeof primaryAnnotationValue === 'string'
+        ? ['true', '1', 'yes', 'on'].includes(primaryAnnotationValue.toLowerCase())
+        : false
 
     if (!text || text.trim().length === 0) {
       return {
@@ -100,12 +122,16 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // Validate that user can create notes in the assigned project (must be a member)
-    const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
-    if (!canCreate) {
-      return {
-        success: false,
-        error: 'You must be a member of the project to create notes',
+    // For new notes (not annotations), user must be a member of the project.
+    // For annotations, createAnnotation already enforced the root note's annotation_privacy (everyone/friends/authors).
+    const isAnnotation = !!mentionedNoteId
+    if (!isAnnotation) {
+      const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
+      if (!canCreate) {
+        return {
+          success: false,
+          error: 'You must be a member of the project to create notes',
+        }
       }
     }
 
@@ -121,6 +147,13 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     
     console.log(`Found ${imageFiles.length} image files to upload`)
 
+    // Comment privacy: only for top-level notes; default 'everyone'
+    const isTopLevelNote = !mentionedNoteId
+    const annotationPrivacy =
+      isTopLevelNote && annotationPrivacyRaw && ['authors', 'friends', 'everyone'].includes(annotationPrivacyRaw)
+        ? (annotationPrivacyRaw as 'authors' | 'friends' | 'everyone')
+        : 'everyone'
+
     // Create note first (we need the ID for image uploads)
     const noteData: Omit<Note, 'id' | 'created_at' | 'updated_at'> = {
       owner_account_id: user.id,
@@ -128,7 +161,11 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       references: [],
       assigned_portfolios: portfolioIds,
       mentioned_note_id: mentionedNoteId || null,
+      parent_note_id: parentNoteId || null,
+      annotations: [],
       deleted_at: null,
+      primary_annotation: primaryAnnotation,
+      annotation_privacy: annotationPrivacy,
     }
 
     const { data: note, error: noteError } = await supabase
@@ -146,8 +183,6 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
 
     // Upload images and update references
     const uploadedImageReferences: NoteReference[] = []
-    const uploadErrors: Array<{ fileName: string; error: string }> = []
-    
     for (let i = 0; i < imageFiles.length; i++) {
       const imageFile = imageFiles[i]
       if (imageFile.size > 0) {
@@ -156,9 +191,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
           const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
           if (imageFile.size > MAX_FILE_SIZE) {
             console.error(`Image ${i + 1} is too large: ${imageFile.name} (${(imageFile.size / 1024 / 1024).toFixed(2)}MB)`)
-            const errorMsg = `Image "${imageFile.name}" is too large (max 50MB). Please compress it before uploading.`
-            uploadErrors.push({ fileName: imageFile.name, error: errorMsg })
-            throw new Error(errorMsg)
+            throw new Error(`Image "${imageFile.name}" is too large (max 50MB). Please compress it before uploading.`)
           }
 
           console.log(`Uploading image ${i + 1}/${imageFiles.length} for note ${note.id} (${(imageFile.size / 1024 / 1024).toFixed(2)}MB)`)
@@ -172,66 +205,23 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         } catch (error: any) {
           console.error(`Failed to upload image ${i + 1}:`, error)
           console.error('Error details:', {
-            message: error?.message,
-            stack: error?.stack,
+            message: error.message,
+            stack: error.stack,
             noteId: note.id,
             fileName: imageFile.name,
-            fileType: imageFile.type,
             fileSize: imageFile.size,
             fileSizeMB: (imageFile.size / 1024 / 1024).toFixed(2),
           })
-          
-          const errorMessage = error?.message || 'Unknown upload error'
-          uploadErrors.push({ fileName: imageFile.name, error: errorMessage })
-          
-          // If it's a size error, we need to clean up the note and return an error
-          if (errorMessage.includes('too large')) {
-            // Clean up the note since we're failing
-            try {
-              await supabase.from('notes').delete().eq('id', note.id)
-            } catch (deleteError) {
-              console.error('Failed to delete note after image upload error:', deleteError)
-            }
-            // Return error immediately
-            return {
-              success: false,
-              error: errorMessage,
-            }
+          // If it's a size error, throw it so user sees the message
+          if (error.message?.includes('too large')) {
+            throw error
           }
-          
-          // For other errors, continue with other images but track the error
-          // We'll check if all images failed after the loop
+          // Continue with other images for other errors
         }
       }
     }
     
     console.log(`Successfully uploaded ${uploadedImageReferences.length} out of ${imageFiles.length} images`)
-    
-    // If user tried to upload images but ALL failed, return an error
-    if (imageFiles.length > 0 && uploadedImageReferences.length === 0 && uploadErrors.length > 0) {
-      // Clean up the note since image uploads failed
-      await supabase.from('notes').delete().eq('id', note.id)
-      
-      // Return the first error message (or a summary if multiple)
-      const firstError = uploadErrors[0]
-      if (uploadErrors.length === 1) {
-        return {
-          success: false,
-          error: firstError.error,
-        }
-      } else {
-        // Multiple images failed - provide a summary
-        return {
-          success: false,
-          error: `Failed to upload all ${uploadErrors.length} images. First error: ${firstError.error}`,
-        }
-      }
-    }
-    
-    // If some images failed but at least one succeeded, log a warning but continue
-    if (uploadErrors.length > 0 && uploadedImageReferences.length > 0) {
-      console.warn(`Warning: ${uploadErrors.length} out of ${imageFiles.length} images failed to upload, but ${uploadedImageReferences.length} succeeded. Continuing with successful uploads.`)
-    }
 
     // Process URL reference if provided
     let urlReference: UrlReference | null = null
@@ -421,27 +411,15 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       noteId: note.id,
     }
   } catch (error: any) {
-    // Handle Next.js redirects
     if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
       const digest = (error as any).digest || ''
       if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
         throw error
       }
     }
-    
-    // Ensure we always return a valid result object
-    const errorMessage = error?.message || (typeof error === 'string' ? error : 'An unexpected error occurred')
-    
-    console.error('Error in createNote:', {
-      error,
-      errorMessage,
-      errorType: typeof error,
-      hasMessage: error?.message !== undefined,
-    })
-    
     return {
       success: false,
-      error: errorMessage,
+      error: error.message || 'An unexpected error occurred',
     }
   }
 }
@@ -454,10 +432,10 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
     const { user } = await requireAuth()
     const supabase = await createClient()
 
-    // Check ownership
+    // Check ownership and fetch annotations metadata
     const { data: note, error: noteError } = await supabase
       .from('notes')
-      .select('owner_account_id, references')
+      .select('owner_account_id, references, annotations, parent_note_id, mentioned_note_id, primary_annotation')
       .eq('id', noteId)
       .single()
 
@@ -532,10 +510,43 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
       .eq('id', noteId)
       .single()
 
-    // Soft delete: Set deleted_at timestamp
+    const nowIso = new Date().toISOString()
+
+    // Collect cascade deletes:
+    // - If deleting a primary annotation, delete its replies (its annotations list).
+    // - If deleting a root note, delete its primary annotations and their replies.
+    const cascadeIds = new Set<string>()
+    const noteAnnotations = Array.isArray(note.annotations) ? (note.annotations as string[]) : []
+    let primaryChildrenData: { id: string; annotations: string[] }[] = []
+
+    if (note.primary_annotation) {
+      noteAnnotations.forEach((id) => cascadeIds.add(id))
+    } else if (!note.parent_note_id && !note.mentioned_note_id) {
+      noteAnnotations.forEach((id) => cascadeIds.add(id))
+
+      if (noteAnnotations.length > 0) {
+        const { data: primaryChildren } = await supabase
+          .from('notes')
+          .select('id, annotations')
+          .in('id', noteAnnotations)
+          .is('deleted_at', null)
+
+        if (primaryChildren) {
+          primaryChildrenData = primaryChildren as { id: string; annotations: string[] }[]
+          primaryChildren.forEach((child: any) => {
+            const childAnnotations = Array.isArray(child.annotations)
+              ? (child.annotations as string[])
+              : []
+            childAnnotations.forEach((cid) => cascadeIds.add(cid))
+          })
+        }
+      }
+    }
+
+    // Soft delete target note
     const { error: deleteError } = await supabase
       .from('notes')
-      .update({ deleted_at: new Date().toISOString() })
+      .update({ deleted_at: nowIso })
       .eq('id', noteId)
 
     if (deleteError) {
@@ -545,18 +556,80 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
       }
     }
 
-    // Cleanup indexing data
-    try {
-      // 1. Delete atomic knowledge entries
-      await supabase.from('atomic_knowledge').delete().eq('note_id', noteId)
+    // Soft delete cascaded annotations (if any)
+    const cascadeList = Array.from(cascadeIds).filter((id) => id !== noteId)
+    if (cascadeList.length > 0) {
+      await supabase
+        .from('notes')
+        .update({ deleted_at: nowIso })
+        .in('id', cascadeList)
+        .is('deleted_at', null)
+    }
 
-      // 2. Delete note vectors
-      await supabase.from('note_vectors').delete().eq('note_id', noteId)
+    // Update parent note's annotations column: remove this annotation's id so the column stays in sync (direct comments and replies).
+    const parentId = note.primary_annotation
+      ? (note.parent_note_id ?? null)
+      : (note.mentioned_note_id ?? null)
+    if (parentId) {
+      await supabase.rpc('remove_annotation_from_note', {
+        parent_id: parentId,
+        annotation_id: noteId,
+      })
+    }
+
+    // When cascading: remove cascaded ids from their parents' annotations arrays
+    if (note.primary_annotation && noteAnnotations.length > 0) {
+      for (const replyId of noteAnnotations) {
+        await supabase.rpc('remove_annotation_from_note', {
+          parent_id: noteId,
+          annotation_id: replyId,
+        })
+      }
+    } else if (!note.parent_note_id && !note.mentioned_note_id && noteAnnotations.length > 0) {
+      for (const primaryId of noteAnnotations) {
+        await supabase.rpc('remove_annotation_from_note', {
+          parent_id: noteId,
+          annotation_id: primaryId,
+        })
+      }
+      for (const primary of primaryChildrenData) {
+        const childIds = Array.isArray(primary.annotations) ? primary.annotations : []
+        for (const replyId of childIds) {
+          await supabase.rpc('remove_annotation_from_note', {
+            parent_id: primary.id,
+            annotation_id: replyId,
+          })
+        }
+      }
+    }
+
+    // Cleanup indexing data (use service client so RLS cannot block these deletes)
+    try {
+      const serviceSupabase = createServiceClient()
+      const allDeletedIds = [noteId, ...cascadeList]
+
+      // 1. Delete atomic knowledge for this note and any cascaded notes
+      const { error: akError } = await serviceSupabase
+        .from('atomic_knowledge')
+        .delete()
+        .in('note_id', allDeletedIds)
+      if (akError) {
+        console.error('Failed to delete atomic_knowledge for note(s):', allDeletedIds, akError)
+      }
+
+      // 2. Delete note vectors for this note and any cascaded notes
+      const { error: nvError } = await serviceSupabase
+        .from('note_vectors')
+        .delete()
+        .in('note_id', allDeletedIds)
+      if (nvError) {
+        console.error('Failed to delete note_vectors for note(s):', allDeletedIds, nvError)
+      }
 
       // 3. Update topics: decrement mention_count and remove note from mentions
       if (noteData?.topics && Array.isArray(noteData.topics) && noteData.topics.length > 0) {
         for (const topicId of noteData.topics) {
-          const { data: topic } = await supabase
+          const { data: topic } = await serviceSupabase
             .from('topics')
             .select('mention_count, mentions')
             .eq('id', topicId)
@@ -567,11 +640,9 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
             const newCount = Math.max(0, (topic.mention_count || 0) - 1)
 
             if (newCount === 0) {
-              // Delete topic if no mentions left
-              await supabase.from('topics').delete().eq('id', topicId)
+              await serviceSupabase.from('topics').delete().eq('id', topicId)
             } else {
-              // Update topic
-              await supabase
+              await serviceSupabase
                 .from('topics')
                 .update({
                   mention_count: newCount,
@@ -590,7 +661,7 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
         noteData.intentions.length > 0
       ) {
         for (const intentionId of noteData.intentions) {
-          const { data: intention } = await supabase
+          const { data: intention } = await serviceSupabase
             .from('intentions')
             .select('mention_count, mentions')
             .eq('id', intentionId)
@@ -603,11 +674,9 @@ export async function deleteNote(noteId: string): Promise<DeleteNoteResult> {
             const newCount = Math.max(0, (intention.mention_count || 0) - 1)
 
             if (newCount === 0) {
-              // Delete intention if no mentions left
-              await supabase.from('intentions').delete().eq('id', intentionId)
+              await serviceSupabase.from('intentions').delete().eq('id', intentionId)
             } else {
-              // Update intention
-              await supabase
+              await serviceSupabase
                 .from('intentions')
                 .update({
                   mention_count: newCount,
@@ -1204,51 +1273,139 @@ export async function getUserPortfoliosForNotes(): Promise<{
   }
 }
 
-/**
- * Get annotations for a note (notes that mention this note)
- * Filters out annotations where the referenced note (the note being annotated) is deleted
- * When viewing a note, hide annotations if the note they reference is deleted
- */
-export async function getAnnotationsByNote(noteId: string): Promise<GetNotesResult> {
+export async function getAnnotationsByNote(
+  noteId: string,
+  offset: number = 0,
+  limit: number = 20,
+  order: 'asc' | 'desc' = 'asc'
+): Promise<GetAnnotationsResult> {
   try {
     const supabase = await createClient()
 
-    // Get all annotations (notes that mention this note)
-    const { data: annotations, error: annotationsError } = await supabase
-      .from('notes')
-      .select('*')
-      .eq('mentioned_note_id', noteId)
-      .is('deleted_at', null) // Only get non-deleted annotations
-      .order('created_at', { ascending: true })
-
-    if (annotationsError) {
-      return {
-        success: false,
-        error: annotationsError.message || 'Failed to fetch annotations',
-      }
-    }
-
     // Check if the note being annotated (noteId) is deleted
-    // If it is, filter out these annotations when viewing under the note
-    // (since user already sees the annotation content at the top when viewing individually)
     const { data: referencedNote } = await supabase
       .from('notes')
-      .select('id, deleted_at')
+      .select('id, deleted_at, annotations')
       .eq('id', noteId)
       .single()
 
-    // If the referenced note is deleted, filter out annotations
-    // (hide them when viewing under the note, but show them when viewing individually)
+    // If the referenced note is deleted, return empty (hide annotations when referenced note is deleted)
     if (referencedNote && referencedNote.deleted_at) {
       return {
         success: true,
-        notes: [], // Hide annotations when referenced note is deleted
+        annotations: [],
+        hasMore: false,
+        totalCount: 0,
       }
+    }
+
+    // First-level annotations for this note are stored on the note's own
+    // `annotations` column. This should only include direct annotations,
+    // not replies to those annotations.
+    const topIds: string[] = Array.isArray(referencedNote?.annotations)
+      ? (referencedNote!.annotations as any)
+      : []
+
+    if (!topIds || topIds.length === 0) {
+      return {
+        success: true,
+        annotations: [],
+        hasMore: false,
+        totalCount: 0,
+      }
+    }
+
+    // Fetch all first-level annotations for this note using the parent note's
+    // `annotations` column. These are the top-level comments in the thread.
+    const { data: topNotes, error: topError } = await supabase
+      .from('notes')
+      .select('*')
+      .in('id', topIds)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true })
+
+    if (topError) {
+      return {
+        success: false,
+        error: topError.message || 'Failed to fetch annotations',
+      }
+    }
+
+    const allTop = (topNotes || []) as Note[]
+    const sorted = order === 'desc'
+      ? [...allTop].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      : allTop
+    const totalCount = sorted.length
+
+    // Apply pagination to top-level annotations
+    const topLevel = sorted.slice(offset, offset + limit)
+
+    // For second-level replies, we look at each top-level annotation's own
+    // `annotations` column. Every reply in that column is considered a child
+    // of that top-level annotation (we only support two levels).
+    const repliesMap = new Map<string, Note[]>()
+    const childIdToParentId = new Map<string, string>()
+    const childIds: string[] = []
+
+    for (const top of allTop) {
+      const childList: string[] = Array.isArray((top as any).annotations)
+        ? ((top as any).annotations as any)
+        : []
+      if (!childList || childList.length === 0) continue
+      for (const childId of childList) {
+        childIds.push(childId)
+        childIdToParentId.set(childId, top.id)
+      }
+    }
+
+    if (childIds.length > 0) {
+      const { data: childNotes, error: childError } = await supabase
+        .from('notes')
+        .select('*')
+        .in('id', childIds)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: true })
+
+      if (childError) {
+        console.error('Error fetching child annotation replies:', childError)
+      } else if (childNotes) {
+        for (const reply of childNotes as Note[]) {
+          const parentId = childIdToParentId.get(reply.id)
+          if (!parentId) continue
+          if (!repliesMap.has(parentId)) {
+            repliesMap.set(parentId, [])
+          }
+          repliesMap.get(parentId)!.push(reply)
+        }
+      }
+    }
+
+    let annotationsWithReplies: AnnotationWithReplies[]
+    let hasMore: boolean
+
+    if (order === 'desc') {
+      // Newest direct (top-level) annotations only; do not mix in replies.
+      // The note's annotations column lists direct comments only; feed preview shows the single newest direct comment.
+      const topLevelDesc = sorted.slice(offset, offset + limit)
+      annotationsWithReplies = topLevelDesc.map((annotation: Note) => ({
+        annotation,
+        replies: repliesMap.get(annotation.id) || [],
+      }))
+      hasMore = offset + limit < totalCount
+    } else {
+      // Standard two-level threaded structure (oldest-first)
+      annotationsWithReplies = (topLevel || []).map((annotation: any) => ({
+        annotation: annotation as Note,
+        replies: repliesMap.get(annotation.id) || [],
+      }))
+      hasMore = totalCount ? offset + limit < totalCount : false
     }
 
     return {
       success: true,
-      notes: (annotations || []) as Note[],
+      annotations: annotationsWithReplies,
+      hasMore,
+      totalCount: totalCount || 0,
     }
   } catch (error: any) {
     return {
@@ -1269,10 +1426,10 @@ export async function createAnnotation(
     const { user } = await requireAuth()
     const supabase = await createClient()
 
-    // Verify the note being annotated exists
+    // Verify the item being annotated exists (could be the root note or an annotation)
     const { data: targetNote, error: noteError } = await supabase
       .from('notes')
-      .select('assigned_portfolios')
+      .select('id, assigned_portfolios, parent_note_id, mentioned_note_id, annotations, primary_annotation')
       .eq('id', noteId)
       .single()
 
@@ -1326,21 +1483,128 @@ export async function createAnnotation(
       }
     }
 
-    // Validate user can create notes in the target project
-    const canCreate = await canCreateNoteInPortfolio(targetProjectId, user.id)
-    if (!canCreate) {
+    // Enforce root note's annotation_privacy (everyone / friends / authors). Default: everyone.
+    const rootNoteId = targetNote.parent_note_id ?? targetNote.id
+    const { data: rootNote, error: rootError } = await supabase
+      .from('notes')
+      .select('id, annotation_privacy, owner_account_id, assigned_portfolios')
+      .eq('id', rootNoteId)
+      .single()
+
+    if (rootError || !rootNote) {
       return {
         success: false,
-        error: 'You must be a member of the project to create annotations',
+        error: 'Could not load note for permission check',
       }
     }
 
-    // Set mentioned_note_id and assigned_portfolios (exactly one project)
+    const rootPortfolioIds = rootNote.assigned_portfolios || []
+    const { data: rootPortfolios } = rootPortfolioIds.length > 0
+      ? await supabase.from('portfolios').select('*').in('id', rootPortfolioIds)
+      : { data: [] }
+
+    const allowed = await canAnnotateNote(
+      rootNote,
+      (rootPortfolios || []) as Portfolio[],
+      user.id
+    )
+    if (!allowed) {
+      return {
+        success: false,
+        error: 'You don\'t have permission to comment on this note',
+      }
+    }
+
+    // Determine parent note for this annotation thread using primary_annotation flag:
+    // - Direct reply to root note -> parent is target (root), and new annotation is primary.
+    // - Replying to an annotation marked primary_annotation=true -> parent is that annotation.
+    // - Otherwise inherit the target's parent_note_id.
+    let parentNoteId: string
+    let newPrimaryAnnotation = false
+    if (!targetNote.parent_note_id) {
+      // Replying directly to the root note
+      parentNoteId = targetNote.id
+      newPrimaryAnnotation = true
+    } else if (targetNote.mentioned_note_id && targetNote.primary_annotation) {
+      // Replying to a primary annotation: attach to that annotation
+      parentNoteId = targetNote.id
+    } else {
+      // Inherit the thread root/parent from the target
+      parentNoteId = targetNote.parent_note_id
+    }
+
+    // Set thread fields:
+    // - mentioned_note_id: immediate parent being replied to (noteId)
+    // - parent_note_id: root note of the thread
     formData.append('mentioned_note_id', noteId)
+    formData.append('parent_note_id', parentNoteId)
+    formData.append('primary_annotation', newPrimaryAnnotation ? 'true' : 'false')
     formData.append('assigned_portfolios', JSON.stringify([targetProjectId]))
 
-    // Use createNote with the modified formData
-    return await createNote(formData)
+    // Create the annotation note
+    const result = await createNote(formData)
+    if (!result.success || !result.noteId) {
+      return result
+    }
+
+    const newAnnotationId = result.noteId
+
+    // Decide where to record this annotation in an `annotations` array:
+    // Always attach to the computed parentNoteId so secondary replies inherit the
+    // correct parent rather than the immediate note they replied to.
+    const annotationsOwnerId = parentNoteId
+
+    // Atomically update the annotations list on the chosen owner (RPC uses SECURITY DEFINER so it can update another user's note)
+    const { error: appendError } = await supabase.rpc('append_annotation_to_note', {
+      parent_id: annotationsOwnerId,
+      annotation_id: newAnnotationId,
+    })
+
+    if (appendError) {
+      console.error('append_annotation_to_note failed:', appendError)
+      return {
+        success: false,
+        error: 'Comment was saved but could not be attached to the thread. Please refresh the page.',
+      }
+    }
+
+    // Notify the annotated note's author (root note owner) about the new reply, unless they are the commenter
+    const rootNoteOwnerId = rootNote.owner_account_id
+    if (rootNoteOwnerId && rootNoteOwnerId !== user.id) {
+      await supabase.from('messages').insert({
+        sender_id: user.id,
+        receiver_id: rootNoteOwnerId,
+        text: '',
+        note_id: rootNoteId,
+        annotation_id: newAnnotationId,
+        message_type: 'comment_preview',
+      })
+      // Ignore insert errors (e.g. receiver has no portfolio) so annotation success is not affected
+
+      // Move conversation to active for both sides (same as POST /api/messages): remove completion records
+      await supabase
+        .from('conversation_completions')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('partner_id', rootNoteOwnerId)
+
+      const { data: friendship } = await supabase
+        .from('friends')
+        .select('id')
+        .or(`and(user_id.eq.${user.id},friend_id.eq.${rootNoteOwnerId}),and(user_id.eq.${rootNoteOwnerId},friend_id.eq.${user.id})`)
+        .eq('status', 'accepted')
+        .maybeSingle()
+
+      if (friendship) {
+        await supabase
+          .from('conversation_completions')
+          .delete()
+          .eq('user_id', rootNoteOwnerId)
+          .eq('partner_id', user.id)
+      }
+    }
+
+    return result
   } catch (error: any) {
     if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
       const digest = (error as any).digest || ''

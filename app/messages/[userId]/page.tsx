@@ -8,7 +8,8 @@ import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
-import { Content, UIText, Button, Dropdown } from '@/components/ui'
+import { CommentPreviewCard } from '@/components/notes/CommentPreviewCard'
+import { Content, UIText, Button, Dropdown, Card } from '@/components/ui'
 import { Archive } from 'lucide-react'
 
 interface PartnerInfo {
@@ -840,14 +841,24 @@ function ConversationViewContent() {
                   key={`${message.id}-${refreshKey}`}
                   className={`flex flex-col ${isSent ? 'items-end' : 'items-start'}`}
                 >
-                  {message.note_id && (
+                  {message.note_id && message.message_type === 'comment_preview' ? (
+                    <div className={`mb-1 max-w-xs lg:max-w-md`}>
+                      <CommentPreviewCard 
+                        noteId={message.note_id}
+                        annotationId={message.annotation_id ?? null}
+                        isSent={isSent}
+                        currentUserId={currentUserId}
+                      />
+                    </div>
+                  ) : message.note_id ? (
                     <div className={`mb-1 max-w-xs lg:max-w-md`}>
                       <MessageNoteCard 
                         noteId={message.note_id} 
                         isSent={isSent}
+                        currentUserId={currentUserId}
                       />
                     </div>
-                  )}
+                  ) : null}
                   
                   {isPortfolioInvitationMessage && portfolio && (
                     <div className={`mb-1 max-w-xs lg:max-w-md`}>

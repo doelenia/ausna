@@ -315,6 +315,7 @@ export async function getFeedNotes(
         .from('notes')
         .select('*')
         .is('deleted_at', null)
+        .is('mentioned_note_id', null) // Exclude annotations
         .order('created_at', { ascending: false })
         .limit(publicLimit)
 
@@ -346,6 +347,7 @@ export async function getFeedNotes(
       .from('notes')
       .select('*')
       .is('deleted_at', null)
+      .is('mentioned_note_id', null) // Exclude annotations
       .order('created_at', { ascending: false })
       .limit(queryLimit)
 
@@ -424,6 +426,7 @@ export async function getFeedNotes(
             .from('notes')
             .select('*')
             .is('deleted_at', null)
+            .is('mentioned_note_id', null) // Exclude annotations
             .order('created_at', { ascending: false })
             .limit(queryLimit)
 

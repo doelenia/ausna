@@ -1,17 +1,28 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { Note } from '@/types/note'
 import { deleteNote } from '@/app/notes/actions'
-import { useRouter } from 'next/navigation'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { NoteCard } from './NoteCard'
-import { UIText } from '@/components/ui'
+import { UIText, Content, Button, Card } from '@/components/ui'
+import { AnnotationComposer } from './AnnotationComposer'
+import { CommentThread } from './CommentThread'
+import { createClient } from '@/lib/supabase/client'
+import { getPortfolioBasic } from '@/lib/portfolio/utils'
+import Link from 'next/link'
+
+interface AnnotationWithReplies {
+  annotation: Note
+  // Direct replies only (second level of thread)
+  replies: Note[]
+}
 
 interface NoteViewProps {
   note: Note
-  annotations: Note[]
+  annotations: Note[] // Deprecated: annotations loaded dynamically client-side
   portfolios: Portfolio[]
   humanPortfolios: Portfolio[]
   currentUserId?: string
@@ -22,7 +33,7 @@ interface NoteViewProps {
 
 export function NoteView({
   note,
-  annotations,
+  annotations: serverAnnotations,
   portfolios,
   humanPortfolios,
   currentUserId,
@@ -32,7 +43,261 @@ export function NoteView({
 }: NoteViewProps) {
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
+  const [annotations, setAnnotations] = useState<AnnotationWithReplies[]>([])
+  const [loadingAnnotations, setLoadingAnnotations] = useState(true)
+  const [hasMoreAnnotations, setHasMoreAnnotations] = useState(false)
+  const [annotationOffset, setAnnotationOffset] = useState(0)
+  const [replyingTo, setReplyingTo] = useState<{ commentId: string; authorName: string; commentPreview?: string } | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+  const [repliesExpandedForCommentIds, setRepliesExpandedForCommentIds] = useState<Set<string>>(new Set())
+  const [authorNames, setAuthorNames] = useState<Map<string, string>>(new Map())
+  const [authorAvatars, setAuthorAvatars] = useState<Map<string, string | undefined>>(new Map())
+  const supabaseRef = useRef(createClient())
+  const humanPortfoliosRef = useRef(humanPortfolios)
+  humanPortfoliosRef.current = humanPortfolios
+
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
+
+  // Detect mobile
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  // Load annotations when note changes only (not when humanPortfolios reference changes)
+  useEffect(() => {
+    const loadAnnotations = async () => {
+      setLoadingAnnotations(true)
+      try {
+        const response = await fetch(`/api/notes/${note.id}/annotations?offset=0&limit=20`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            setAnnotations(data.annotations || [])
+            setHasMoreAnnotations(data.hasMore || false)
+            setAnnotationOffset(data.annotations?.length || 0)
+
+            const userIds = new Set<string>()
+            const collectUserIds = (items: AnnotationWithReplies[]) => {
+              items.forEach((item: AnnotationWithReplies) => {
+                userIds.add(item.annotation.owner_account_id)
+                if (item.replies?.length) {
+                  item.replies.forEach((reply: Note) => userIds.add(reply.owner_account_id))
+                }
+              })
+            }
+            collectUserIds(data.annotations || [])
+
+            const namesMap = new Map<string, string>()
+            const avatarsMap = new Map<string, string | undefined>()
+            const portfolios = humanPortfoliosRef.current || []
+
+            for (const userId of userIds) {
+              const portfolio = portfolios.find((p: Portfolio) => p.user_id === userId)
+              if (portfolio) {
+                const basic = getPortfolioBasic(portfolio)
+                namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
+                avatarsMap.set(userId, basic.avatar)
+              } else {
+                // Fallback: fetch from supabase
+                const { data: portfolioData } = await supabaseRef.current
+                  .from('portfolios')
+                  .select('*')
+                  .eq('user_id', userId)
+                  .eq('type', 'human')
+                  .maybeSingle()
+                
+                if (portfolioData) {
+                  const basic = getPortfolioBasic(portfolioData as Portfolio)
+                  namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
+                  avatarsMap.set(userId, basic.avatar)
+                } else {
+                  namesMap.set(userId, `User ${userId.slice(0, 8)}`)
+                }
+              }
+            }
+
+            setAuthorNames(namesMap)
+            setAuthorAvatars(avatarsMap)
+          }
+        }
+      } catch (error) {
+        console.error('Error loading annotations:', error)
+      } finally {
+        setLoadingAnnotations(false)
+      }
+    }
+
+    loadAnnotations()
+  }, [note.id])
+
+  // Scroll to #comments or #annotation-<id> when opening note with hash (e.g. from feed comment button or "View comment" in messages)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash
+    if (!hash) return
+    const timer = setTimeout(() => {
+      if (hash === '#comments') {
+        const el = document.getElementById('comments')
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      if (hash.startsWith('#annotation-') && !loadingAnnotations && annotations.length > 0) {
+        const id = hash.slice(1)
+        const el = document.getElementById(id)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [loadingAnnotations, annotations.length])
+
+  const loadMoreAnnotations = async () => {
+    try {
+      const response = await fetch(`/api/notes/${note.id}/annotations?offset=${annotationOffset}&limit=20`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success) {
+          setAnnotations((prev) => [...prev, ...(data.annotations || [])])
+          setHasMoreAnnotations(data.hasMore || false)
+          setAnnotationOffset((prev) => prev + (data.annotations?.length || 0))
+
+          // Collect user IDs from new annotations (recursively)
+          const userIds = new Set<string>()
+          const collectUserIds = (items: AnnotationWithReplies[]) => {
+            items.forEach((item: AnnotationWithReplies) => {
+              userIds.add(item.annotation.owner_account_id)
+              if (item.replies?.length) {
+                item.replies.forEach((reply: Note) => userIds.add(reply.owner_account_id))
+              }
+            })
+          }
+          collectUserIds(data.annotations || [])
+
+          // Fetch author names and avatars for new users
+          const namesMap = new Map<string, string>(authorNames)
+          const avatarsMap = new Map<string, string | undefined>(authorAvatars)
+
+          for (const userId of userIds) {
+            if (!namesMap.has(userId)) {
+              // Try to get from humanPortfolios first
+              const portfolio = humanPortfolios.find(p => p.user_id === userId)
+              if (portfolio) {
+                const basic = getPortfolioBasic(portfolio)
+                namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
+                avatarsMap.set(userId, basic.avatar)
+              } else {
+                // Fallback: fetch from supabase
+                const { data: portfolioData } = await supabaseRef.current
+                  .from('portfolios')
+                  .select('*')
+                  .eq('user_id', userId)
+                  .eq('type', 'human')
+                  .maybeSingle()
+                
+                if (portfolioData) {
+                  const basic = getPortfolioBasic(portfolioData as Portfolio)
+                  namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
+                  avatarsMap.set(userId, basic.avatar)
+                } else {
+                  namesMap.set(userId, `User ${userId.slice(0, 8)}`)
+                }
+              }
+            }
+          }
+
+          setAuthorNames(namesMap)
+          setAuthorAvatars(avatarsMap)
+        }
+      }
+    } catch (error) {
+      console.error('Error loading more annotations:', error)
+    }
+  }
+
+  // Two-level design: replies are already provided in the initial payload,
+  // so we don't need a separate loader. This is kept for API compatibility
+  // but simply returns an empty array.
+  const loadReplies = async (): Promise<AnnotationWithReplies[]> => {
+    return []
+  }
+
+  const handleAnnotationSuccess = () => {
+    // Reload annotations
+    setAnnotationOffset(0)
+    const loadAnnotations = async () => {
+      try {
+        const response = await fetch(`/api/notes/${note.id}/annotations?offset=0&limit=20`)
+        if (response.ok) {
+          const data = await response.json()
+          if (data.success) {
+            setAnnotations(data.annotations || [])
+            setHasMoreAnnotations(data.hasMore || false)
+            setAnnotationOffset(data.annotations?.length || 0)
+
+            // Collect user IDs from annotations (recursively)
+            const userIds = new Set<string>()
+            const collectUserIds = (items: AnnotationWithReplies[]) => {
+              items.forEach((item: AnnotationWithReplies) => {
+                userIds.add(item.annotation.owner_account_id)
+                if (item.replies?.length) {
+                  item.replies.forEach((reply: Note) => userIds.add(reply.owner_account_id))
+                }
+              })
+            }
+            collectUserIds(data.annotations || [])
+
+            // Fetch author names and avatars
+            const namesMap = new Map<string, string>(authorNames)
+            const avatarsMap = new Map<string, string | undefined>(authorAvatars)
+
+            for (const userId of userIds) {
+              if (!namesMap.has(userId)) {
+                // Try to get from humanPortfolios first
+                const portfolio = humanPortfolios.find(p => p.user_id === userId)
+                if (portfolio) {
+                  const basic = getPortfolioBasic(portfolio)
+                  namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
+                  avatarsMap.set(userId, basic.avatar)
+                } else {
+                  // Fallback: fetch from supabase
+                  const { data: portfolioData } = await supabaseRef.current
+                    .from('portfolios')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .eq('type', 'human')
+                    .maybeSingle()
+                  
+                  if (portfolioData) {
+                    const basic = getPortfolioBasic(portfolioData as Portfolio)
+                    namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
+                    avatarsMap.set(userId, basic.avatar)
+                  } else {
+                    namesMap.set(userId, `User ${userId.slice(0, 8)}`)
+                  }
+                }
+              }
+            }
+
+            setAuthorNames(namesMap)
+            setAuthorAvatars(avatarsMap)
+          }
+        }
+      } catch (error) {
+        console.error('Error reloading annotations:', error)
+      }
+    }
+    loadAnnotations()
+    setReplyingTo(null)
+  }
+
+  const handleReplySuccess = (parentCommentId: string) => {
+    setRepliesExpandedForCommentIds((prev) => new Set(prev).add(parentCommentId))
+    handleAnnotationSuccess()
+  }
 
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this note? This action cannot be undone.')) {
@@ -59,9 +324,36 @@ export function NoteView({
   // Get first portfolio ID for NoteCard
   const firstPortfolioId = portfolios && portfolios.length > 0 ? portfolios[0].id : annotatePortfolioId
 
+  const getAuthorName = (userId: string): string => {
+    if (currentUserId && userId === currentUserId) return 'You'
+    return authorNames.get(userId) || `User ${userId.slice(0, 8)}`
+  }
+
+  const getAuthorAvatar = (userId: string): string | undefined => {
+    return authorAvatars.get(userId)
+  }
+
+  // Map of noteId -> Note for all annotations and direct replies
+  const noteById = useMemo(() => {
+    const map = new Map<string, Note>()
+    annotations.forEach((item) => {
+      map.set(item.annotation.id, item.annotation)
+      item.replies.forEach((reply) => {
+        map.set(reply.id, reply)
+      })
+    })
+    return map
+  }, [annotations])
+
+  const getNoteOwnerName = (noteId: string): string | undefined => {
+    const n = noteById.get(noteId)
+    if (!n) return undefined
+    return getAuthorName(n.owner_account_id)
+  }
+
   return (
-    <div className="bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8">
-      {/* Note Card - using unified NoteCard component */}
+    <div className={`bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8 ${isMobile ? 'pb-72' : ''}`}>
+      {/* Note Card */}
       <NoteCard
         note={note}
         portfolioId={firstPortfolioId}
@@ -71,20 +363,88 @@ export function NoteView({
         onDeleted={handleDelete}
       />
 
-      {/* Annotations Section */}
-      {annotations && annotations.length > 0 && (
-        <div className="bg-white shadow rounded-lg p-6">
-          <UIText as="h2" className="mb-4">Annotations</UIText>
-          <div className="space-y-4">
-            {annotations.map((annotation) => (
-              <NoteCard
-                key={annotation.id}
-                note={annotation}
-                currentUserId={currentUserId}
-              />
-            ))}
-          </div>
-        </div>
+      {/* Comment bar + comments section (scroll target for #comments from feed); same width as note card on desktop */}
+      <div id="comments" className="w-full md:max-w-xl md:mx-auto">
+        {/* Annotation Composer - Desktop (inline); same Card as comments section */}
+        {!isMobile && (
+          <Card variant="subtle" className="p-6">
+            <AnnotationComposer
+              parentNoteId={note.id}
+              onSuccess={handleAnnotationSuccess}
+              disabled={!canAnnotate || !currentUserId}
+              currentUserId={currentUserId}
+              isMobile={false}
+              embedInCard
+            />
+          </Card>
+        )}
+
+        {/* Comments Section - mobile: divider + padding (like feed); desktop: card */}
+        {(() => {
+          const commentsContent = loadingAnnotations ? (
+            <div className="text-center py-8">
+              <UIText className="text-gray-500">Loading comments...</UIText>
+            </div>
+          ) : annotations.length === 0 ? (
+            <div className="text-center py-8">
+              <UIText className="text-gray-500">No comments yet</UIText>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {annotations.map((item) => (
+                <div key={item.annotation.id} id={`annotation-${item.annotation.id}`}>
+                  <CommentThread
+                    comment={item.annotation}
+                    replies={item.replies}
+                    currentUserId={currentUserId}
+                    isMobile={isMobile}
+                    onReply={(commentId, authorName, commentPreview) => setReplyingTo({ commentId, authorName, commentPreview })}
+                    onReplySuccess={handleReplySuccess}
+                    canReply={canAnnotate && !!currentUserId}
+                    loadReplies={loadReplies}
+                    getAuthorName={getAuthorName}
+                    getAuthorAvatar={getAuthorAvatar}
+                    parentNoteId={note.id}
+                    getNoteOwnerName={getNoteOwnerName}
+                    onDelete={handleAnnotationSuccess}
+                    expandReplies={repliesExpandedForCommentIds.has(item.annotation.id)}
+                  />
+                </div>
+              ))}
+              {hasMoreAnnotations && (
+                <div className="text-center">
+                  <Button variant="secondary" onClick={loadMoreAnnotations}>
+                    <UIText>Load more comments</UIText>
+                  </Button>
+                </div>
+              )}
+            </div>
+          )
+          return isMobile ? (
+            <div className="border-t border-gray-200 pt-4 px-4 pb-6 mt-4">
+              {commentsContent}
+            </div>
+          ) : (
+            <Card variant="subtle" className="p-6 mt-4 md:mt-6">
+              {commentsContent}
+            </Card>
+          )
+        })()}
+      </div>
+
+      {/* Annotation Composer - Mobile (fixed at bottom) */}
+      {isMobile && (
+        <AnnotationComposer
+          parentNoteId={note.id}
+          parentAnnotationId={replyingTo?.commentId}
+          replyToName={replyingTo?.authorName}
+          replyToCommentPreview={replyingTo?.commentPreview}
+          onSuccess={handleAnnotationSuccess}
+          onCancel={replyingTo ? () => setReplyingTo(null) : undefined}
+          disabled={!canAnnotate || !currentUserId}
+          currentUserId={currentUserId}
+          isMobile={true}
+        />
       )}
     </div>
   )

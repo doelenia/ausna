@@ -1,12 +1,17 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { createNote } from '@/app/notes/actions'
 import { Portfolio, isProjectPortfolio } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
-import { UIText, Button } from '@/components/ui'
+import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { UIText, Button, Content, UIButtonText } from '@/components/ui'
+import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
+import Link from 'next/link'
 import { ensureBrowserCompatibleImage } from '@/lib/utils/heic-converter'
+import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
+import { Image as ImageIcon, Link2 } from 'lucide-react'
 
 interface CreateNoteFormProps {
   portfolios: Portfolio[]
@@ -32,10 +37,13 @@ export function CreateNoteForm({
   const router = useRouter()
   const [text, setText] = useState('')
   const [referenceType, setReferenceType] = useState<ReferenceType>('none')
-  const [url, setUrl] = useState('')
+  const [urlInput, setUrlInput] = useState('')
+  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null)
   const [selectedPortfolios, setSelectedPortfolios] = useState<string[]>(defaultPortfolioIds)
   const [images, setImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([]) // Thumbnail URLs for previews
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCompressing, setIsCompressing] = useState(false)
   const [compressionProgress, setCompressionProgress] = useState<number>(0)
@@ -49,6 +57,7 @@ export function CreateNoteForm({
   const [shouldPin, setShouldPin] = useState(false)
   const [pinInfo, setPinInfo] = useState<{ count: number; max: number; canPin: boolean } | null>(null)
   const [loadingPinInfo, setLoadingPinInfo] = useState(false)
+  const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone'>('everyone')
 
   // Filter to only show project portfolios (exclude human and community)
   const displayablePortfolios = portfolios.filter((p) => isProjectPortfolio(p))
@@ -627,12 +636,41 @@ export function CreateNoteForm({
   }
 
   const removeImage = (index: number) => {
-    // Clean up thumbnail URL to free memory
     if (imagePreviews[index]) {
       URL.revokeObjectURL(imagePreviews[index])
     }
     setImages((prev) => prev.filter((_, i) => i !== index))
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const reorderImages = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return
+    setImages((prev) => {
+      const arr = [...prev]
+      const [item] = arr.splice(fromIndex, 1)
+      arr.splice(toIndex, 0, item)
+      return arr
+    })
+    setImagePreviews((prev) => {
+      const arr = [...prev]
+      const [item] = arr.splice(fromIndex, 1)
+      arr.splice(toIndex, 0, item)
+      return arr
+    })
+  }
+
+  const handleImageDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (dragIndex === null || dropTargetIndex === null) return
+    const toIndex = dropTargetIndex > dragIndex ? dropTargetIndex - 1 : dropTargetIndex
+    if (toIndex !== dragIndex) reorderImages(dragIndex, toIndex)
+    setDragIndex(null)
+    setDropTargetIndex(null)
+  }
+
+  const normalizeUrlForPreview = (raw: string): string => {
+    const t = raw.trim()
+    return t.match(/^https?:\/\//i) ? t : `https://${t}`
   }
 
   // Clean up all object URLs on unmount
@@ -708,8 +746,8 @@ export function CreateNoteForm({
       formData.append('text', text.trim())
       
       // Handle reference based on type
-      if (referenceType === 'url' && url.trim()) {
-        formData.append('url', url.trim())
+      if (referenceType === 'url' && confirmedUrl) {
+        formData.append('url', confirmedUrl)
       }
       
       if (referenceType === 'image') {
@@ -738,6 +776,10 @@ export function CreateNoteForm({
         formData.append('mentioned_note_id', mentionedNoteId)
       }
 
+      if (!mentionedNoteId) {
+        formData.append('annotation_privacy', annotationPrivacy)
+      }
+
       if (selectedCollectionIds.length > 0) {
         formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
       }
@@ -757,6 +799,13 @@ export function CreateNoteForm({
       }
 
       if (result.success) {
+        setText('')
+        setReferenceType('none')
+        setUrlInput('')
+        setConfirmedUrl(null)
+        setImages([])
+        imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+        setImagePreviews([])
         if (onSuccess) {
           onSuccess()
         } else if (redirectUrl) {
@@ -783,87 +832,104 @@ export function CreateNoteForm({
         </div>
       )}
 
-      {/* Reference Type Selection */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Reference Type
-        </label>
-        <div className="flex gap-4">
-          <label className="flex items-center">
-            <input
-              type="radio"
-              name="referenceType"
-              value="none"
-              checked={referenceType === 'none'}
-              onChange={(e) => setReferenceType(e.target.value as ReferenceType)}
-              className="mr-2"
-            />
-            <span className="text-sm text-gray-700">No Reference</span>
-          </label>
-          <label className="flex items-center">
-            <input
-              type="radio"
-              name="referenceType"
-              value="image"
-              checked={referenceType === 'image'}
-              onChange={(e) => setReferenceType(e.target.value as ReferenceType)}
-              className="mr-2"
-            />
-            <span className="text-sm text-gray-700">Image</span>
-          </label>
-          <label className="flex items-center">
-            <input
-              type="radio"
-              name="referenceType"
-              value="url"
-              checked={referenceType === 'url'}
-              onChange={(e) => setReferenceType(e.target.value as ReferenceType)}
-              className="mr-2"
-            />
-            <span className="text-sm text-gray-700">URL</span>
-          </label>
-        </div>
-      </div>
-
       {/* Text input */}
       <div>
-        <label htmlFor="text" className="block text-sm font-medium text-gray-700 mb-1">
-          Note Text <span className="text-red-500">*</span>
-        </label>
         <textarea
           id="text"
           value={text}
           onChange={(e) => setText(e.target.value)}
           required
           rows={4}
-          className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+          className="w-full px-0 py-2 bg-transparent focus:outline-none resize-none placeholder:text-gray-400"
           placeholder="Write your note..."
+          aria-label="Note text"
         />
       </div>
 
-      {/* URL input - only show when URL reference type selected */}
+      {/* Reference: Image and URL icon buttons below text (selected = darker) */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          title="Add image"
+          aria-label="Add image"
+          onClick={() => setReferenceType(referenceType === 'image' ? 'none' : 'image')}
+          className={`p-2 rounded-md transition-colors ${
+            referenceType === 'image'
+              ? 'bg-gray-300 text-gray-800 hover:bg-gray-400'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          title="Add URL"
+          aria-label="Add URL"
+          onClick={() => {
+            setReferenceType(referenceType === 'url' ? 'none' : 'url')
+            if (referenceType === 'url') setConfirmedUrl(null)
+          }}
+          className={`p-2 rounded-md transition-colors ${
+            referenceType === 'url'
+              ? 'bg-gray-300 text-gray-800 hover:bg-gray-400'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <Link2 className="w-4 h-4" strokeWidth={1.5} />
+        </button>
+      </div>
+
+      {/* URL: input + confirm, then preview with delete */}
       {referenceType === 'url' && (
         <div>
-          <label htmlFor="url" className="block text-sm font-medium text-gray-700 mb-1">
-            URL Reference
-          </label>
-          <input
-            type="text"
-            id="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            placeholder="example.com or https://example.com"
-          />
+          {!confirmedUrl ? (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                id="url"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                placeholder="example.com or https://example.com"
+              />
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => urlInput.trim() && setConfirmedUrl(normalizeUrlForPreview(urlInput))}
+                disabled={!urlInput.trim()}
+              >
+                <UIText>Confirm</UIText>
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
+              <img
+                src={getFaviconUrl(getHostnameFromUrl(confirmedUrl))}
+                alt=""
+                className="w-5 h-5 rounded"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `https://www.google.com/s2/favicons?domain=${getHostnameFromUrl(confirmedUrl)}&sz=64`
+                }}
+              />
+              <span className="text-sm text-gray-700 truncate flex-1 min-w-0">{getHostnameFromUrl(confirmedUrl)}</span>
+              <button
+                type="button"
+                onClick={() => setConfirmedUrl(null)}
+                className="p-1 rounded text-red-600 hover:bg-red-50"
+                title="Remove URL"
+                aria-label="Remove URL"
+              >
+                <UIText className="text-xs">Delete</UIText>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Image upload - only show when Image reference type selected */}
+      {/* Image: add + list with reorder and delete */}
       {referenceType === 'image' && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Images
-          </label>
           <input
             ref={fileInputRef}
             type="file"
@@ -892,66 +958,131 @@ export function CreateNoteForm({
             </div>
           )}
           {images.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2 items-start">
               {images.map((image, index) => (
-                <div key={index} className="relative">
-                  {imagePreviews[index] ? (
-                    <img
-                      src={imagePreviews[index]}
-                      alt={`Preview ${index + 1}`}
-                      className="w-20 h-20 object-cover rounded"
-                      loading="lazy"
+                <Fragment key={index}>
+                  {dragIndex !== null && dropTargetIndex === index && (
+                    <div
+                      className="w-20 h-20 rounded border-2 border-dashed border-gray-400 bg-gray-100 flex-shrink-0"
+                      onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(index) }}
+                      onDrop={handleImageDrop}
                     />
-                  ) : (
-                    <div className="w-20 h-20 bg-gray-200 rounded flex items-center justify-center">
-                      <UIText className="text-xs text-gray-500">Loading...</UIText>
-                    </div>
                   )}
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => removeImage(index)}
-                    className="absolute top-0 right-0 w-5 h-5 min-w-0 p-0 rounded-full"
+                  <div
+                    draggable
+                    onDragStart={() => setDragIndex(index)}
+                    onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(index) }}
+                    onDrop={handleImageDrop}
+                    onDragEnd={() => { setDragIndex(null); setDropTargetIndex(null) }}
+                    className={`relative flex flex-col items-center gap-1 flex-shrink-0 cursor-grab active:cursor-grabbing ${dragIndex === index ? 'opacity-50' : ''}`}
                   >
-                    <UIText className="text-xs">×</UIText>
-                  </Button>
-                </div>
+                    {imagePreviews[index] ? (
+                      <img
+                        src={imagePreviews[index]}
+                        alt={`Preview ${index + 1}`}
+                        className="w-20 h-20 object-cover rounded pointer-events-none"
+                        loading="lazy"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="w-20 h-20 bg-gray-200 rounded flex items-center justify-center">
+                        <UIText className="text-xs text-gray-500">Loading...</UIText>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="p-1 rounded text-red-600 hover:bg-red-50"
+                        title="Remove"
+                        aria-label="Remove"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                </Fragment>
               ))}
+              {dragIndex !== null && dropTargetIndex === images.length && (
+                <div
+                  className="w-20 h-20 rounded border-2 border-dashed border-gray-400 bg-gray-100 flex-shrink-0"
+                  onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(images.length) }}
+                  onDrop={handleImageDrop}
+                />
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* Portfolio assignment - show assigned project (cannot be removed) */}
-      {selectedPortfolios.length > 0 && (
+      {/* Assigned project banner (same style as NoteCard) */}
+      {selectedProjectId && (() => {
+        const project = portfolios.find((p) => p.id === selectedProjectId && isProjectPortfolio(p))
+        if (!project) return null
+        const basic = getPortfolioBasic(project)
+        const metadata = project.metadata as { basic?: { emoji?: string }; project_type_specific?: string } | undefined
+        const emoji = metadata?.basic?.emoji
+        const projectType = metadata?.project_type_specific ?? null
+        const description = basic.description
+        return (
+          <Link
+            href={getPortfolioUrl('projects', project.id)}
+            className="flex items-start gap-3 p-3 rounded-lg bg-gray-100"
+          >
+            <div className="flex-shrink-0">
+              <StickerAvatar
+                src={basic.avatar}
+                alt={basic.name}
+                type="projects"
+                size={48}
+                emoji={emoji}
+                name={basic.name}
+              />
+            </div>
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+                <Content className="truncate min-w-0">{basic.name}</Content>
+                {projectType && (
+                  <UIButtonText className="text-gray-500 flex-shrink-0">{projectType}</UIButtonText>
+                )}
+              </div>
+              {description && (
+                <div className="min-w-0 overflow-hidden">
+                  <UIText className="text-gray-500 truncate block w-full">{description}</UIText>
+                </div>
+              )}
+            </div>
+          </Link>
+        )
+      })()}
+      {selectedPortfolios.length === 0 && (
+        <UIText as="p" className="text-red-600">A project must be assigned to create a note</UIText>
+      )}
+
+      {/* Comment privacy - who can comment (post note only) */}
+      {!mentionedNoteId && (
         <div>
-          <UIText as="label" className="block mb-2">
-            Assigned to Project <span className="text-red-500">*</span>
+          <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
+            Who can comment
           </UIText>
           <div className="flex flex-wrap gap-2">
-            {selectedPortfolios
-              .filter((portfolioId) => {
-                const portfolio = portfolios.find((p) => p.id === portfolioId)
-                return portfolio && isProjectPortfolio(portfolio)
-              })
-              .map((portfolioId) => {
-                const portfolio = portfolios.find((p) => p.id === portfolioId)
-                if (!portfolio) return null
-                return (
-                  <span
-                    key={portfolioId}
-                    className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
-                  >
-                    {getPortfolioName(portfolio)}
-                    {/* Disable removal - note must be assigned to exactly one project */}
-                  </span>
-                )
-              })}
+            {(['everyone', 'friends', 'authors'] as const).map((privacy) => (
+              <button
+                key={privacy}
+                type="button"
+                onClick={() => setAnnotationPrivacy(privacy)}
+                className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                  annotationPrivacy === privacy
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                {privacy === 'everyone' && 'Everyone'}
+                {privacy === 'friends' && 'Friends only'}
+                {privacy === 'authors' && 'Authors only'}
+              </button>
+            ))}
           </div>
-          {selectedPortfolios.length === 0 && (
-            <UIText as="p" className="text-red-600 mt-1">A project must be assigned to create a note</UIText>
-          )}
         </div>
       )}
 

@@ -45,6 +45,9 @@ export function NoteActions({
   const [noteCollectionIds, setNoteCollectionIds] = useState<string[]>([])
   const [loadingCollections, setLoadingCollections] = useState(true)
   const [updatingCollections, setUpdatingCollections] = useState(false)
+  const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone' | null>(null)
+  const [loadingPrivacy, setLoadingPrivacy] = useState(true)
+  const [updatingPrivacy, setUpdatingPrivacy] = useState(false)
 
   // Fetch pin options (user's human portfolio and assigned projects)
   useEffect(() => {
@@ -162,6 +165,64 @@ export function NoteActions({
 
     fetchCollections()
   }, [note.id, portfolioId, note.assigned_portfolios])
+
+  // Fetch annotation privacy setting
+  useEffect(() => {
+    const fetchPrivacy = async () => {
+      setLoadingPrivacy(true)
+      try {
+        // Get privacy from note prop if available, otherwise fetch
+        if (note.annotation_privacy) {
+          setAnnotationPrivacy(note.annotation_privacy)
+        } else {
+          const response = await fetch(`/api/notes/${note.id}`)
+          if (response.ok) {
+            const data = await response.json()
+            if (data.success && data.note) {
+              setAnnotationPrivacy(data.note.annotation_privacy || 'everyone')
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching annotation privacy:', error)
+      } finally {
+        setLoadingPrivacy(false)
+      }
+    }
+
+    fetchPrivacy()
+  }, [note.id, note.annotation_privacy])
+
+  const handlePrivacyChange = async (privacy: 'authors' | 'friends' | 'everyone') => {
+    if (updatingPrivacy || privacy === annotationPrivacy) return
+
+    setUpdatingPrivacy(true)
+    try {
+      const response = await fetch(`/api/notes/${note.id}/annotation-privacy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ annotation_privacy: privacy }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success) {
+          setAnnotationPrivacy(privacy)
+        } else {
+          alert(data.error || 'Failed to update annotation privacy')
+        }
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to update annotation privacy')
+      }
+    } catch (error: any) {
+      console.error('Error updating annotation privacy:', error)
+      alert(error.message || 'Failed to update annotation privacy')
+    } finally {
+      setUpdatingPrivacy(false)
+      setIsOpen(false)
+    }
+  }
 
   const handlePinToggle = async (option: PinOption) => {
     if (pinning) return
@@ -361,6 +422,39 @@ export function NoteActions({
                 </button>
               )}
               
+              {/* Annotation Privacy - only show for note owner */}
+              {currentUserId === note.owner_account_id && (
+                <>
+                  <div className="border-t border-gray-200 my-1" />
+                  <div className="px-4 py-2">
+                    <UIText className="text-xs font-medium text-gray-500 mb-2">Who can comment</UIText>
+                    {loadingPrivacy ? (
+                      <UIText className="text-xs text-gray-500">Loading...</UIText>
+                    ) : (
+                      <div className="space-y-1">
+                        {(['everyone', 'friends', 'authors'] as const).map((privacy) => (
+                          <button
+                            key={privacy}
+                            onClick={() => handlePrivacyChange(privacy)}
+                            disabled={updatingPrivacy}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              annotationPrivacy === privacy
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {annotationPrivacy === privacy ? '✓ ' : ''}
+                            {privacy === 'everyone' && 'Everyone'}
+                            {privacy === 'friends' && 'Friends only'}
+                            {privacy === 'authors' && 'Authors only'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
               {/* Collection assignment - only show if there are collections or if we're still loading */}
               {(loadingCollections || collections.length > 0) && (
                 <>

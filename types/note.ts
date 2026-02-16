@@ -38,9 +38,26 @@ export interface Note {
   references: NoteReference[]
   assigned_portfolios: string[]
   mentioned_note_id: string | null
+  /**
+   * Root note for this annotation thread.
+   * - NULL for regular notes (non-annotations)
+   * - For annotations and replies, points to the original note being annotated.
+   */
+  parent_note_id?: string | null
+  /**
+   * Marks a first-level annotation directly on the root note.
+   * Replies to annotations should inherit false.
+   */
+  primary_annotation?: boolean
+  /**
+   * List of annotation IDs that belong to this note's thread.
+   * Used to quickly know if a note has annotations without recursive queries.
+   */
+  annotations?: string[] | null
   created_at: string
   updated_at: string
   deleted_at: string | null
+  annotation_privacy?: 'authors' | 'friends' | 'everyone'
   // Indexing fields
   summary?: string | null
   compound_text?: string | null

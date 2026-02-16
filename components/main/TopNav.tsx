@@ -16,6 +16,7 @@ export function TopNav() {
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
   const [safariCookieHint, setSafariCookieHint] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
+  const [inviteUnreadCount, setInviteUnreadCount] = useState(0)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [userProjectsLoading, setUserProjectsLoading] = useState(false)
@@ -109,40 +110,41 @@ export function TopNav() {
     checkApproval()
   }, [user, supabase])
 
-  // Fetch unread message count from active conversations.
-  // Delay first fetch briefly so session cookies are available on the server (avoids "Load failed" right after login).
+  // Fetch unread from active and invite tabs. Navbar: number badge if active unread > 0; red dot only if active unread === 0 and invite unread > 0.
   useEffect(() => {
     if (!user) {
       setUnreadCount(0)
+      setInviteUnreadCount(0)
       return
     }
 
-    const fetchUnreadCount = async (retry = false): Promise<void> => {
+    const fetchUnread = async (retry = false): Promise<void> => {
       try {
-        const response = await fetch('/api/messages?tab=active')
-        if (response.ok) {
-          const data = await response.json()
-          const conversations = data.conversations || []
-          const totalUnread = conversations.reduce((sum: number, conv: any) => {
-            return sum + (conv.unread_count || 0)
-          }, 0)
-          if (isMountedRef.current) setUnreadCount(totalUnread)
+        const [activeRes, inviteRes] = await Promise.all([
+          fetch('/api/messages?tab=active'),
+          fetch('/api/messages?tab=invitations'),
+        ])
+        if (activeRes.ok && isMountedRef.current) {
+          const data = await activeRes.json()
+          const total = (data.conversations || []).reduce((sum: number, conv: any) => sum + (conv.unread_count || 0), 0)
+          setUnreadCount(total)
+        }
+        if (inviteRes.ok && isMountedRef.current) {
+          const data = await inviteRes.json()
+          const total = (data.conversations || []).reduce((sum: number, conv: any) => sum + (conv.unread_count || 0), 0)
+          setInviteUnreadCount(total)
         }
       } catch (error) {
         if (!retry && isMountedRef.current) {
-          setTimeout(() => fetchUnreadCount(true), 1500)
+          setTimeout(() => fetchUnread(true), 1500)
         }
       }
     }
 
-    const t = setTimeout(() => fetchUnreadCount(), 1200)
-
-    const handleMessagesRead = () => {
-      fetchUnreadCount()
-    }
+    const t = setTimeout(() => fetchUnread(), 1200)
+    const handleMessagesRead = () => fetchUnread()
     window.addEventListener('messagesMarkedAsRead', handleMessagesRead)
-
-    const interval = setInterval(() => fetchUnreadCount(), 30000)
+    const interval = setInterval(() => fetchUnread(), 30000)
 
     return () => {
       clearTimeout(t)
@@ -278,7 +280,9 @@ export function TopNav() {
                   unreadCount > 0 ? (
                     <span className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
                       <UIText className="text-xs">{unreadCount > 99 ? '99+' : unreadCount}</UIText>
-                  </span>
+                    </span>
+                  ) : inviteUnreadCount > 0 ? (
+                    <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />
                   ) : undefined
                 }
               />
@@ -308,7 +312,9 @@ export function TopNav() {
                     unreadCount > 0 ? (
                       <span className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
                         <UIText className="text-xs">{unreadCount > 99 ? '99+' : unreadCount}</UIText>
-                    </span>
+                      </span>
+                    ) : inviteUnreadCount > 0 ? (
+                      <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />
                     ) : undefined
                   }
                 />

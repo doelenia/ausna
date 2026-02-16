@@ -206,13 +206,18 @@ export function FeedView({ currentUserId }: FeedViewProps) {
                   <div key={note.id} id={`note-${note.id}`}>
                     <LazyLoad
                       rootMargin="200px"
-                      fallback={<SkeletonCard showAvatar={true} showBanner={true} />}
+                      fallback={
+                        <div className="w-full md:max-w-xl md:mx-auto">
+                          <SkeletonCard showAvatar={true} showBanner={true} />
+                        </div>
+                      }
                       eager={index < 3} // Load first 3 cards immediately
                     >
                       <NoteCard
                         note={note}
                         currentUserId={currentUserId}
                         flatOnMobile={true}
+                        showComments={true}
                       />
                     </LazyLoad>
                   </div>
