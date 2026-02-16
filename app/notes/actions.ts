@@ -67,6 +67,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     const collectionIds = formData.get('collection_ids') as string | null
     const shouldPin = formData.get('should_pin') === 'true'
     const annotationPrivacyRaw = formData.get('annotation_privacy') as string | null
+    const noteTypeRaw = formData.get('note_type') as string | null
     const primaryAnnotationValue = formData.get('primary_annotation')
     const primaryAnnotation =
       typeof primaryAnnotationValue === 'string'
@@ -122,10 +123,11 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // For new notes (not annotations), user must be a member of the project.
-    // For annotations, createAnnotation already enforced the root note's annotation_privacy (everyone/friends/authors).
-    const isAnnotation = !!mentionedNoteId
-    if (!isAnnotation) {
+    // For new notes (not annotations or reactions), user must be a member of the project.
+    // For annotations and reactions, specialized creators already enforce permissions.
+    const isAnnotation = !!mentionedNoteId && noteTypeRaw !== 'reaction'
+    const isReaction = noteTypeRaw === 'reaction'
+    if (!isAnnotation && !isReaction) {
       const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
       if (!canCreate) {
         return {
@@ -154,8 +156,20 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         ? (annotationPrivacyRaw as 'authors' | 'friends' | 'everyone')
         : 'everyone'
 
+    // Determine note type:
+    // - Explicit note_type from formData takes precedence (validated to the allowed set)
+    // - Otherwise, infer 'annotation' when mentioning another note
+    // - Fallback to 'post'
+    let noteType: 'post' | 'annotation' | 'reaction' = 'post'
+    if (noteTypeRaw === 'post' || noteTypeRaw === 'annotation' || noteTypeRaw === 'reaction') {
+      noteType = noteTypeRaw
+    } else if (mentionedNoteId) {
+      noteType = 'annotation'
+    }
+
     // Create note first (we need the ID for image uploads)
     const noteData: Omit<Note, 'id' | 'created_at' | 'updated_at'> = {
+      type: noteType,
       owner_account_id: user.id,
       text: text.trim(),
       references: [],
@@ -926,6 +940,7 @@ export async function getNotesByPortfolio(portfolioId: string): Promise<GetNotes
     // Ensure references is an array for all notes (handle null/undefined cases)
     const notesWithReferences: Note[] = (notes || []).map((note: any) => ({
       ...note,
+      type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
       references: Array.isArray(note.references) ? note.references : [],
     }))
 
@@ -1053,6 +1068,7 @@ export async function getNotesByPortfolioPaginated(
       // Explicitly construct the note object to ensure references are included
       const normalizedNote: Note = {
         id: note.id,
+        type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
         owner_account_id: note.owner_account_id,
         text: note.text,
         references: finalReferences, // Explicitly set references
@@ -1114,6 +1130,7 @@ export async function getNotesByPortfolioPaginated(
       // Build a plain object that's guaranteed to be serializable
       const plainNote = {
         id: String(note.id),
+        type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
         owner_account_id: String(note.owner_account_id),
         text: String(note.text || ''),
         references: Array.isArray(refs) && refs.length > 0
@@ -1221,6 +1238,7 @@ export async function getNoteById(noteId: string, includeDeleted: boolean = fals
     // Ensure references is an array (handle null/undefined cases)
     const noteWithReferences: Note = {
       ...note,
+      type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
       references: Array.isArray(note.references) ? note.references : [],
     }
 
@@ -1429,7 +1447,7 @@ export async function createAnnotation(
     // Verify the item being annotated exists (could be the root note or an annotation)
     const { data: targetNote, error: noteError } = await supabase
       .from('notes')
-      .select('id, assigned_portfolios, parent_note_id, mentioned_note_id, annotations, primary_annotation')
+      .select('id, owner_account_id, assigned_portfolios, parent_note_id, mentioned_note_id, annotations, primary_annotation')
       .eq('id', noteId)
       .single()
 
@@ -1568,12 +1586,14 @@ export async function createAnnotation(
       }
     }
 
-    // Notify the annotated note's author (root note owner) about the new reply, unless they are the commenter
-    const rootNoteOwnerId = rootNote.owner_account_id
-    if (rootNoteOwnerId && rootNoteOwnerId !== user.id) {
+    // Notify the author of the note being replied to (mentioned note) about the new reply,
+    // unless they are the commenter. This works for both direct comments on the root note
+    // and replies to existing annotations.
+    const mentionedNoteOwnerId = (targetNote as any).owner_account_id as string | undefined
+    if (mentionedNoteOwnerId && mentionedNoteOwnerId !== user.id) {
       await supabase.from('messages').insert({
         sender_id: user.id,
-        receiver_id: rootNoteOwnerId,
+        receiver_id: mentionedNoteOwnerId,
         text: '',
         note_id: rootNoteId,
         annotation_id: newAnnotationId,
@@ -1586,12 +1606,12 @@ export async function createAnnotation(
         .from('conversation_completions')
         .delete()
         .eq('user_id', user.id)
-        .eq('partner_id', rootNoteOwnerId)
+        .eq('partner_id', mentionedNoteOwnerId)
 
       const { data: friendship } = await supabase
         .from('friends')
         .select('id')
-        .or(`and(user_id.eq.${user.id},friend_id.eq.${rootNoteOwnerId}),and(user_id.eq.${rootNoteOwnerId},friend_id.eq.${user.id})`)
+        .or(`and(user_id.eq.${user.id},friend_id.eq.${mentionedNoteOwnerId}),and(user_id.eq.${mentionedNoteOwnerId},friend_id.eq.${user.id})`)
         .eq('status', 'accepted')
         .maybeSingle()
 
@@ -1599,7 +1619,7 @@ export async function createAnnotation(
         await supabase
           .from('conversation_completions')
           .delete()
-          .eq('user_id', rootNoteOwnerId)
+          .eq('user_id', mentionedNoteOwnerId)
           .eq('partner_id', user.id)
       }
     }

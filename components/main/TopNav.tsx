@@ -278,8 +278,10 @@ export function TopNav() {
                 className="md:hidden"
                 badge={
                   unreadCount > 0 ? (
-                    <span className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
-                      <UIText className="text-xs">{unreadCount > 99 ? '99+' : unreadCount}</UIText>
+                    <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
+                      <UIText className="text-xs" style={{ color: 'white' }}>
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </UIText>
                     </span>
                   ) : inviteUnreadCount > 0 ? (
                     <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />
@@ -310,8 +312,10 @@ export function TopNav() {
                   aria-label="Messages"
                   badge={
                     unreadCount > 0 ? (
-                      <span className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
-                        <UIText className="text-xs">{unreadCount > 99 ? '99+' : unreadCount}</UIText>
+                      <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
+                        <UIText className="text-xs" style={{ color: 'white' }}>
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </UIText>
                       </span>
                     ) : inviteUnreadCount > 0 ? (
                       <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { getPinnedItems } from '@/app/portfolio/[type]/[id]/actions'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
-import { Title, Content, UIText } from '@/components/ui'
+import { Title, Content, UIText, UIButtonText } from '@/components/ui'
 
 interface PinnedItemWithData {
   type: 'portfolio' | 'note'
@@ -136,9 +136,9 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
                 prefetch={true}
               >
                 <div className="flex items-start justify-between mb-2">
-                  <UIText as="span">
+                  <UIButtonText as="span" className="text-gray-500">
                     {new Date(note.created_at).toLocaleDateString()}
-                  </UIText>
+                  </UIButtonText>
                 </div>
                 <Content as="p" className="line-clamp-3">
                   {note.text}

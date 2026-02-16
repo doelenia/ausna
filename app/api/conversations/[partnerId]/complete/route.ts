@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 
 /**
  * POST /api/conversations/[partnerId]/complete - Mark conversation as complete
+ *
+ * `partnerId` is the conversation partner's auth user id. The
+ * `conversation_completions` table always stores auth user IDs in both
+ * `user_id` and `partner_id` columns (never portfolio IDs).
  */
 export async function POST(
   request: NextRequest,
@@ -66,6 +70,8 @@ export async function POST(
 
 /**
  * DELETE /api/conversations/[partnerId]/complete - Uncomplete conversation
+ *
+ * `partnerId` is the conversation partner's auth user id.
  */
 export async function DELETE(
   request: NextRequest,

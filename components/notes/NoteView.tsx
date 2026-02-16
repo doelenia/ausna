@@ -29,6 +29,10 @@ interface NoteViewProps {
   canAnnotate: boolean
   annotatePortfolioId?: string
   referencedNoteDeleted?: boolean
+  /** When navigating via an annotation/reaction ID, the server passes the original
+   * annotation ID here so we can expand/scroll even if the hash is missing or changed.
+   */
+  initialAnnotationId?: string | null
 }
 
 export function NoteView({
@@ -40,6 +44,7 @@ export function NoteView({
   canAnnotate,
   annotatePortfolioId,
   referencedNoteDeleted = false,
+  initialAnnotationId,
 }: NoteViewProps) {
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
@@ -57,6 +62,70 @@ export function NoteView({
   humanPortfoliosRef.current = humanPortfolios
 
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
+
+  // Helper to process the current URL hash and expand/scroll to the correct annotation thread.
+  // Accepts the current annotations snapshot explicitly so we don't rely on
+  // potentially stale state inside async callbacks.
+  const processHashForAnnotations = (
+    currentAnnotations: AnnotationWithReplies[],
+    loading: boolean
+  ) => {
+    if (typeof window === 'undefined') return
+    let hash = window.location.hash
+
+    // If we came here via an annotation/reaction note ID, prefer that explicit
+    // annotation target when no hash is present or when the hash doesn't point
+    // to a specific annotation.
+    if ((!hash || !hash.startsWith('#annotation-')) && initialAnnotationId) {
+      hash = `#annotation-${initialAnnotationId}`
+    }
+
+    if (!hash) return
+
+    if (hash === '#comments') {
+      const el = document.getElementById('comments')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+
+    if (hash.startsWith('#annotation-') && !loading && currentAnnotations.length > 0) {
+      const targetAnnotationId = hash.replace('#annotation-', '')
+
+      // Find the primary (top-level) annotation that either IS this id
+      // or has a direct reply with this id.
+      let primaryId: string | null = null
+      for (const item of currentAnnotations) {
+        if (item.annotation.id === targetAnnotationId) {
+          primaryId = item.annotation.id
+          break
+        }
+        if (item.replies?.some((r) => r.id === targetAnnotationId)) {
+          primaryId = item.annotation.id
+          break
+        }
+      }
+
+      if (primaryId) {
+        setRepliesExpandedForCommentIds((prev) => {
+          const next = new Set(prev)
+          next.add(primaryId!)
+          return next
+        })
+      }
+
+      // Try to scroll to the exact element first; if it doesn't exist (e.g. reply id),
+      // fall back to the primary annotation container.
+      let elementId = hash.slice(1) // e.g. "annotation-<id>"
+      let el = document.getElementById(elementId)
+      if (!el && primaryId) {
+        elementId = `annotation-${primaryId}`
+        el = document.getElementById(elementId)
+      }
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }
 
   // Detect mobile
   useEffect(() => {
@@ -77,9 +146,10 @@ export function NoteView({
         if (response.ok) {
           const data = await response.json()
           if (data.success) {
-            setAnnotations(data.annotations || [])
+            const loadedAnnotations: AnnotationWithReplies[] = data.annotations || []
+            setAnnotations(loadedAnnotations)
             setHasMoreAnnotations(data.hasMore || false)
-            setAnnotationOffset(data.annotations?.length || 0)
+            setAnnotationOffset(loadedAnnotations.length)
 
             const userIds = new Set<string>()
             const collectUserIds = (items: AnnotationWithReplies[]) => {
@@ -90,7 +160,7 @@ export function NoteView({
                 }
               })
             }
-            collectUserIds(data.annotations || [])
+            collectUserIds(loadedAnnotations)
 
             const namesMap = new Map<string, string>()
             const avatarsMap = new Map<string, string | undefined>()
@@ -123,6 +193,11 @@ export function NoteView({
 
             setAuthorNames(namesMap)
             setAuthorAvatars(avatarsMap)
+
+            // After annotations and author info are loaded, process any hash
+            // to expand/scroll to the correct annotation, using the freshly
+            // loaded annotations snapshot.
+            processHashForAnnotations(loadedAnnotations, false)
           }
         }
       } catch (error) {
@@ -134,26 +209,6 @@ export function NoteView({
 
     loadAnnotations()
   }, [note.id])
-
-  // Scroll to #comments or #annotation-<id> when opening note with hash (e.g. from feed comment button or "View comment" in messages)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const hash = window.location.hash
-    if (!hash) return
-    const timer = setTimeout(() => {
-      if (hash === '#comments') {
-        const el = document.getElementById('comments')
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        return
-      }
-      if (hash.startsWith('#annotation-') && !loadingAnnotations && annotations.length > 0) {
-        const id = hash.slice(1)
-        const el = document.getElementById(id)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }
-    }, 100)
-    return () => clearTimeout(timer)
-  }, [loadingAnnotations, annotations.length])
 
   const loadMoreAnnotations = async () => {
     try {
@@ -361,6 +416,12 @@ export function NoteView({
         isViewMode={true}
         flatOnMobile={true}
         onDeleted={handleDelete}
+        onCommentClick={() => {
+          const el = document.getElementById('comments')
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        }}
       />
 
       {/* Comment bar + comments section (scroll target for #comments from feed); same width as note card on desktop */}

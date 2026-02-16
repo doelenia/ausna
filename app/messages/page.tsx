@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
-import { Title, Content, UIText, Dropdown } from '@/components/ui'
+import { Title, Content, UIText, UIButtonText, Dropdown } from '@/components/ui'
 import { Archive } from 'lucide-react'
 
 interface Conversation {
@@ -18,6 +18,9 @@ interface Conversation {
     text: string
     created_at: string
     read_at: string | null
+    note_id?: string | null
+    annotation_id?: string | null
+    message_type?: string | null
   }
   unread_count: number
   status_message?: string | null
@@ -38,6 +41,7 @@ function MessagesPageContent() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'invitations' | 'active'>('active')
   const [inviteUnreadCount, setInviteUnreadCount] = useState(0)
+  const [activeUnreadCount, setActiveUnreadCount] = useState(0)
   const supabase = createClient()
   const portfolioHelpers = createHumanPortfolioHelpers(supabase)
 
@@ -76,22 +80,14 @@ function MessagesPageContent() {
         throw new Error('Failed to load conversations')
       }
       const data = await response.json()
-      console.log('[DEBUG] Loaded conversations:', {
-        tab,
-        count: data.conversations?.length || 0,
-        conversations: data.conversations?.map((c: any) => ({
-          partner_id: c.partner_id,
-          partner_name: c.partner_name,
-          status_message: c.status_message,
-          my_side_active: c.my_side_active,
-          partner_side_active: c.partner_side_active,
-        })),
-      })
       setConversations(data.conversations || [])
 
       if (tab === 'invitations') {
         const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
         setInviteUnreadCount(total)
+      } else {
+        const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
+        setActiveUnreadCount(total)
       }
 
       // Load partner info for each conversation
@@ -145,6 +141,23 @@ function MessagesPageContent() {
     loadInviteUnreadCount()
   }, [])
 
+  const formatRelativeTime = (isoString: string): string => {
+    const date = new Date(isoString)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffSec = Math.floor(diffMs / 1000)
+    const diffMin = Math.floor(diffSec / 60)
+    const diffHr = Math.floor(diffMin / 60)
+    const diffDay = Math.floor(diffHr / 24)
+
+    if (diffSec < 60) return 'Just now'
+    if (diffMin < 60) return `${diffMin}m ago`
+    if (diffHr < 24) return `${diffHr}h ago`
+    if (diffDay === 1) return 'Yesterday'
+    if (diffDay < 7) return `${diffDay}d ago`
+    return date.toLocaleDateString()
+  }
+
   if (loading) {
     return (
       <div className="bg-white shadow rounded-lg p-6">
@@ -184,7 +197,14 @@ function MessagesPageContent() {
                   : 'text-gray-700 hover:bg-gray-200'
               }`}
             >
-              <UIText>Active</UIText>
+              <div className="flex items-center gap-2">
+                <UIText>Active</UIText>
+                {activeUnreadCount > 0 && (
+                  <span className="inline-flex items-center justify-center rounded-full bg-red-600 min-w-[1.25rem] h-5 px-1.5">
+                    <UIText style={{ color: 'white' }}>{activeUnreadCount}</UIText>
+                  </span>
+                )}
+              </div>
             </button>
             <button
               onClick={(e) => {
@@ -221,13 +241,45 @@ function MessagesPageContent() {
                   partnerInfo?.avatar ||
                   `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
 
-                console.log('[DEBUG] Rendering conversation:', {
-                  partner_id: conv.partner_id,
-                  partner_name: conv.partner_name,
-                  status_message: conv.status_message,
-                  my_side_active: conv.my_side_active,
-                  displayName,
-                })
+                const last = conv.last_message
+                const isSentByMe = last.sender_id !== conv.partner_id
+                const baseText = (last.text || '').trim()
+                const hasUnread = conv.unread_count > 0
+
+                let previewText = baseText
+
+                if (!previewText) {
+                  const hasNote = !!last.note_id
+                  const isCommentPreview = last.message_type === 'comment_preview'
+                  const hasAnnotation = !!last.annotation_id
+
+                  if (isCommentPreview) {
+                    if (hasAnnotation) {
+                      // Comment notification
+                      previewText = isSentByMe
+                        ? 'You commented on: ...'
+                        : 'Sent you a comment on: ...'
+                    } else if (hasNote) {
+                      // Reaction (like) notification on a note
+                      previewText = isSentByMe
+                        ? 'You reacted to a note with ❤️ ...'
+                        : 'Reacted to your note with ❤️ ...'
+                    } else {
+                      // Fallback comment preview
+                      previewText = isSentByMe
+                        ? 'You sent an update on: ...'
+                        : 'Sent you an update on: ...'
+                    }
+                  } else if (hasNote) {
+                    // Generic note/share preview
+                    previewText = isSentByMe
+                      ? 'You shared a note: ...'
+                      : 'Shared a note with you: ...'
+                  } else {
+                    // Generic fallback so the preview is never empty
+                    previewText = isSentByMe ? 'You sent a message' : 'New message'
+                  }
+                }
 
                 return (
                   <div
@@ -247,7 +299,7 @@ function MessagesPageContent() {
                         <div className="flex items-center justify-between gap-2 min-w-0">
                           <div className="flex items-center gap-2 min-w-0">
                             <UIText as="h3" className="truncate">
-                              {displayName}
+                              {hasUnread ? <strong>{displayName}</strong> : displayName}
                             </UIText>
                             {conv.status_message === 'waiting_for_accept' && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">
@@ -260,11 +312,16 @@ function MessagesPageContent() {
                               </span>
                             )}
                           </div>
-                          <UIText as="span" className="ml-2">
-                            {new Date(
-                              conv.last_message.created_at
-                            ).toLocaleDateString()}
-                          </UIText>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {hasUnread && (
+                              <span className="inline-flex items-center justify-center rounded-full bg-red-600 min-w-[1.25rem] h-5 px-1.5">
+                                <UIButtonText style={{ color: 'white' }}>{conv.unread_count}</UIButtonText>
+                              </span>
+                            )}
+                            <UIButtonText as="span" className="text-gray-500">
+                              {formatRelativeTime(conv.last_message.created_at)}
+                            </UIButtonText>
+                          </div>
                         </div>
                         {conv.status_message === 'waiting_for_accept' ? (
                           <UIText as="p" className="text-yellow-600 italic mt-1">
@@ -275,16 +332,14 @@ function MessagesPageContent() {
                             Chat is archived by {conv.partner_name || displayName}
                           </UIText>
                         ) : (
-                          <UIText as="p" className="truncate mt-1 max-w-full block">
-                            {conv.last_message.text}
-                          </UIText>
+                          <UIButtonText
+                            as="p"
+                            className="truncate mt-1 max-w-full block text-gray-500"
+                          >
+                            {hasUnread ? <strong>{previewText}</strong> : previewText}
+                          </UIButtonText>
                         )}
                       </div>
-                        {conv.unread_count > 0 && (
-                          <span className="bg-blue-600 text-white text-xs font-bold rounded-full h-6 w-6 flex items-center justify-center">
-                            {conv.unread_count}
-                          </span>
-                        )}
                     </Link>
                     {activeTab === 'active' && conv.my_side_active && (
                       <Dropdown

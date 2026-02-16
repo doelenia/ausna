@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 
 /**
  * POST /api/friends/[friendId] - Send a friend request
+ *
+ * IMPORTANT: `friendId` is always the *auth user id* of the
+ * recipient (never a portfolio id). We verify existence by
+ * looking up their human portfolio via `portfolios.user_id`.
  */
 export async function POST(
   request: NextRequest,
@@ -34,7 +38,9 @@ export async function POST(
       )
     }
 
-    // Verify friend exists by checking if they have a human portfolio
+    // Verify friend exists by checking if they have a human portfolio.
+    // This lookup is intentionally done by `user_id` so that the friends
+    // table and conversation_completions always store auth user IDs.
     const { data: friendPortfolio, error: friendError } = await supabase
       .from('portfolios')
       .select('id')
@@ -111,6 +117,10 @@ export async function POST(
 
 /**
  * PUT /api/friends/[friendId] - Accept a friend request
+ *
+ * `friendId` is the sender's auth user id. We accept a pending
+ * row in `friends` where (user_id = friendId, friend_id = me),
+ * and then clear any conversation_completions rows for both sides.
  */
 export async function PUT(
   request: NextRequest,
@@ -197,6 +207,10 @@ export async function PUT(
 
 /**
  * DELETE /api/friends/[friendId] - Remove/unfriend or cancel pending request
+ *
+ * `friendId` is the other participant's auth user id. Depending on whether
+ * there is a pending request we either cancel that specific row or delete
+ * the accepted friendship in both directions.
  */
 export async function DELETE(
   request: NextRequest,
@@ -274,6 +288,10 @@ export async function DELETE(
 
 /**
  * GET /api/friends/[friendId] - Check friend status
+ *
+ * `friendId` is interpreted as an auth user id. The handler checks for any
+ * row in `friends` where (user_id, friend_id) are the two user ids
+ * in either order and derives a status from the current user's perspective.
  */
 export async function GET(
   request: NextRequest,

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Note, type NoteReference, type ImageReference, type UrlReference } from '@/types/note'
 import { UserAvatar } from '@/components/ui'
-import { UIText, Content } from '@/components/ui'
+import { UIText, UIButtonText, Content } from '@/components/ui'
 import { AnnotationComposer } from './AnnotationComposer'
 import { deleteNote, type AnnotationWithReplies } from '@/app/notes/actions'
 import { getUrlDisplayInfo } from '@/lib/notes/url-helpers'
@@ -189,9 +189,9 @@ export function CommentThread({
             >
               <UIText as="span" className="font-medium">{authorName}</UIText>
             </Link>
-            <UIText as="span" className="text-gray-500 text-xs">
+            <UIButtonText as="span" className="text-gray-500 text-xs">
               {formatRelativeTime(comment.created_at)}
-            </UIText>
+            </UIButtonText>
           </div>
           <div className="mb-2">
             <Content as="p" className="whitespace-pre-wrap">

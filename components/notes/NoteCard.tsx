@@ -16,7 +16,7 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
 import { useDataCache } from '@/lib/cache/useDataCache'
-import { MessageCircle } from 'lucide-react'
+import { MessageCircle, Heart } from 'lucide-react'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -42,6 +42,11 @@ interface NoteCardProps {
    * Comments are loaded lazily when card is in viewport
    */
   showComments?: boolean
+  /**
+   * Optional callback for when the comment icon is clicked in view mode.
+   * When not provided, the comment icon navigates to the note page (#comments).
+   */
+  onCommentClick?: () => void
 }
 
 export function NoteCard({
@@ -56,6 +61,7 @@ export function NoteCard({
   onDeleted,
   onRemovedFromPortfolio,
   showComments = false,
+  onCommentClick,
 }: NoteCardProps) {
   const router = useRouter()
   const { getCachedPortfolioData, setCachedPortfolioData, getCachedPortfolio, setCachedPortfolio } = useDataCache()
@@ -71,11 +77,21 @@ export function NoteCard({
   const [isTextExpanded, setIsTextExpanded] = useState(false)
   const [isTextTruncated, setIsTextTruncated] = useState(false)
   const [wasTruncated, setWasTruncated] = useState(false)
+  type ReactionListItem = { id: string; userId: string; createdAt: string }
+
   const [comments, setComments] = useState<Note[]>([])
   const [commentCount, setCommentCount] = useState<number | null>(null)
   const [newestCommentAuthorPortfolio, setNewestCommentAuthorPortfolio] = useState<Portfolio | null>(null)
   const [loadingComments, setLoadingComments] = useState(false)
   const [commentsLoaded, setCommentsLoaded] = useState(false)
+  const [likeLikers, setLikeLikers] = useState<string[]>([])
+  const [hasLiked, setHasLiked] = useState<boolean>(false)
+  const [likeLikerProfiles, setLikeLikerProfiles] = useState<Record<string, { name: string; avatar?: string | null }>>({})
+  const [showReactionsModal, setShowReactionsModal] = useState(false)
+  const [reactionItems, setReactionItems] = useState<ReactionListItem[]>([])
+  const [reactionsTotalCount, setReactionsTotalCount] = useState<number | null>(null)
+  const [reactionsLoading, setReactionsLoading] = useState(false)
+  const [reactionsOffset, setReactionsOffset] = useState(0)
   const imageRef = useRef<HTMLImageElement | null>(null)
   const carouselRef = useRef<HTMLDivElement | null>(null)
   const textRef = useRef<HTMLDivElement | null>(null)
@@ -309,6 +325,173 @@ export function NoteCard({
       }
     }
   }, [showComments, commentsLoaded, isViewMode, note.id])
+
+  // Load like reactions (top 5) when note changes
+  useEffect(() => {
+    let cancelled = false
+    const loadReactions = async () => {
+      try {
+        const response = await fetch(`/api/notes/${note.id}/reactions?type=like&limit=5`)
+        if (!response.ok) return
+        const data = await response.json()
+        if (cancelled) return
+        if (data.success) {
+          setLikeLikers(Array.isArray(data.likers) ? data.likers : [])
+          setHasLiked(!!data.hasReacted)
+          if (typeof data.totalCount === 'number') {
+            setReactionsTotalCount(data.totalCount)
+          }
+        }
+      } catch (error) {
+        console.error('Error loading reactions:', error)
+      }
+    }
+    loadReactions()
+    return () => {
+      cancelled = true
+    }
+  }, [note.id])
+
+  const loadMoreReactions = async () => {
+    if (reactionsLoading) return
+    const total = reactionsTotalCount ?? 0
+    if (reactionItems.length >= total && total > 0) return
+
+    try {
+      setReactionsLoading(true)
+      const response = await fetch(
+        `/api/notes/${note.id}/reactions?type=like&view=list&limit=10&offset=${reactionsOffset}`
+      )
+      if (!response.ok) {
+        return
+      }
+      const data = await response.json()
+      if (!data.success) return
+
+      const items: ReactionListItem[] = Array.isArray(data.reactions)
+        ? data.reactions.map((r: any) => ({
+            id: String(r.id),
+            userId: String(r.userId),
+            createdAt: String(r.createdAt),
+          }))
+        : []
+
+      setReactionItems((prev) => {
+        const existingIds = new Set(prev.map((i) => i.id))
+        const merged = [...prev]
+        for (const item of items) {
+          if (!existingIds.has(item.id)) {
+            merged.push(item)
+          }
+        }
+        return merged
+      })
+
+      if (typeof data.totalCount === 'number') {
+        setReactionsTotalCount(data.totalCount)
+      }
+      setReactionsOffset((prev) => prev + items.length)
+    } catch (error) {
+      console.error('Error loading reactions list:', error)
+    } finally {
+      setReactionsLoading(false)
+    }
+  }
+
+  // Load basic profile info (name, avatar) for likers so avatars render correctly
+  useEffect(() => {
+    const loadLikerProfiles = async () => {
+      if (!likeLikers || likeLikers.length === 0) return
+
+      // Determine which userIds we still need to fetch
+      const missingIds = likeLikers.filter((userId) => !likeLikerProfiles[userId])
+      if (missingIds.length === 0) return
+
+      try {
+        const supabase = createClient()
+        const { data, error } = await supabase
+          .from('portfolios')
+          .select('*')
+          .eq('type', 'human')
+          .in('user_id', missingIds)
+
+        if (error) {
+          console.error('[NoteCard] Error loading liker profiles:', error)
+          return
+        }
+
+        const nextProfiles: Record<string, { name: string; avatar?: string | null }> = { ...likeLikerProfiles }
+        for (const row of data || []) {
+          const portfolio = row as Portfolio
+          const basic = getPortfolioBasic(portfolio)
+          const userId = portfolio.user_id
+          if (!userId) continue
+          nextProfiles[userId] = {
+            name: basic.name || `User ${userId.slice(0, 8)}`,
+            avatar: basic.avatar || undefined,
+          }
+        }
+
+        // Ensure we at least have a fallback entry so we don't try to refetch repeatedly
+        missingIds.forEach((userId) => {
+          if (!nextProfiles[userId]) {
+            nextProfiles[userId] = {
+              name: `User ${userId.slice(0, 8)}`,
+              avatar: undefined,
+            }
+          }
+        })
+
+        setLikeLikerProfiles(nextProfiles)
+      } catch (error) {
+        console.error('[NoteCard] Unexpected error loading liker profiles:', error)
+      }
+    }
+
+    loadLikerProfiles()
+    // We intentionally depend on likeLikers and likeLikerProfiles so we only fetch missing ones
+  }, [likeLikers, likeLikerProfiles])
+
+  const handleToggleLike = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!currentUserId) {
+      router.push('/login')
+      return
+    }
+    // Optimistic toggle in UI
+    setHasLiked((prev) => !prev)
+    setLikeLikers((prev) => {
+      const alreadyLiked = prev.includes(currentUserId)
+      if (alreadyLiked) {
+        return prev.filter((id) => id !== currentUserId)
+      }
+      // Add current user to front
+      return [currentUserId, ...prev.filter((id) => id !== currentUserId)]
+    })
+
+    // Immediately sync with server (no debounce) so likes persist reliably
+    try {
+      const response = await fetch(`/api/notes/${note.id}/reactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ type: 'like' }),
+      })
+      if (!response.ok) {
+        console.error('Failed to sync like reaction with server')
+        return
+      }
+      const data = await response.json()
+      if (data.success) {
+        setLikeLikers(Array.isArray(data.likers) ? data.likers : [])
+        setHasLiked(!!data.hasReacted)
+      }
+    } catch (error) {
+      console.error('Error syncing like reaction:', error)
+    }
+  }
 
   const loadComments = async () => {
     setLoadingComments(true)
@@ -1073,9 +1256,9 @@ export function NoteCard({
                   </UIText>
                 </Link>
               )}
-              <UIText as="span">
+              <UIButtonText as="span" className="text-gray-500">
                 {formatRelativeTime(note.created_at)}
-              </UIText>
+              </UIButtonText>
               {/* Feed source label - only show in "all" feed */}
               {note.feedSource && (
                 <UIText as="span" className="px-2 py-1 rounded-full bg-gray-100">
@@ -1220,18 +1403,113 @@ export function NoteCard({
         {/* Project banner at the end of the main card (not in collage view) */}
         {!isCollageView && projectBanner}
 
-        {/* Comment button + newest comment preview (feed view only) */}
+        {/* Reactions & comments row (icons + like pill) */}
+        {!isCollageView && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            {/* Left: like + comment icons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleLike}
+                className={`inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors ${
+                  hasLiked
+                    ? 'text-red-600 bg-red-50 hover:bg-red-100'
+                    : 'text-gray-600 hover:text-red-600 hover:bg-gray-100'
+                }`}
+                aria-label="Like"
+                title="Like"
+              >
+                <Heart
+                  className="w-5 h-5"
+                  strokeWidth={1.5}
+                  fill={hasLiked ? 'currentColor' : 'none'}
+                />
+              </button>
+              {isViewMode ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (onCommentClick) {
+                      onCommentClick()
+                    } else {
+                      if (typeof window !== 'undefined') {
+                        const el = document.getElementById('comments')
+                        if (el) {
+                          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                        }
+                      }
+                    }
+                  }}
+                  className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                  aria-label="Comment"
+                  title="Comment"
+                >
+                  <MessageCircle className="w-5 h-5" strokeWidth={1.5} />
+                </button>
+              ) : (
+                <Link
+                  href={currentUserId ? `/notes/${note.id}#comments` : '/login'}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                  aria-label="Comment"
+                  title="Comment"
+                >
+                  <MessageCircle className="w-5 h-5" strokeWidth={1.5} />
+                </Link>
+              )}
+            </div>
+
+            {/* Right: like pill with stacked avatars (top 5 likers) - clickable to open reactions popup */}
+            {likeLikers.length > 0 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  setShowReactionsModal(true)
+                  if (reactionItems.length === 0) {
+                    // Load initial page of reactions for popup
+                    loadMoreReactions().catch(() => {})
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-100 flex-shrink-0 min-w-0 hover:bg-gray-200 transition-colors"
+                aria-label="View reactions"
+              >
+                <Heart className="w-4 h-4 text-red-600" strokeWidth={1.5} fill="currentColor" />
+                <div className="flex -space-x-2 flex-shrink-0">
+                  {likeLikers.slice(0, 5).map((userId, index) => (
+                    <div
+                      key={userId}
+                      className="relative"
+                      style={{ zIndex: likeLikers.length - index }}
+                    >
+                      {(() => {
+                        const profile = likeLikerProfiles[userId]
+                        const name = profile?.name ?? `User ${userId.slice(0, 8)}`
+                        const avatar = profile?.avatar
+                        return (
+                          <UserAvatar
+                            userId={userId}
+                            name={name}
+                            avatar={avatar}
+                            size={24}
+                            showLink={false}
+                          />
+                        )
+                      })()}
+                    </div>
+                  ))}
+                </div>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Comment preview (feed view only, when enabled) */}
         {showComments && !isViewMode && !isCollageView && (
           <div className="mt-3 flex flex-col gap-2">
-            <Link
-              href={currentUserId ? `/notes/${note.id}#comments` : '/login'}
-              onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
-              aria-label="Comment"
-              title="Comment"
-            >
-              <MessageCircle className="w-5 h-5" strokeWidth={1.5} />
-            </Link>
             {commentCount !== null && commentCount > 0 && (
               <>
                 {comments.length > 0 && (() => {
@@ -1261,9 +1539,9 @@ export function NoteCard({
                         </div>
                         <div className="flex items-baseline gap-2 min-w-0 flex-1">
                           <UIText as="span" className="font-medium">{commentAuthorName}</UIText>
-                          <UIText as="span" className="text-gray-500 text-xs">
+                          <UIButtonText as="span" className="text-gray-500 text-xs">
                             {formatRelativeTime(comment.created_at)}
-                          </UIText>
+                          </UIButtonText>
                         </div>
                       </div>
                       {/* Comment text below, indented to align with name */}
@@ -1287,6 +1565,74 @@ export function NoteCard({
           </div>
         )}
       </div>
+
+      {/* Reactions popup modal */}
+      {showReactionsModal && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+          onClick={() => setShowReactionsModal(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 flex items-center justify-center">
+              <UIText>Reactions</UIText>
+            </div>
+            <div
+              className="px-4 py-3 overflow-y-auto"
+              style={{ maxHeight: '60vh' }}
+              onScroll={(e) => {
+                const target = e.currentTarget
+                const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+                if (
+                  distanceToBottom < 64 &&
+                  !reactionsLoading &&
+                  reactionsTotalCount !== null &&
+                  reactionItems.length < reactionsTotalCount
+                ) {
+                  loadMoreReactions().catch(() => {})
+                }
+              }}
+            >
+              {reactionItems.length === 0 && !reactionsLoading && (
+                <UIText className="text-center text-gray-500">No reactions yet.</UIText>
+              )}
+              {reactionItems.map((item) => {
+                const profile = likeLikerProfiles[item.userId]
+                const name = profile?.name ?? `User ${item.userId.slice(0, 8)}`
+                const avatar = profile?.avatar
+                return (
+                  <div key={item.id} className="flex items-center justify-between py-2 gap-3">
+                    <Link
+                      href={`/portfolio/human/${item.userId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+                    >
+                      <UserAvatar
+                        userId={item.userId}
+                        name={name}
+                        avatar={avatar}
+                        size={32}
+                        showLink={false}
+                      />
+                      <UIText as="span">{name}</UIText>
+                    </Link>
+                    <div className="flex items-center justify-center">
+                      <Heart className="w-4 h-4 text-red-600" strokeWidth={1.5} fill="currentColor" />
+                    </div>
+                  </div>
+                )
+              })}
+              {reactionsLoading && (
+                <div className="py-2">
+                  <UIText className="text-center text-gray-500">Loading...</UIText>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 

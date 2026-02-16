@@ -73,7 +73,11 @@ export async function canCreateNoteInPortfolio(
 }
 
 /**
- * Check if two users are friends (accepted friendship, server-side)
+ * Check if two users are friends (accepted friendship, server-side).
+ *
+ * IMPORTANT: `ownerId` and `userId` are always auth user IDs. This helper
+ * never works with portfolio IDs; callers must convert from any human
+ * portfolio to its owner user id before calling.
  */
 export async function isFriend(
   ownerId: string,
