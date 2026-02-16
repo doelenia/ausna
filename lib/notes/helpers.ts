@@ -73,6 +73,64 @@ export async function canCreateNoteInPortfolio(
 }
 
 /**
+ * Check if two users are friends (accepted friendship, server-side)
+ */
+export async function isFriend(
+  ownerId: string,
+  userId: string
+): Promise<boolean> {
+  if (!ownerId || !userId || ownerId === userId) return false
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('friends')
+    .select('id')
+    .or(`and(user_id.eq.${ownerId},friend_id.eq.${userId}),and(user_id.eq.${userId},friend_id.eq.${ownerId})`)
+    .eq('status', 'accepted')
+    .maybeSingle()
+  return !!data
+}
+
+export type AnnotationPrivacy = 'everyone' | 'friends' | 'authors'
+
+/**
+ * Check if a user can annotate (comment on) a note based on the note's annotation_privacy.
+ * Default: if annotation_privacy is missing, treat as 'everyone'.
+ * - everyone: any authenticated user can comment
+ * - friends: only friends of the note owner can comment
+ * - authors: only users who can post on one of the note's assigned portfolios (project members)
+ */
+export async function canAnnotateNote(
+  note: {
+    annotation_privacy?: AnnotationPrivacy | null
+    owner_account_id: string
+    assigned_portfolios?: string[]
+  },
+  portfolios: Portfolio[] | null,
+  userId: string
+): Promise<boolean> {
+  if (!userId) return false
+
+  const privacy: AnnotationPrivacy = note.annotation_privacy ?? 'everyone'
+
+  switch (privacy) {
+    case 'everyone':
+      return true
+    case 'friends':
+      return isFriend(note.owner_account_id, userId)
+    case 'authors': {
+      const portfolioIds = note.assigned_portfolios || []
+      if (portfolioIds.length === 0) return false
+      for (const portfolioId of portfolioIds) {
+        if (await canCreateNoteInPortfolio(portfolioId, userId)) return true
+      }
+      return false
+    }
+    default:
+      return true
+  }
+}
+
+/**
  * Check if user can remove a note from a portfolio
  * Rules:
  * - Note owner can remove if they're member/owner (except from own human portfolio)

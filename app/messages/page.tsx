@@ -37,6 +37,7 @@ function MessagesPageContent() {
   )
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'invitations' | 'active'>('active')
+  const [inviteUnreadCount, setInviteUnreadCount] = useState(0)
   const supabase = createClient()
   const portfolioHelpers = createHumanPortfolioHelpers(supabase)
 
@@ -88,31 +89,26 @@ function MessagesPageContent() {
       })
       setConversations(data.conversations || [])
 
+      if (tab === 'invitations') {
+        const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
+        setInviteUnreadCount(total)
+      }
+
       // Load partner info for each conversation
-      // Merge with existing partnerInfos to prevent losing data
       const infos = new Map<string, PartnerInfo>(partnerInfos)
       for (const conv of data.conversations || []) {
-        // Only load if not already in map
         if (!infos.has(conv.partner_id)) {
           try {
-            const portfolio = await portfolioHelpers.getHumanPortfolio(
-              conv.partner_id
-            )
+            const portfolio = await portfolioHelpers.getHumanPortfolio(conv.partner_id)
             if (portfolio) {
               const metadata = portfolio.metadata as any
               const basic = metadata?.basic || {}
-              // Prioritize basic.name from human portfolio, fallback to username
               const displayName = basic.name || metadata?.username || 'User'
               const avatarUrl = basic?.avatar || metadata?.avatar_url
               const finalAvatarUrl =
                 avatarUrl ||
                 `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
-
-              infos.set(conv.partner_id, {
-                id: conv.partner_id,
-                name: displayName,
-                avatar: finalAvatarUrl,
-              })
+              infos.set(conv.partner_id, { id: conv.partner_id, name: displayName, avatar: finalAvatarUrl })
             }
           } catch (error) {
             console.error('Error loading partner info:', error)
@@ -127,9 +123,27 @@ function MessagesPageContent() {
     }
   }
 
+  // Fetch invite unread count on mount so Invite tab can show red dot without switching tabs
+  const loadInviteUnreadCount = async () => {
+    try {
+      const response = await fetch('/api/messages?tab=invitations')
+      if (response.ok) {
+        const data = await response.json()
+        const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
+        setInviteUnreadCount(total)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     loadConversations(activeTab)
   }, [activeTab])
+
+  useEffect(() => {
+    loadInviteUnreadCount()
+  }, [])
 
   if (loading) {
     return (
@@ -177,13 +191,16 @@ function MessagesPageContent() {
                 e.preventDefault()
                 setActiveTab('invitations')
               }}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+              className={`relative px-4 py-2 rounded-lg text-sm transition-colors ${
                 activeTab === 'invitations'
                   ? 'bg-gray-200 text-gray-700'
                   : 'text-gray-700 hover:bg-gray-200'
               }`}
             >
               <UIText>Invitations</UIText>
+              {inviteUnreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 bg-red-600 rounded-full h-2 w-2" aria-label="Unread invitations" />
+              )}
             </button>
           </div>
 
@@ -219,16 +236,16 @@ function MessagesPageContent() {
                   >
                     <Link
                       href={`/messages/${conv.partner_id}`}
-                      className="flex-1 flex items-center gap-4 text-left"
+                      className="flex-1 min-w-0 flex items-center gap-4 text-left"
                     >
                       <img
                         src={avatarUrl}
                         alt={displayName}
                         className="h-12 w-12 rounded-full object-cover border-2 border-gray-300"
                       />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className="flex items-center gap-2 min-w-0">
                             <UIText as="h3" className="truncate">
                               {displayName}
                             </UIText>
@@ -258,7 +275,7 @@ function MessagesPageContent() {
                             Chat is archived by {conv.partner_name || displayName}
                           </UIText>
                         ) : (
-                          <UIText as="p" className="truncate mt-1">
+                          <UIText as="p" className="truncate mt-1 max-w-full block">
                             {conv.last_message.text}
                           </UIText>
                         )}

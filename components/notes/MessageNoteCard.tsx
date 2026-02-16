@@ -13,9 +13,10 @@ import { NoteReference, ImageReference, UrlReference } from '@/types/note'
 interface MessageNoteCardProps {
   noteId: string
   isSent: boolean
+  currentUserId?: string | null
 }
 
-export function MessageNoteCard({ noteId, isSent }: MessageNoteCardProps) {
+export function MessageNoteCard({ noteId, isSent, currentUserId }: MessageNoteCardProps) {
   const [note, setNote] = useState<Note | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
@@ -145,7 +146,9 @@ export function MessageNoteCard({ noteId, isSent }: MessageNoteCardProps) {
   }
 
   const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
-  const ownerName = ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`
+  const ownerName = (currentUserId && note.owner_account_id === currentUserId)
+    ? 'You'
+    : (ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`)
 
   return (
     <div className={`max-w-xs lg:max-w-md border rounded-lg overflow-hidden ${

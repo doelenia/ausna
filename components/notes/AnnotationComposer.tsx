@@ -1,18 +1,26 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Fragment } from 'react'
 import { createAnnotation } from '@/app/notes/actions'
 import { UIText, Button, Content } from '@/components/ui'
 import { ensureBrowserCompatibleImage } from '@/lib/utils/heic-converter'
+import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
+import { Image as ImageIcon, Link2 } from 'lucide-react'
 
 interface AnnotationComposerProps {
   parentNoteId: string
   parentAnnotationId?: string
   replyToName?: string
+  /** One-line preview of the comment being replied to (mobile only). Shown as: Reply to [name]'s "[preview]". */
+  replyToCommentPreview?: string
   onSuccess: () => void
   onCancel?: () => void
   disabled?: boolean
   isMobile?: boolean
+  /** When disabled, used to show "log in" vs "no permission" message. */
+  currentUserId?: string | null
+  /** When true (desktop), do not add own border/bg so parent Card provides the same look as note/comment section. */
+  embedInCard?: boolean
 }
 
 type ReferenceType = 'none' | 'image' | 'url'
@@ -21,22 +29,37 @@ export function AnnotationComposer({
   parentNoteId,
   parentAnnotationId,
   replyToName,
+  replyToCommentPreview,
   onSuccess,
   onCancel,
   disabled = false,
   isMobile = false,
+  currentUserId: currentUserIdProp,
+  embedInCard = false,
 }: AnnotationComposerProps) {
   const [text, setText] = useState('')
   const [referenceType, setReferenceType] = useState<ReferenceType>('none')
-  const [url, setUrl] = useState('')
+  const [urlInput, setUrlInput] = useState('')
+  const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null)
   const [images, setImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isCompressing, setIsCompressing] = useState(false)
   const [compressionProgress, setCompressionProgress] = useState<number>(0)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  /** Mobile only: collapsed (placeholder) vs activated (full bar). */
+  const [mobileActivated, setMobileActivated] = useState(false)
+
+  // Mobile: when user taps Reply, parent sets replyToName/parentAnnotationId → expand to activated
+  useEffect(() => {
+    if (isMobile && (parentAnnotationId || replyToName)) {
+      setMobileActivated(true)
+    }
+  }, [isMobile, parentAnnotationId, replyToName])
 
   // Focus textarea on mount (desktop only)
   useEffect(() => {
@@ -44,6 +67,19 @@ export function AnnotationComposer({
       textareaRef.current.focus()
     }
   }, [isMobile, disabled])
+
+  // Auto-grow textarea height (one line min, grow with content)
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.overflow = 'hidden'
+    const lineHeight = 24
+    const maxHeight = 200
+    const h = Math.min(Math.max(el.scrollHeight, lineHeight), maxHeight)
+    el.style.height = `${h}px`
+    el.style.overflow = h >= maxHeight ? 'auto' : 'hidden'
+  }, [text])
 
   // Compress image function (reused from CreateNoteForm)
   const compressImage = async (
@@ -184,6 +220,36 @@ export function AnnotationComposer({
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const reorderImages = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return
+    setImages((prev) => {
+      const arr = [...prev]
+      const [item] = arr.splice(fromIndex, 1)
+      arr.splice(toIndex, 0, item)
+      return arr
+    })
+    setImagePreviews((prev) => {
+      const arr = [...prev]
+      const [item] = arr.splice(fromIndex, 1)
+      arr.splice(toIndex, 0, item)
+      return arr
+    })
+  }
+
+  const handleImageDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (dragIndex === null || dropTargetIndex === null) return
+    const toIndex = dropTargetIndex > dragIndex ? dropTargetIndex - 1 : dropTargetIndex
+    if (toIndex !== dragIndex) reorderImages(dragIndex, toIndex)
+    setDragIndex(null)
+    setDropTargetIndex(null)
+  }
+
+  const normalizeUrlForPreview = (raw: string): string => {
+    const t = raw.trim()
+    return t.match(/^https?:\/\//i) ? t : `https://${t}`
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (disabled || isSubmitting || !text.trim()) return
@@ -195,8 +261,8 @@ export function AnnotationComposer({
       const formData = new FormData()
       formData.append('text', text.trim())
 
-      if (referenceType === 'url' && url.trim()) {
-        formData.append('url', url.trim())
+      if (referenceType === 'url' && confirmedUrl) {
+        formData.append('url', confirmedUrl)
       }
 
       if (referenceType === 'image') {
@@ -211,10 +277,12 @@ export function AnnotationComposer({
 
       if (result.success) {
         setText('')
-        setUrl('')
+        setUrlInput('')
+        setConfirmedUrl(null)
         setImages([])
         setImagePreviews([])
         setReferenceType('none')
+        if (isMobile) setMobileActivated(false)
         onSuccess()
       } else {
         setError(result.error || 'Failed to create annotation')
@@ -228,16 +296,34 @@ export function AnnotationComposer({
   }
 
   const containerClasses = isMobile
-    ? 'fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-50'
-    : 'rounded-lg border border-gray-200 bg-white p-4'
+    ? 'fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 pb-20 z-50'
+    : embedInCard
+      ? ''
+      : 'rounded-lg border border-gray-200 bg-white p-4'
 
   if (disabled) {
+    const message = currentUserIdProp
+      ? 'You don\'t have permission to comment on this note.'
+      : 'Please log in to comment'
     return (
       <div className={containerClasses}>
         <Content className="text-gray-500 text-center py-4">
-          Please log in to comment
+          {message}
         </Content>
       </div>
+    )
+  }
+
+  // Mobile collapsed: short bar with placeholder only; tap to expand
+  if (isMobile && !mobileActivated) {
+    return (
+      <button
+        type="button"
+        onClick={() => setMobileActivated(true)}
+        className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3 pb-20 z-50 text-left"
+      >
+        <span className="text-gray-400 text-base">Write a comment...</span>
+      </button>
     )
   }
 
@@ -251,7 +337,11 @@ export function AnnotationComposer({
 
       {replyToName && (
         <div className="mb-2">
-          <UIText className="text-gray-600">Reply to {replyToName}:</UIText>
+          <UIText className="text-gray-600">
+            {isMobile && replyToCommentPreview
+              ? `Reply to ${replyToName}'s "${replyToCommentPreview}"`
+              : `Reply to ${replyToName}:`}
+          </UIText>
         </div>
       )}
 
@@ -261,66 +351,95 @@ export function AnnotationComposer({
         onChange={(e) => setText(e.target.value)}
         placeholder="Write a comment..."
         required
-        rows={isMobile ? 3 : 4}
-        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 resize-none"
+        rows={1}
+        className="w-full min-h-[24px] px-0 py-2 bg-transparent focus:outline-none resize-none placeholder:text-gray-400 overflow-hidden"
         disabled={isSubmitting}
       />
 
-      {/* Reference Type Selection */}
-      <div className="mt-2 flex gap-4 text-sm">
-        <label className="flex items-center">
-          <input
-            type="radio"
-            name="referenceType"
-            value="none"
-            checked={referenceType === 'none'}
-            onChange={(e) => setReferenceType(e.target.value as ReferenceType)}
-            className="mr-2"
-            disabled={isSubmitting}
-          />
-          <UIText>No Reference</UIText>
-        </label>
-        <label className="flex items-center">
-          <input
-            type="radio"
-            name="referenceType"
-            value="image"
-            checked={referenceType === 'image'}
-            onChange={(e) => setReferenceType(e.target.value as ReferenceType)}
-            className="mr-2"
-            disabled={isSubmitting}
-          />
-          <UIText>Image</UIText>
-        </label>
-        <label className="flex items-center">
-          <input
-            type="radio"
-            name="referenceType"
-            value="url"
-            checked={referenceType === 'url'}
-            onChange={(e) => setReferenceType(e.target.value as ReferenceType)}
-            className="mr-2"
-            disabled={isSubmitting}
-          />
-          <UIText>URL</UIText>
-        </label>
+      {/* Reference: Image and URL icon buttons (selected = darker) */}
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          title="Add image"
+          aria-label="Add image"
+          disabled={isSubmitting}
+          onClick={() => setReferenceType(referenceType === 'image' ? 'none' : 'image')}
+          className={`p-2 rounded-md transition-colors ${
+            referenceType === 'image'
+              ? 'bg-gray-300 text-gray-800 hover:bg-gray-400'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" strokeWidth={1.5} />
+        </button>
+        <button
+          type="button"
+          title="Add URL"
+          aria-label="Add URL"
+          disabled={isSubmitting}
+          onClick={() => {
+            setReferenceType(referenceType === 'url' ? 'none' : 'url')
+            if (referenceType === 'url') setConfirmedUrl(null)
+          }}
+          className={`p-2 rounded-md transition-colors ${
+            referenceType === 'url'
+              ? 'bg-gray-300 text-gray-800 hover:bg-gray-400'
+              : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+          }`}
+        >
+          <Link2 className="w-4 h-4" strokeWidth={1.5} />
+        </button>
       </div>
 
-      {/* URL input */}
+      {/* URL: input + confirm, then preview with delete */}
       {referenceType === 'url' && (
         <div className="mt-2">
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            placeholder="example.com or https://example.com"
-            disabled={isSubmitting}
-          />
+          {!confirmedUrl ? (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                placeholder="example.com or https://example.com"
+                disabled={isSubmitting}
+              />
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => urlInput.trim() && setConfirmedUrl(normalizeUrlForPreview(urlInput))}
+                disabled={isSubmitting || !urlInput.trim()}
+              >
+                <UIText>Confirm</UIText>
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 bg-gray-50">
+              <img
+                src={getFaviconUrl(getHostnameFromUrl(confirmedUrl))}
+                alt=""
+                className="w-5 h-5 rounded"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = `https://www.google.com/s2/favicons?domain=${getHostnameFromUrl(confirmedUrl)}&sz=64`
+                }}
+              />
+              <span className="text-sm text-gray-700 truncate flex-1 min-w-0">{getHostnameFromUrl(confirmedUrl)}</span>
+              <button
+                type="button"
+                onClick={() => setConfirmedUrl(null)}
+                className="p-1 rounded text-red-600 hover:bg-red-50"
+                title="Remove URL"
+                aria-label="Remove URL"
+              >
+                <UIText className="text-xs">Delete</UIText>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Image upload */}
+      {/* Image: add + list with reorder and delete */}
       {referenceType === 'image' && (
         <div className="mt-2">
           <input
@@ -342,32 +461,58 @@ export function AnnotationComposer({
             <UIText>{isCompressing ? `Compressing... ${Math.round(compressionProgress)}%` : 'Add Images'}</UIText>
           </Button>
           {images.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-2 items-start">
               {images.map((image, index) => (
-                <div key={index} className="relative">
-                  {imagePreviews[index] ? (
-                    <img
-                      src={imagePreviews[index]}
-                      alt={`Preview ${index + 1}`}
-                      className="w-20 h-20 object-cover rounded"
-                      loading="lazy"
+                <Fragment key={index}>
+                  {dragIndex !== null && dropTargetIndex === index && (
+                    <div
+                      className="w-20 h-20 rounded border-2 border-dashed border-gray-400 bg-gray-100 flex-shrink-0"
+                      onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(index) }}
+                      onDrop={handleImageDrop}
                     />
-                  ) : (
-                    <div className="w-20 h-20 bg-gray-200 rounded flex items-center justify-center">
-                      <UIText className="text-xs text-gray-500">Loading...</UIText>
-                    </div>
                   )}
-                  <Button
-                    type="button"
-                    variant="danger"
-                    size="sm"
-                    onClick={() => removeImage(index)}
-                    className="absolute top-0 right-0 w-5 h-5 min-w-0 p-0 rounded-full"
+                  <div
+                    draggable
+                    onDragStart={() => setDragIndex(index)}
+                    onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(index) }}
+                    onDrop={handleImageDrop}
+                    onDragEnd={() => { setDragIndex(null); setDropTargetIndex(null) }}
+                    className={`relative flex flex-col items-center gap-1 flex-shrink-0 cursor-grab active:cursor-grabbing ${dragIndex === index ? 'opacity-50' : ''}`}
                   >
-                    <UIText className="text-xs">×</UIText>
-                  </Button>
-                </div>
+                    {imagePreviews[index] ? (
+                      <img
+                        src={imagePreviews[index]}
+                        alt={`Preview ${index + 1}`}
+                        className="w-20 h-20 object-cover rounded pointer-events-none"
+                        loading="lazy"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="w-20 h-20 bg-gray-200 rounded flex items-center justify-center">
+                        <UIText className="text-xs text-gray-500">Loading...</UIText>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => removeImage(index)}
+                        className="p-1 rounded text-red-600 hover:bg-red-50"
+                        title="Remove"
+                        aria-label="Remove"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  </div>
+                </Fragment>
               ))}
+              {dragIndex !== null && dropTargetIndex === images.length && (
+                <div
+                  className="w-20 h-20 rounded border-2 border-dashed border-gray-400 bg-gray-100 flex-shrink-0"
+                  onDragOver={(e) => { e.preventDefault(); setDropTargetIndex(images.length) }}
+                  onDrop={handleImageDrop}
+                />
+              )}
             </div>
           )}
         </div>
@@ -375,12 +520,15 @@ export function AnnotationComposer({
 
       {/* Actions */}
       <div className="mt-4 flex gap-2 justify-end">
-        {onCancel && (
+        {(onCancel || isMobile) && (
           <Button
             type="button"
             variant="secondary"
             size="sm"
-            onClick={onCancel}
+            onClick={() => {
+              if (isMobile) setMobileActivated(false)
+              onCancel?.()
+            }}
             disabled={isSubmitting}
           >
             <UIText>Cancel</UIText>

@@ -17,6 +17,7 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const offset = parseInt(searchParams.get('offset') || '0', 10)
     const limit = parseInt(searchParams.get('limit') || '20', 10)
+    const order = (searchParams.get('order') === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc'
 
     if (!noteId) {
       return NextResponse.json(
@@ -39,7 +40,7 @@ export async function GET(
       )
     }
 
-    const result = await getAnnotationsByNote(noteId, offset, limit)
+    const result = await getAnnotationsByNote(noteId, offset, limit, order)
 
     if (!result.success) {
       return NextResponse.json(

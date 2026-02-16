@@ -5,7 +5,7 @@ import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { redirect } from 'next/navigation'
-import { Title, Content, UIText } from '@/components/ui'
+import { Content, UIText } from '@/components/ui'
 
 interface CreateNotePageProps {
   searchParams: {
@@ -85,17 +85,12 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
-          <div className="mb-6">
-            <Title as="h1" className="mb-2">
-              {annotatedNote ? 'Annotate Note' : 'Create Note'}
-            </Title>
-            {annotatedNote && (
-              <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                <UIText as="p" className="mb-2">Annotating:</UIText>
-                <Content as="p">{annotatedNote.text.substring(0, 200)}{annotatedNote.text.length > 200 ? '...' : ''}</Content>
-              </div>
-            )}
-          </div>
+          {annotatedNote && (
+            <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+              <UIText as="p" className="mb-2">Annotating:</UIText>
+              <Content as="p">{annotatedNote.text.substring(0, 200)}{annotatedNote.text.length > 200 ? '...' : ''}</Content>
+            </div>
+          )}
 
           <CreateNoteForm
             portfolios={portfolios}

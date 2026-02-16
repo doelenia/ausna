@@ -9,12 +9,14 @@ import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
+import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import { Title, Subtitle, Content, UIText, UIButtonText, Card, UserAvatar, Button } from '@/components/ui'
 import { SkeletonAvatar, SkeletonText, SkeletonBanner } from '@/components/ui/Skeleton'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
 import { useDataCache } from '@/lib/cache/useDataCache'
+import { MessageCircle } from 'lucide-react'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -71,6 +73,7 @@ export function NoteCard({
   const [wasTruncated, setWasTruncated] = useState(false)
   const [comments, setComments] = useState<Note[]>([])
   const [commentCount, setCommentCount] = useState<number | null>(null)
+  const [newestCommentAuthorPortfolio, setNewestCommentAuthorPortfolio] = useState<Portfolio | null>(null)
   const [loadingComments, setLoadingComments] = useState(false)
   const [commentsLoaded, setCommentsLoaded] = useState(false)
   const imageRef = useRef<HTMLImageElement | null>(null)
@@ -309,18 +312,25 @@ export function NoteCard({
 
   const loadComments = async () => {
     setLoadingComments(true)
+    setNewestCommentAuthorPortfolio(null)
     try {
-      // Fetch comment count first
-      const countResponse = await fetch(`/api/notes/${note.id}/annotations?offset=0&limit=1`)
-      if (countResponse.ok) {
-        const countData = await countResponse.json()
-        if (countData.success) {
-          setCommentCount(countData.totalCount || 0)
-          
-          // Fetch first comment if available
-          if (countData.annotations && countData.annotations.length > 0) {
-            const firstAnnotation = countData.annotations[0]
-            setComments([firstAnnotation.annotation])
+      const response = await fetch(`/api/notes/${note.id}/annotations?offset=0&limit=1&order=desc`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.success) {
+          setCommentCount(data.totalCount || 0)
+          if (data.annotations && data.annotations.length > 0) {
+            const annotation = data.annotations[0].annotation as Note
+            setComments([annotation])
+            const ownerId = annotation.owner_account_id
+            const supabase = createClient()
+            const { data: portfolio } = await supabase
+              .from('portfolios')
+              .select('*')
+              .eq('type', 'human')
+              .eq('user_id', ownerId)
+              .maybeSingle()
+            setNewestCommentAuthorPortfolio((portfolio as Portfolio) || null)
           }
         }
       }
@@ -413,73 +423,97 @@ export function NoteCard({
       <div className="mb-4">
         {/* Image carousel */}
         {imageReferences.length > 0 && (
-          <div 
-            ref={carouselRef}
-            className="relative mb-4 rounded-lg overflow-hidden bg-gray-100"
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          >
+          <>
             <div
-              className="relative"
-              style={{
-                aspectRatio: getCarouselAspectRatio(),
-                minHeight: '100px',
-                maxHeight: '800px',
-              }}
+              ref={carouselRef}
+              className="relative w-full rounded-lg overflow-hidden bg-gray-100"
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
             >
-              <img
-                src={imageReferences[currentImageIndex]?.url}
-                alt={`Note image ${currentImageIndex + 1}`}
-                className="w-full h-full object-contain"
-                onLoad={handleImageLoad}
-              />
-              
-              {/* Arrow buttons (desktop) */}
-              {imageReferences.length > 1 && (
-                <>
-                  <button
-                    onClick={handlePreviousImage}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors hidden sm:flex items-center justify-center"
-                    aria-label="Previous image"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={handleNextImage}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors hidden sm:flex items-center justify-center"
-                    aria-label="Next image"
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </>
-              )}
-
-              {/* Dot indicators */}
-              {imageReferences.length > 1 && (
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-                  {imageReferences.map((_, index) => (
-                    <button
+              {/* Sliding viewport with aspect-ratio box */}
+              <div
+                className="relative overflow-hidden w-full"
+                style={{
+                  width: '100%',
+                  aspectRatio: getCarouselAspectRatio(),
+                  minHeight: '100px',
+                  maxHeight: '800px',
+                }}
+              >
+                <div
+                  className="flex h-full transition-transform duration-300 ease-out"
+                  style={{
+                    width: `${imageReferences.length * 100}%`,
+                    transform: `translateX(-${currentImageIndex * (100 / imageReferences.length)}%)`,
+                  }}
+                >
+                  {imageReferences.map((imgRef, index) => (
+                    <div
                       key={index}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        setCurrentImageIndex(index)
-                      }}
-                      className={`w-2 h-2 rounded-full transition-colors ${
-                        index === currentImageIndex ? 'bg-white' : 'bg-white/50'
-                      }`}
-                      aria-label={`Go to image ${index + 1}`}
-                    />
+                      className="flex-shrink-0 h-full w-full flex items-center justify-center bg-gray-100"
+                      style={{ width: `${100 / imageReferences.length}%` }}
+                    >
+                      <img
+                        src={imgRef.url}
+                        alt={`Note image ${index + 1}`}
+                        className="max-w-full max-h-full w-auto object-contain block mx-auto"
+                        onLoad={(e) => {
+                          if (index === currentImageIndex) {
+                            handleImageLoad(e)
+                          }
+                        }}
+                      />
+                    </div>
                   ))}
                 </div>
-              )}
+
+                {/* Arrow buttons (desktop) */}
+                {imageReferences.length > 1 && (
+                  <>
+                    <button
+                      onClick={handlePreviousImage}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors hidden sm:flex items-center justify-center z-10"
+                      aria-label="Previous image"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={handleNextImage}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors hidden sm:flex items-center justify-center z-10"
+                      aria-label="Next image"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
+
+            {/* Dot indicators - below the gray container */}
+            {imageReferences.length > 1 && (
+              <div className="flex justify-center gap-1.5 py-2 mb-4">
+                {imageReferences.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setCurrentImageIndex(index)
+                    }}
+                    className={`w-2 h-2 rounded-full transition-colors ${
+                      index === currentImageIndex ? 'bg-gray-600' : 'bg-gray-300'
+                    }`}
+                    aria-label={`Go to image ${index + 1}`}
+                  />
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {/* URL references */}
@@ -536,7 +570,9 @@ export function NoteCard({
   }
 
   const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
-  const ownerName = ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`
+  const ownerName = (currentUserId && note.owner_account_id === currentUserId)
+    ? 'You'
+    : (ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`)
 
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
 
@@ -1038,7 +1074,7 @@ export function NoteCard({
                 </Link>
               )}
               <UIText as="span">
-                {new Date(note.created_at).toLocaleDateString()}
+                {formatRelativeTime(note.created_at)}
               </UIText>
               {/* Feed source label - only show in "all" feed */}
               {note.feedSource && (
@@ -1184,36 +1220,70 @@ export function NoteCard({
         {/* Project banner at the end of the main card (not in collage view) */}
         {!isCollageView && projectBanner}
 
-        {/* Comments preview (feed view only) */}
+        {/* Comment button + newest comment preview (feed view only) */}
         {showComments && !isViewMode && !isCollageView && (
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            {loadingComments ? (
-              <div className="flex items-center gap-2 text-gray-500">
-                <UIText className="text-sm">Loading comments...</UIText>
-              </div>
-            ) : commentCount !== null && commentCount > 0 ? (
-              <div className="space-y-2">
-                {comments.length > 0 && (
-                  <div className="flex gap-2 items-start">
-                    <div className="flex-shrink-0 w-6 h-6 rounded-full bg-gray-200" />
-                    <div className="flex-1 min-w-0">
-                      <Content as="p" className="text-sm line-clamp-2">
-                        {comments[0].text}
-                      </Content>
-                    </div>
-                  </div>
-                )}
-                {commentCount > 1 && (
-                  <Link
-                    href={`/notes/${note.id}`}
-                    onClick={(e) => e.stopPropagation()}
-                    className="text-sm text-blue-600 hover:text-blue-800"
-                  >
-                    <UIText>View {commentCount} {commentCount === 1 ? 'comment' : 'comments'}</UIText>
-                  </Link>
-                )}
-              </div>
-            ) : null}
+          <div className="mt-3 flex flex-col gap-2">
+            <Link
+              href={currentUserId ? `/notes/${note.id}#comments` : '/login'}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+              aria-label="Comment"
+              title="Comment"
+            >
+              <MessageCircle className="w-5 h-5" strokeWidth={1.5} />
+            </Link>
+            {commentCount !== null && commentCount > 0 && (
+              <>
+                {comments.length > 0 && (() => {
+                  const comment = comments[0]
+                  const isCommentAuthorSelf = currentUserId && comment.owner_account_id === currentUserId
+                  const commentAuthorBasic = isCommentAuthorSelf
+                    ? { name: 'You' as string, avatar: undefined as string | undefined }
+                    : (newestCommentAuthorPortfolio ? getPortfolioBasic(newestCommentAuthorPortfolio) : null)
+                  const commentAuthorName = commentAuthorBasic?.name ?? `User ${comment.owner_account_id.slice(0, 8)}`
+                  const commentAuthorAvatar = commentAuthorBasic?.avatar
+                  return (
+                    <Link
+                      href={`/notes/${note.id}#comments`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="block p-2 -mx-2 rounded-lg hover:bg-gray-100 transition-colors"
+                    >
+                      {/* Avatar and name on same row so they align vertically */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-shrink-0">
+                          <UserAvatar
+                            userId={comment.owner_account_id}
+                            name={commentAuthorName}
+                            avatar={commentAuthorAvatar}
+                            size={32}
+                            showLink={false}
+                          />
+                        </div>
+                        <div className="flex items-baseline gap-2 min-w-0 flex-1">
+                          <UIText as="span" className="font-medium">{commentAuthorName}</UIText>
+                          <UIText as="span" className="text-gray-500 text-xs">
+                            {formatRelativeTime(comment.created_at)}
+                          </UIText>
+                        </div>
+                      </div>
+                      {/* Comment text below, indented to align with name */}
+                      <div className="mt-1 pl-11">
+                        <Content as="p" className="text-sm text-gray-700 line-clamp-2 whitespace-pre-wrap">
+                          {comment.text}
+                        </Content>
+                      </div>
+                    </Link>
+                  )
+                })()}
+                <Link
+                  href={`/notes/${note.id}#comments`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline transition-colors inline-block"
+                >
+                  <UIText>View more</UIText>
+                </Link>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1235,7 +1305,7 @@ export function NoteCard({
   // Flat layout on mobile (no card), card layout on desktop
   if (flatOnMobile) {
     return (
-      <div className="w-full md:max-w-xl md:mx-auto">
+      <div ref={cardRef} className="w-full md:max-w-xl md:mx-auto">
         {/* Mobile: flat layout
             - Feed: white background only, rely on internal padding
             - Note view: no extra padding (use original inner padding), background provided by page

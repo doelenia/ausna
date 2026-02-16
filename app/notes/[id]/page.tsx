@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
-import { getNoteById, getAnnotationsByNote } from '@/app/notes/actions'
-import { canCreateNoteInPortfolio } from '@/lib/notes/helpers'
+import { getNoteById } from '@/app/notes/actions'
+import { canAnnotateNote } from '@/lib/notes/helpers'
 import { NotePageClient } from './NotePageClient'
 import { notFound } from 'next/navigation'
 import { UIText } from '@/components/ui'
@@ -93,18 +93,10 @@ export default async function NotePage({ params }: NotePageProps) {
           .eq('type', 'human')
           .in('user_id', Array.from(creatorUserIds))
       : Promise.resolve({ data: null, error: null }),
-    // Check if user can annotate (must be member of at least one portfolio)
-    // Only check if user is authenticated
-    user && portfolios && portfolios.length > 0
-      ? (async () => {
-          for (const portfolio of portfolios) {
-            const canCreate = await canCreateNoteInPortfolio(portfolio.id, user.id)
-            if (canCreate) {
-              return true
-            }
-          }
-          return false
-        })()
+    // Check if user can annotate based on note's annotation_privacy (everyone / friends / authors)
+    // Default: treat missing annotation_privacy as 'everyone'
+    user
+      ? canAnnotateNote(note, portfolios || [], user.id)
       : Promise.resolve(false)
   ])
 

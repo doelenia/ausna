@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import { Note } from '@/types/note'
 import { deleteNote } from '@/app/notes/actions'
-import { useRouter } from 'next/navigation'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { NoteCard } from './NoteCard'
@@ -47,11 +47,14 @@ export function NoteView({
   const [loadingAnnotations, setLoadingAnnotations] = useState(true)
   const [hasMoreAnnotations, setHasMoreAnnotations] = useState(false)
   const [annotationOffset, setAnnotationOffset] = useState(0)
-  const [replyingTo, setReplyingTo] = useState<{ commentId: string; authorName: string } | null>(null)
+  const [replyingTo, setReplyingTo] = useState<{ commentId: string; authorName: string; commentPreview?: string } | null>(null)
   const [isMobile, setIsMobile] = useState(false)
+  const [repliesExpandedForCommentIds, setRepliesExpandedForCommentIds] = useState<Set<string>>(new Set())
   const [authorNames, setAuthorNames] = useState<Map<string, string>>(new Map())
   const [authorAvatars, setAuthorAvatars] = useState<Map<string, string | undefined>>(new Map())
   const supabaseRef = useRef(createClient())
+  const humanPortfoliosRef = useRef(humanPortfolios)
+  humanPortfoliosRef.current = humanPortfolios
 
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
 
@@ -65,7 +68,7 @@ export function NoteView({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Load annotations dynamically
+  // Load annotations when note changes only (not when humanPortfolios reference changes)
   useEffect(() => {
     const loadAnnotations = async () => {
       setLoadingAnnotations(true)
@@ -78,7 +81,6 @@ export function NoteView({
             setHasMoreAnnotations(data.hasMore || false)
             setAnnotationOffset(data.annotations?.length || 0)
 
-            // Fetch author names and avatars (recursively for nested replies)
             const userIds = new Set<string>()
             const collectUserIds = (items: AnnotationWithReplies[]) => {
               items.forEach((item: AnnotationWithReplies) => {
@@ -92,10 +94,10 @@ export function NoteView({
 
             const namesMap = new Map<string, string>()
             const avatarsMap = new Map<string, string | undefined>()
+            const portfolios = humanPortfoliosRef.current || []
 
             for (const userId of userIds) {
-              // Try to get from humanPortfolios first
-              const portfolio = humanPortfolios.find(p => p.user_id === userId)
+              const portfolio = portfolios.find((p: Portfolio) => p.user_id === userId)
               if (portfolio) {
                 const basic = getPortfolioBasic(portfolio)
                 namesMap.set(userId, basic.name || `User ${userId.slice(0, 8)}`)
@@ -131,7 +133,27 @@ export function NoteView({
     }
 
     loadAnnotations()
-  }, [note.id, humanPortfolios])
+  }, [note.id])
+
+  // Scroll to #comments or #annotation-<id> when opening note with hash (e.g. from feed comment button or "View comment" in messages)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash
+    if (!hash) return
+    const timer = setTimeout(() => {
+      if (hash === '#comments') {
+        const el = document.getElementById('comments')
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
+      }
+      if (hash.startsWith('#annotation-') && !loadingAnnotations && annotations.length > 0) {
+        const id = hash.slice(1)
+        const el = document.getElementById(id)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [loadingAnnotations, annotations.length])
 
   const loadMoreAnnotations = async () => {
     try {
@@ -272,6 +294,11 @@ export function NoteView({
     setReplyingTo(null)
   }
 
+  const handleReplySuccess = (parentCommentId: string) => {
+    setRepliesExpandedForCommentIds((prev) => new Set(prev).add(parentCommentId))
+    handleAnnotationSuccess()
+  }
+
   const handleDelete = async () => {
     if (!confirm('Are you sure you want to delete this note? This action cannot be undone.')) {
       return
@@ -298,6 +325,7 @@ export function NoteView({
   const firstPortfolioId = portfolios && portfolios.length > 0 ? portfolios[0].id : annotatePortfolioId
 
   const getAuthorName = (userId: string): string => {
+    if (currentUserId && userId === currentUserId) return 'You'
     return authorNames.get(userId) || `User ${userId.slice(0, 8)}`
   }
 
@@ -324,7 +352,7 @@ export function NoteView({
   }
 
   return (
-    <div className="bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8">
+    <div className={`bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8 ${isMobile ? 'pb-72' : ''}`}>
       {/* Note Card */}
       <NoteCard
         note={note}
@@ -335,62 +363,74 @@ export function NoteView({
         onDeleted={handleDelete}
       />
 
-      {/* Annotation Composer - Desktop (inline) */}
-      {!isMobile && (
-        <Card variant="subtle" className="p-4">
-          <AnnotationComposer
-            parentNoteId={note.id}
-            parentAnnotationId={replyingTo?.commentId}
-            replyToName={replyingTo?.authorName}
-            onSuccess={handleAnnotationSuccess}
-            onCancel={replyingTo ? () => setReplyingTo(null) : undefined}
-            disabled={!canAnnotate || !currentUserId}
-            isMobile={false}
-          />
-        </Card>
-      )}
-
-      {/* Comments Section */}
-      <Card variant="subtle" className="p-6">
-        {loadingAnnotations ? (
-          <div className="text-center py-8">
-            <UIText className="text-gray-500">Loading comments...</UIText>
-          </div>
-        ) : annotations.length === 0 ? (
-          <div className="text-center py-8">
-            <UIText className="text-gray-500">No comments yet</UIText>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {annotations.map((item) => (
-              <CommentThread
-                key={item.annotation.id}
-                comment={item.annotation}
-                replies={item.replies}
-                currentUserId={currentUserId}
-                onReply={(commentId, authorName) => setReplyingTo({ commentId, authorName })}
-                canReply={canAnnotate && !!currentUserId}
-                loadReplies={loadReplies}
-                getAuthorName={getAuthorName}
-                getAuthorAvatar={getAuthorAvatar}
-                parentNoteId={note.id}
-                getNoteOwnerName={getNoteOwnerName}
-                onDelete={handleAnnotationSuccess}
-              />
-            ))}
-            {hasMoreAnnotations && (
-              <div className="text-center">
-                <Button
-                  variant="secondary"
-                  onClick={loadMoreAnnotations}
-                >
-                  <UIText>Load more comments</UIText>
-                </Button>
-              </div>
-            )}
-          </div>
+      {/* Comment bar + comments section (scroll target for #comments from feed); same width as note card on desktop */}
+      <div id="comments" className="w-full md:max-w-xl md:mx-auto">
+        {/* Annotation Composer - Desktop (inline); same Card as comments section */}
+        {!isMobile && (
+          <Card variant="subtle" className="p-6">
+            <AnnotationComposer
+              parentNoteId={note.id}
+              onSuccess={handleAnnotationSuccess}
+              disabled={!canAnnotate || !currentUserId}
+              currentUserId={currentUserId}
+              isMobile={false}
+              embedInCard
+            />
+          </Card>
         )}
-      </Card>
+
+        {/* Comments Section - mobile: divider + padding (like feed); desktop: card */}
+        {(() => {
+          const commentsContent = loadingAnnotations ? (
+            <div className="text-center py-8">
+              <UIText className="text-gray-500">Loading comments...</UIText>
+            </div>
+          ) : annotations.length === 0 ? (
+            <div className="text-center py-8">
+              <UIText className="text-gray-500">No comments yet</UIText>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {annotations.map((item) => (
+                <div key={item.annotation.id} id={`annotation-${item.annotation.id}`}>
+                  <CommentThread
+                    comment={item.annotation}
+                    replies={item.replies}
+                    currentUserId={currentUserId}
+                    isMobile={isMobile}
+                    onReply={(commentId, authorName, commentPreview) => setReplyingTo({ commentId, authorName, commentPreview })}
+                    onReplySuccess={handleReplySuccess}
+                    canReply={canAnnotate && !!currentUserId}
+                    loadReplies={loadReplies}
+                    getAuthorName={getAuthorName}
+                    getAuthorAvatar={getAuthorAvatar}
+                    parentNoteId={note.id}
+                    getNoteOwnerName={getNoteOwnerName}
+                    onDelete={handleAnnotationSuccess}
+                    expandReplies={repliesExpandedForCommentIds.has(item.annotation.id)}
+                  />
+                </div>
+              ))}
+              {hasMoreAnnotations && (
+                <div className="text-center">
+                  <Button variant="secondary" onClick={loadMoreAnnotations}>
+                    <UIText>Load more comments</UIText>
+                  </Button>
+                </div>
+              )}
+            </div>
+          )
+          return isMobile ? (
+            <div className="border-t border-gray-200 pt-4 px-4 pb-6 mt-4">
+              {commentsContent}
+            </div>
+          ) : (
+            <Card variant="subtle" className="p-6 mt-4 md:mt-6">
+              {commentsContent}
+            </Card>
+          )
+        })()}
+      </div>
 
       {/* Annotation Composer - Mobile (fixed at bottom) */}
       {isMobile && (
@@ -398,9 +438,11 @@ export function NoteView({
           parentNoteId={note.id}
           parentAnnotationId={replyingTo?.commentId}
           replyToName={replyingTo?.authorName}
+          replyToCommentPreview={replyingTo?.commentPreview}
           onSuccess={handleAnnotationSuccess}
           onCancel={replyingTo ? () => setReplyingTo(null) : undefined}
           disabled={!canAnnotate || !currentUserId}
+          currentUserId={currentUserId}
           isMobile={true}
         />
       )}
