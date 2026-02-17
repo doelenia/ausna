@@ -244,41 +244,47 @@ export function NotesFeed({
 
   // Load more notes
   const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore) return
+    if (loadingMore || !hasMore) {
+      return
+    }
 
     setLoadingMore(true)
-      try {
-        const currentOffset = offsetRef.current
-        offsetRef.current += 20
-        
-        const url = selectedCollectionId
-          ? `/api/portfolios/${portfolioId}/notes?offset=${currentOffset}&limit=20&collection_id=${selectedCollectionId}`
-          : `/api/portfolios/${portfolioId}/notes?offset=${currentOffset}&limit=20`
-        const response = await fetch(url)
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || 'Failed to load more notes')
-        }
-      
-        const result = await response.json()
-        if (result.success && result.notes) {
-          // When collection is selected, don't filter out pinned notes - they're already filtered by collection
-          // When no collection is selected, filter out pinned notes and duplicates
-          setNotes(prev => {
-            if (selectedCollectionId) {
-              // Include all notes from API (already filtered by collection)
-              const existingIds = new Set(prev.map(n => n.id))
-              const newNotes = result.notes.filter((note: Note) => !existingIds.has(note.id))
-              return [...prev, ...newNotes]
-            } else {
-              // Filter out pinned notes and duplicates
-              const existingIds = new Set([...pinnedNoteIds, ...prev.map(n => n.id)])
-              const newNotes = result.notes.filter((note: Note) => !existingIds.has(note.id))
-              return [...prev, ...newNotes]
-            }
-          })
-          setHasMore(result.hasMore ?? false)
-        }
+    try {
+      const currentOffset = offsetRef.current
+      offsetRef.current += 20
+
+      const url = selectedCollectionId
+        ? `/api/portfolios/${portfolioId}/notes?offset=${currentOffset}&limit=20&collection_id=${selectedCollectionId}`
+        : `/api/portfolios/${portfolioId}/notes?offset=${currentOffset}&limit=20`
+
+      const response = await fetch(url)
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to load more notes')
+      }
+
+      const result = await response.json()
+
+      if (result.success && result.notes) {
+        // When collection is selected, don't filter out pinned notes - they're already filtered by collection
+        // When no collection is selected, filter out pinned notes and duplicates
+        setNotes(prev => {
+          let newNotes: Note[]
+
+          if (selectedCollectionId) {
+            // Include all notes from API (already filtered by collection)
+            const existingIds = new Set(prev.map(n => n.id))
+            newNotes = result.notes.filter((note: Note) => !existingIds.has(note.id))
+          } else {
+            // Filter out pinned notes and duplicates
+            const existingIds = new Set([...pinnedNoteIds, ...prev.map(n => n.id)])
+            newNotes = result.notes.filter((note: Note) => !existingIds.has(note.id))
+          }
+
+          return [...prev, ...newNotes]
+        })
+        setHasMore(result.hasMore ?? false)
+      }
     } catch (err: any) {
       console.error('Failed to load more notes:', err)
     } finally {

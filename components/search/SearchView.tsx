@@ -82,9 +82,12 @@ export function SearchView() {
   }, [performSearch])
 
   return (
-    <div className="w-full max-w-2xl mx-auto flex flex-col" style={{ height: 'calc(100vh - 4rem)' }}>
+    <div
+      className="w-full max-w-2xl mx-auto flex flex-col px-4 md:px-0"
+      style={{ height: 'calc(100vh - 4rem)' }}
+    >
       {/* Search Input - Sticky */}
-      <div className="sticky top-0 z-10 bg-gray-50 pt-4 pb-4 px-4 -mx-4 flex-shrink-0">
+      <div className="sticky top-0 z-10 bg-gray-50 pt-4 pb-4 flex-shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-5 w-5" />
           <input
@@ -99,7 +102,7 @@ export function SearchView() {
       </div>
 
       {/* Results Container - Scrollable */}
-      <div className="flex-1 overflow-y-auto px-4 py-6" style={{ minHeight: 0 }}>
+      <div className="flex-1 overflow-y-auto py-6" style={{ minHeight: 0 }}>
         {/* Results */}
         {loading && results.length === 0 ? (
           <div className="text-center py-12">

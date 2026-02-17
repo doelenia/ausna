@@ -27,9 +27,16 @@ export function FeedView({ currentUserId }: FeedViewProps) {
   const offsetRef = useRef(0)
   const loadedNoteIdsRef = useRef<Set<string>>(new Set())
   const loadNotesRef = useRef<((reset: boolean) => Promise<void>) | null>(null)
+  const inFlightRef = useRef(false)
 
   const loadNotes = useCallback(
     async (reset: boolean = false) => {
+      if (inFlightRef.current) {
+        return
+      }
+
+      inFlightRef.current = true
+
       if (reset) {
         setLoading(true)
         offsetRef.current = 0
@@ -52,7 +59,9 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           params.append('communityId', activeCommunityId)
         }
 
-        const response = await fetch(`/api/feed?${params.toString()}`)
+        const url = `/api/feed?${params.toString()}`
+
+        const response = await fetch(url)
 
         if (!response.ok) {
           throw new Error('Failed to fetch feed')
@@ -69,6 +78,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           setNotes((prev) => {
             const existingIds = new Set(prev.map((n) => n.id))
             const uniqueNewNotes = newNotes.filter((n) => !existingIds.has(n.id))
+
             return [...prev, ...uniqueNewNotes]
           })
         }
@@ -104,6 +114,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
       } finally {
         setLoading(false)
         setLoadingMore(false)
+        inFlightRef.current = false
       }
     },
     [activeFeed, activeCommunityId, currentUserId]
@@ -127,7 +138,12 @@ export function FeedView({ currentUserId }: FeedViewProps) {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && loadNotesRef.current) {
+        const isIntersecting = entries[0]?.isIntersecting ?? false
+
+        if (isIntersecting && loadNotesRef.current) {
+          if (inFlightRef.current) {
+            return
+          }
           loadNotesRef.current(false)
         }
       },

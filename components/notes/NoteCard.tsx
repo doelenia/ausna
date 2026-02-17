@@ -1508,9 +1508,9 @@ export function NoteCard({
         )}
 
         {/* Comment preview (feed view only, when enabled) */}
-        {showComments && !isViewMode && !isCollageView && (
+        {showComments && !isViewMode && !isCollageView && commentCount !== null && commentCount > 0 && (
           <div className="mt-3 flex flex-col gap-2">
-            {commentCount !== null && commentCount > 0 && (
+            {commentCount > 0 && (
               <>
                 {comments.length > 0 && (() => {
                   const comment = comments[0]
