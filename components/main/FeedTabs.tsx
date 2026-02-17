@@ -47,7 +47,7 @@ export function FeedTabs({
   }
 
   return (
-    <div className="sticky top-0 md:top-16 z-40">
+    <div className="sticky top-0 z-40">
       <div className="w-full px-4 sm:px-6 lg:px-8">
         <div 
           className="rounded-xl bg-gray-50/80 backdrop-blur-xl p-1"

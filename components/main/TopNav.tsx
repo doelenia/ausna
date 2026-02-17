@@ -91,7 +91,8 @@ export function TopNav() {
     if (!el) return
 
     const update = () => {
-      const h = Math.ceil(el.getBoundingClientRect().height)
+      const rect = el.getBoundingClientRect()
+      const h = Math.ceil(rect.height)
       // Ignore hidden instance (display:none => height 0) since layout renders two TopNav nodes (mobile + desktop).
       if (h > 0) {
         document.documentElement.style.setProperty('--app-topnav-height', `${h}px`)
