@@ -7,7 +7,6 @@ import {
   createBloomFilter,
   deserializeBloomFilter,
   serializeBloomFilter,
-  getPrioritizedNotes,
   markNotesAsSeen,
 } from '@/lib/feed/bloom-filter'
 import { Portfolio, isCommunityPortfolio } from '@/types/portfolio'
@@ -339,9 +338,10 @@ export async function getFeedNotes(
     }
 
     // For logged-in users, use existing logic
-
-    // Query more than limit to have buffer for bloom filter filtering
-    const queryLimit = limit * 2
+    // We paginate by created_at (stable ordering) for logged-in users.
+    // Fetch `limit + 1` so we can compute hasMore reliably.
+    const rangeStart = Math.max(0, offset)
+    const rangeEnd = rangeStart + limit // inclusive: yields limit+1 rows when available
 
     let notesQuery = supabase
       .from('notes')
@@ -349,7 +349,7 @@ export async function getFeedNotes(
       .is('deleted_at', null)
       .is('mentioned_note_id', null) // Exclude annotations
       .order('created_at', { ascending: false })
-      .limit(queryLimit)
+      .range(rangeStart, rangeEnd)
 
     if (feedType === 'friends') {
       // Get notes from friends
@@ -387,38 +387,48 @@ export async function getFeedNotes(
         new Set([...friendIds, ...communityMemberIds])
       )
 
-      // Build query: notes from users OR notes assigned to portfolios
-      const conditions: string[] = []
-
-      if (allUserIds.length > 0) {
-        conditions.push(`owner_account_id.in.(${allUserIds.join(',')})`)
-      }
-
-      // For portfolio-based notes, we need to check if any assigned_portfolio matches
-      // Since Supabase doesn't support array overlap directly, we'll fetch and filter
+      // For portfolio-based notes, we need to check if any assigned_portfolio matches.
+      // Since Supabase doesn't support array overlap directly, we'll fetch a pool and filter.
       const allPortfolioIds = Array.from(
         new Set([...subscribedPortfolioIds, ...memberPortfolioIds])
       )
 
-      if (allUserIds.length > 0) {
-        notesQuery = notesQuery.in('owner_account_id', allUserIds)
-      } else if (allPortfolioIds.length === 0) {
+      if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
         // No friends, no communities, no portfolios
         return { success: true, notes: [], hasMore: false }
       }
 
-      // We'll filter portfolio-based notes after fetching
-      const { data: userNotes, error: userError } = await notesQuery
+      // Pool size increases as offset grows; cap to keep response time predictable.
+      const poolTarget = offset + limit + 1
+      const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
-      if (userError) {
-        return {
-          success: false,
-          error: userError.message || 'Failed to fetch notes',
+      // Fetch user-based notes (friends/community members)
+      let userNotes: any[] = []
+      let userNotesMaybeMore = false
+      if (allUserIds.length > 0) {
+        const { data: userNotesData, error: userError } = await supabase
+          .from('notes')
+          .select('*')
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+          .in('owner_account_id', allUserIds)
+          .order('created_at', { ascending: false })
+          .limit(poolLimit)
+
+        if (userError) {
+          return {
+            success: false,
+            error: userError.message || 'Failed to fetch notes',
+          }
         }
+
+        userNotes = userNotesData || []
+        userNotesMaybeMore = (userNotesData || []).length >= poolLimit
       }
 
       // Also fetch notes assigned to portfolios
       let portfolioNotes: any[] = []
+      let portfolioNotesMaybeMore = false
       if (allPortfolioIds.length > 0) {
         // Fetch notes that have any of these portfolios in assigned_portfolios
         const { data: portfolioNotesData, error: portfolioError } =
@@ -428,7 +438,7 @@ export async function getFeedNotes(
             .is('deleted_at', null)
             .is('mentioned_note_id', null) // Exclude annotations
             .order('created_at', { ascending: false })
-            .limit(queryLimit)
+            .limit(poolLimit)
 
         if (!portfolioError && portfolioNotesData) {
           // Filter notes that have any assigned portfolio in our list
@@ -438,6 +448,7 @@ export async function getFeedNotes(
               allPortfolioIds.includes(pid)
             )
           })
+          portfolioNotesMaybeMore = portfolioNotesData.length >= poolLimit
         }
       }
 
@@ -467,21 +478,16 @@ export async function getFeedNotes(
         return isOwnerVisible || isAssignedToVisiblePortfolio
       })
 
-      const allNotes = validatedNotes
-        .sort(
-          (a, b) =>
-            new Date(b.created_at).getTime() -
-            new Date(a.created_at).getTime()
-        )
-        .slice(0, queryLimit)
+      const sortedAllNotes = validatedNotes.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
 
-      // Get bloom filter and filter notes
-      const { bloomFilter } = await getOrCreateBloomFilter(user.id)
-      const prioritizedNotes = getPrioritizedNotes(allNotes, bloomFilter, limit)
+      const pageNotes = sortedAllNotes.slice(offset, offset + limit)
 
-      // Determine source for each note and add to note object
+      // Determine source for each note in the page and add to note object
       const notesWithSource = await Promise.all(
-        prioritizedNotes.map(async (note: any) => {
+        pageNotes.map(async (note: any) => {
           const source = await determineNoteSource(
             note,
             user.id,
@@ -503,7 +509,10 @@ export async function getFeedNotes(
         references: Array.isArray(note.references) ? note.references : [],
       }))
 
-      const hasMore = allNotes.length >= queryLimit
+      const hasMore =
+        sortedAllNotes.length > offset + limit ||
+        userNotesMaybeMore ||
+        portfolioNotesMaybeMore
 
       return {
         success: true,
@@ -526,17 +535,14 @@ export async function getFeedNotes(
       return { success: true, notes: [], hasMore: false }
     }
 
-    // Get bloom filter and filter notes
-    const { bloomFilter } = await getOrCreateBloomFilter(user.id)
-    const prioritizedNotes = getPrioritizedNotes(notes, bloomFilter, limit)
+    const pageNotes = (notes || []).slice(0, limit)
+    const hasMore = (notes || []).length > limit
 
     // Ensure references is an array
-    const notesWithReferences: Note[] = prioritizedNotes.map((note: any) => ({
+    const notesWithReferences: Note[] = pageNotes.map((note: any) => ({
       ...note,
       references: Array.isArray(note.references) ? note.references : [],
     }))
-
-    const hasMore = notes.length >= queryLimit
 
     return {
       success: true,

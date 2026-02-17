@@ -23,6 +23,7 @@ export function TopNav() {
   const [isApproved, setIsApproved] = useState<boolean | null>(null)
   const supabase = useMemo(() => createClient(), [])
   const isMountedRef = useRef(true)
+  const navRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     isMountedRef.current = true
@@ -80,6 +81,32 @@ export function TopNav() {
       window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, onSessionExpired)
       window.removeEventListener('safari-auth-cookies-blocked', onSafariCookieBlocked)
       subscription.unsubscribe()
+    }
+  }, [])
+
+  // Keep a CSS variable in sync with the *visible* TopNav height.
+  // Root layout uses this to pad scroll content so the mobile bottom nav never overlaps content.
+  useEffect(() => {
+    const el = navRef.current
+    if (!el) return
+
+    const update = () => {
+      const h = Math.ceil(el.getBoundingClientRect().height)
+      // Ignore hidden instance (display:none => height 0) since layout renders two TopNav nodes (mobile + desktop).
+      if (h > 0) {
+        document.documentElement.style.setProperty('--app-topnav-height', `${h}px`)
+      }
+    }
+
+    update()
+
+    const ro = new ResizeObserver(() => update())
+    ro.observe(el)
+    window.addEventListener('resize', update)
+
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', update)
     }
   }, [])
 
@@ -210,7 +237,7 @@ export function TopNav() {
   }, [user, supabase])
 
   return (
-    <nav className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
+    <nav ref={navRef} className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
       {safariCookieHint && (
         <div className="w-full bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between gap-2">
           <UIText className="text-blue-900">

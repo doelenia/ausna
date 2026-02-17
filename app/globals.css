@@ -38,6 +38,30 @@ body {
     rgb(var(--background-start-rgb));
 }
 
+/* 
+ * Universal fix: prevent mobile bottom nav from covering content.
+ * TopNav (mobile) is overlaid at the bottom of the scroll container; we pad scroll content by the
+ * measured nav height + safe-area inset, so the last item is always reachable/visible.
+ *
+ * Note: Root layout renders TopNav twice (mobile+desktop); TopNav sets --app-topnav-height from the visible one.
+ */
+:root {
+  --app-topnav-height: 64px; /* fallback */
+}
+
+.app-scroll {
+  /* Mobile: bottom nav overlay + iOS home indicator + gradient overlay (h-8 = 32px) */
+  padding-bottom: calc(var(--app-topnav-height) + env(safe-area-inset-bottom, 0px) + 32px);
+}
+
+@media (min-width: 768px) {
+  .app-scroll {
+    /* Desktop: top nav overlay */
+    padding-top: var(--app-topnav-height);
+    padding-bottom: 0;
+  }
+}
+
 /* Ensure input fields have proper text colors */
 input[type="text"],
 input[type="email"],

@@ -5,7 +5,7 @@ import { Title, UIText } from '@/components/ui'
 export default function SignupPage() {
   return (
     <div className="flex items-center justify-center min-h-full">
-      <div className="max-w-md w-full space-y-8">
+      <div className="max-w-md w-full space-y-8 px-4 md:px-0">
         <div>
           <Title as="h1" className="mt-6 text-center">
             Welcome to join Ausna!
