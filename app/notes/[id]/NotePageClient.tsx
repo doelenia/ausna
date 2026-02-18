@@ -72,8 +72,8 @@ export function NotePageClient({
     }
   }, [initialAnnotationId, router, serverNote.id])
 
-  // Scroll to top when navigating to note page (prevents scroll position from feed),
-  // BUT do not override targeted hash navigations (comments / annotations).
+  // Scroll to top when opening a note without #comments or #annotation-* (e.g. from feed).
+  // Only comment button, comment preview, and "View more" in feed use #comments.
   useEffect(() => {
     if (typeof window === 'undefined') return
     const hash = window.location.hash
@@ -84,17 +84,21 @@ export function NotePageClient({
       return
     }
 
-    // Find the scrollable container (the div with h-full overflow-auto in layout)
-    // Use requestAnimationFrame to ensure DOM is ready
-    requestAnimationFrame(() => {
-      const scrollableContainer = document.querySelector('.h-full.overflow-auto.w-full') as HTMLElement
+    const scrollToTop = () => {
+      const scrollableContainer =
+        (document.querySelector('.h-full.overflow-auto.w-full') as HTMLElement) ||
+        (document.querySelector('.app-scroll') as HTMLElement)
       if (scrollableContainer) {
-        // Scroll the container to top immediately
         scrollableContainer.scrollTop = 0
       }
-      // Also ensure window is at top (for browsers that use window scroll)
       window.scrollTo(0, 0)
-    })
+    }
+
+    // Run once when DOM is ready
+    requestAnimationFrame(scrollToTop)
+    // Run again after a short delay to override any scroll restoration (e.g. from Next.js or browser)
+    const t = setTimeout(scrollToTop, 100)
+    return () => clearTimeout(t)
   }, [noteId])
 
   // Cache server data and update note if needed (runs once on mount)
