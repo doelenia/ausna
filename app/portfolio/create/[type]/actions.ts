@@ -6,6 +6,7 @@ import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { uploadAvatar } from '@/lib/storage/avatars-server'
 import { generateSlug } from '@/lib/portfolio/helpers'
 import { addProjectToOwnedList } from '@/lib/portfolio/human'
+import { normalizeActivityDateTime } from '@/lib/datetime'
 
 interface CreatePortfolioResult {
   success: boolean
@@ -27,8 +28,20 @@ export async function createPortfolio(
     const emoji = formData.get('emoji') as string | null
     const projectTypeGeneral = formData.get('project_type_general') as string
     const projectTypeSpecific = formData.get('project_type_specific') as string
-    const creatorRole = formData.get('creator_role') as string || 'Creator'
+    const creatorRole = (formData.get('creator_role') as string) || 'Creator'
     const visibilityRaw = formData.get('visibility') as string | null
+    const projectStatusRaw = formData.get('project_status') as string | null
+    const activityStartRaw = formData.get('activity_datetime_start') as string | null
+    const activityEndRaw = formData.get('activity_datetime_end') as string | null
+    const activityInProgressRaw = formData.get('activity_datetime_in_progress') as string | null
+    const activityAllDayRaw = formData.get('activity_datetime_all_day') as string | null
+    const activityLocationLine1Raw = formData.get('activity_location_line1') as string | null
+    const activityLocationCityRaw = formData.get('activity_location_city') as string | null
+    const activityLocationStateRaw = formData.get('activity_location_state') as string | null
+    const activityLocationCountryRaw = formData.get('activity_location_country') as string | null
+    const activityLocationCountryCodeRaw = formData.get('activity_location_country_code') as string | null
+    const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
+    const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
 
     // Validate type
     if (type !== 'projects' && type !== 'community') {
@@ -116,13 +129,86 @@ export async function createPortfolio(
       settings: {},
       members: [user.id], // Creator is automatically a member
       managers: [user.id], // Creator is automatically a manager
-      ...(projectTypeGeneral && projectTypeSpecific ? {
-        project_type_general: projectTypeGeneral,
-        project_type_specific: projectTypeSpecific,
-      } : {}),
+      ...(projectTypeGeneral && projectTypeSpecific
+        ? {
+            project_type_general: projectTypeGeneral,
+            project_type_specific: projectTypeSpecific,
+          }
+        : {}),
       memberRoles: {
         [user.id]: creatorRole.trim() || 'Creator',
       },
+    }
+
+    // Attach initial activity_datetime and location for projects when provided
+    if (type === 'projects') {
+      const hasAnyActivityField =
+        (activityStartRaw && activityStartRaw.trim().length > 0) ||
+        (activityEndRaw && activityEndRaw.trim().length > 0) ||
+        (activityInProgressRaw && activityInProgressRaw.trim().length > 0) ||
+        (activityAllDayRaw && activityAllDayRaw.trim().length > 0)
+
+      if (hasAnyActivityField) {
+        const normalized = normalizeActivityDateTime(
+          {
+            start: activityStartRaw || '',
+            end: activityEndRaw || undefined,
+            inProgress: activityInProgressRaw === 'true',
+            allDay: activityAllDayRaw === 'true',
+          },
+          { intervalMinutes: 15 }
+        )
+
+        if (normalized) {
+          metadata.properties = {
+            ...(metadata.properties || {}),
+            activity_datetime: normalized,
+          }
+        }
+      }
+
+      const locationLine1 = activityLocationLine1Raw?.trim() || ''
+      const locationCity = activityLocationCityRaw?.trim() || ''
+      const locationState = activityLocationStateRaw?.trim() || ''
+      const locationCountry = activityLocationCountryRaw?.trim() || ''
+      const locationCountryCode = activityLocationCountryCodeRaw?.trim() || ''
+      const locationStateCode = activityLocationStateCodeRaw?.trim() || ''
+      const locationPrivate = activityLocationPrivateRaw === 'true'
+
+      const hasAnyLocationField =
+        locationLine1.length > 0 ||
+        locationCity.length > 0 ||
+        locationState.length > 0 ||
+        locationCountry.length > 0 ||
+        locationPrivate
+
+      if (hasAnyLocationField) {
+        const location: Record<string, any> = {}
+        if (locationLine1) location.line1 = locationLine1
+        if (locationCity) location.city = locationCity
+        if (locationState) location.state = locationState
+        if (locationCountry) location.country = locationCountry
+        if (locationCountryCode) location.countryCode = locationCountryCode
+        if (locationStateCode) location.stateCode = locationStateCode
+        if (locationPrivate) location.isExactLocationPrivate = true
+
+        if (Object.keys(location).length > 0) {
+          metadata.properties = {
+            ...(metadata.properties || {}),
+            location,
+          }
+        }
+      }
+
+      if (projectStatusRaw) {
+        const normalizedStatus =
+          projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
+            ? projectStatusRaw
+            : undefined
+        if (normalizedStatus) {
+          metadata.status = normalizedStatus
+        }
+      }
     }
 
     // Create portfolio

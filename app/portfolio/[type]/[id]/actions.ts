@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PinnedItem } from '@/types/portfolio'
+import { normalizeActivityDateTime } from '@/lib/datetime'
 import { getPortfolioBasic, canEditPortfolio, canDeletePortfolio, canManagePinned, canAddToPinned, getPinnedItemsCount, isNoteAssignedToPortfolio } from '@/lib/portfolio/helpers'
 import { Note } from '@/types/note'
 import { revalidatePath } from 'next/cache'
@@ -293,6 +294,18 @@ export async function updatePortfolio(
     const projectTypeGeneral = formData.get('project_type_general') as string | null
     const projectTypeSpecific = formData.get('project_type_specific') as string | null
     const visibilityRaw = formData.get('visibility') as string | null
+    const projectStatusRaw = formData.get('project_status') as string | null
+    const activityStartRaw = formData.get('activity_datetime_start') as string | null
+    const activityEndRaw = formData.get('activity_datetime_end') as string | null
+    const activityInProgressRaw = formData.get('activity_datetime_in_progress') as string | null
+    const activityAllDayRaw = formData.get('activity_datetime_all_day') as string | null
+    const activityLocationLine1Raw = formData.get('activity_location_line1') as string | null
+    const activityLocationCityRaw = formData.get('activity_location_city') as string | null
+    const activityLocationStateRaw = formData.get('activity_location_state') as string | null
+    const activityLocationCountryRaw = formData.get('activity_location_country') as string | null
+    const activityLocationCountryCodeRaw = formData.get('activity_location_country_code') as string | null
+    const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
+    const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
 
     if (!portfolioId) {
       return {
@@ -356,6 +369,102 @@ export async function updatePortfolio(
         updatedMetadata.project_type_specific = projectTypeSpecific || undefined
       }
       // If not provided in formData, leave existing values unchanged
+    }
+
+    // For project portfolios, update activity_datetime and location inside metadata.properties
+    if (portfolio.type === 'projects') {
+      const properties = (currentMetadata.properties || {}) as Record<string, any>
+      const hasAnyActivityField =
+        (activityStartRaw && activityStartRaw.trim().length > 0) ||
+        (activityEndRaw && activityEndRaw.trim().length > 0) ||
+        (activityInProgressRaw && activityInProgressRaw.trim().length > 0) ||
+        (activityAllDayRaw && activityAllDayRaw.trim().length > 0)
+
+      if (hasAnyActivityField) {
+        const normalized = normalizeActivityDateTime(
+          {
+            start: activityStartRaw || '',
+            end: activityEndRaw || undefined,
+            inProgress: activityInProgressRaw === 'true',
+            allDay: activityAllDayRaw === 'true',
+          },
+          { intervalMinutes: 15 }
+        )
+
+        if (normalized) {
+          updatedMetadata.properties = {
+            ...properties,
+            activity_datetime: normalized,
+          }
+        } else {
+          // If normalization failed, remove the property rather than saving invalid data
+          const { activity_datetime, ...rest } = properties
+          updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+        }
+      } else if (properties && Object.prototype.hasOwnProperty.call(properties, 'activity_datetime')) {
+        const { activity_datetime, ...rest } = properties
+        updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+      }
+
+      const locationLine1 = activityLocationLine1Raw?.trim() || ''
+      const locationCity = activityLocationCityRaw?.trim() || ''
+      const locationState = activityLocationStateRaw?.trim() || ''
+      const locationCountry = activityLocationCountryRaw?.trim() || ''
+      const locationCountryCode = activityLocationCountryCodeRaw?.trim() || ''
+      const locationStateCode = activityLocationStateCodeRaw?.trim() || ''
+      const locationPrivate = activityLocationPrivateRaw === 'true'
+
+      const hasAnyLocationField =
+        (activityLocationLine1Raw !== null && activityLocationLine1Raw !== undefined) ||
+        (activityLocationCityRaw !== null && activityLocationCityRaw !== undefined) ||
+        (activityLocationStateRaw !== null && activityLocationStateRaw !== undefined) ||
+        (activityLocationCountryRaw !== null && activityLocationCountryRaw !== undefined) ||
+        (activityLocationCountryCodeRaw !== null && activityLocationCountryCodeRaw !== undefined) ||
+        (activityLocationStateCodeRaw !== null && activityLocationStateCodeRaw !== undefined) ||
+        (activityLocationPrivateRaw !== null && activityLocationPrivateRaw !== undefined)
+
+      if (hasAnyLocationField) {
+        const nextProperties = (updatedMetadata.properties || properties || {}) as Record<string, any>
+
+        const hasAnyNonEmptyLocationField =
+          locationLine1.length > 0 ||
+          locationCity.length > 0 ||
+          locationState.length > 0 ||
+          locationCountry.length > 0 ||
+          locationCountryCode.length > 0 ||
+          locationStateCode.length > 0 ||
+          locationPrivate
+
+        if (hasAnyNonEmptyLocationField) {
+          const location: Record<string, any> = {}
+          if (locationLine1) location.line1 = locationLine1
+          if (locationCity) location.city = locationCity
+          if (locationState) location.state = locationState
+          if (locationCountry) location.country = locationCountry
+          if (locationCountryCode) location.countryCode = locationCountryCode
+          if (locationStateCode) location.stateCode = locationStateCode
+          if (locationPrivate) location.isExactLocationPrivate = true
+
+          nextProperties.location = Object.keys(location).length > 0 ? location : undefined
+        } else if (Object.prototype.hasOwnProperty.call(nextProperties, 'location')) {
+          const { location, ...rest } = nextProperties
+          updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+        } else {
+          updatedMetadata.properties = Object.keys(nextProperties).length > 0 ? nextProperties : undefined
+        }
+      }
+
+      if (projectStatusRaw !== null) {
+        const normalizedStatus =
+          projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
+            ? projectStatusRaw
+            : undefined
+        if (normalizedStatus) {
+          updatedMetadata.status = normalizedStatus
+        } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
+          delete updatedMetadata.status
+        }
+      }
     }
 
     // Check if description changed (compare trimmed versions)
@@ -501,11 +610,6 @@ export async function updatePortfolio(
         })
         .eq('id', portfolioId)
     }
-
-    // Revalidate Next.js cache for portfolio pages after any update
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/pinned`)
 
     return {
       success: true,
