@@ -1,4 +1,5 @@
 import { Json } from './supabase'
+import type { ActivityLocationValue } from '@/lib/location'
 
 export type PortfolioVisibility = 'public' | 'private'
 
@@ -85,6 +86,13 @@ export interface ProjectPortfolioProperties {
   goals?: string
   timelines?: string
   asks?: ProjectPortfolioAsk[]
+  activity_datetime?: {
+    start: string
+    end?: string | null
+    inProgress?: boolean
+    allDay?: boolean
+  }
+  location?: ActivityLocationValue
 }
 
 /**

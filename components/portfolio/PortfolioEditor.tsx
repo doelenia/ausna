@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PortfolioVisibility } from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
@@ -10,15 +10,29 @@ import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
-import { Title, UIText, Button } from '@/components/ui'
+import { Title, UIText, Button, Card } from '@/components/ui'
+import { ActivityDateTimePicker } from './ActivityDateTimePicker'
+import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
+import { ActivityLocationPicker } from './ActivityLocationPicker'
+import { ActivityLocationBadge } from './ActivityLocationBadge'
+import type { ActivityLocationValue } from '@/lib/location'
+import type { ActivityDateTimeValue } from '@/lib/datetime'
 
 interface PortfolioEditorProps {
   portfolio: Portfolio
   onCancel: () => void
   onSave: () => void
+  initialShowActivityPicker?: boolean
+  initialShowLocationPicker?: boolean
 }
 
-export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditorProps) {
+export function PortfolioEditor({
+  portfolio,
+  onCancel,
+  onSave,
+  initialShowActivityPicker,
+  initialShowLocationPicker,
+}: PortfolioEditorProps) {
   const basic = getPortfolioBasic(portfolio)
   const metadata = portfolio.metadata as any
   const [name, setName] = useState(basic.name)
@@ -37,6 +51,24 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
   const fileInputRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
   const avatarHelpers = createAvatarUploadHelpers(supabase)
+  const initialActivity =
+    (metadata?.properties?.activity_datetime as ActivityDateTimeValue | undefined) || null
+  const [activityValue, setActivityValue] = useState<ActivityDateTimeValue | null>(initialActivity)
+  const [showActivityPicker, setShowActivityPicker] = useState(initialShowActivityPicker ?? false)
+  const initialLocation =
+    (metadata?.properties?.location as ActivityLocationValue | undefined) || null
+  const [activityLocation, setActivityLocation] = useState<ActivityLocationValue | null>(
+    initialLocation
+  )
+  const [showLocationPicker, setShowLocationPicker] = useState(initialShowLocationPicker ?? false)
+  const [projectStatus, setProjectStatus] = useState<string>(
+    metadata?.status || (!initialActivity ? 'in-progress' : '')
+  )
+
+  const isActivitySelectionValid = useMemo(
+    () => !activityValue || !!activityValue.start,
+    [activityValue]
+  )
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -197,6 +229,64 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       }
       if (isProjectPortfolio(portfolio)) {
         formData.append('visibility', visibility)
+        formData.append('project_status', projectStatus || '')
+        if (activityValue?.start) {
+          formData.append('activity_datetime_start', activityValue.start)
+          if (activityValue.end) {
+            formData.append('activity_datetime_end', activityValue.end)
+          }
+          formData.append('activity_datetime_in_progress', activityValue.inProgress ? 'true' : 'false')
+          formData.append('activity_datetime_all_day', activityValue.allDay ? 'true' : 'false')
+        } else {
+          formData.append('activity_datetime_start', '')
+          formData.append('activity_datetime_end', '')
+          formData.append('activity_datetime_in_progress', '')
+          formData.append('activity_datetime_all_day', '')
+        }
+        if (activityLocation) {
+          if (activityLocation.line1) {
+            formData.append('activity_location_line1', activityLocation.line1)
+          } else {
+            formData.append('activity_location_line1', '')
+          }
+          if (activityLocation.city) {
+            formData.append('activity_location_city', activityLocation.city)
+          } else {
+            formData.append('activity_location_city', '')
+          }
+          if (activityLocation.state) {
+            formData.append('activity_location_state', activityLocation.state)
+          } else {
+            formData.append('activity_location_state', '')
+          }
+          if (activityLocation.country) {
+            formData.append('activity_location_country', activityLocation.country)
+          } else {
+            formData.append('activity_location_country', '')
+          }
+          if (activityLocation.countryCode) {
+            formData.append('activity_location_country_code', activityLocation.countryCode)
+          } else {
+            formData.append('activity_location_country_code', '')
+          }
+          if (activityLocation.stateCode) {
+            formData.append('activity_location_state_code', activityLocation.stateCode)
+          } else {
+            formData.append('activity_location_state_code', '')
+          }
+          formData.append(
+            'activity_location_private',
+            activityLocation.isExactLocationPrivate ? 'true' : 'false'
+          )
+        } else {
+          formData.append('activity_location_line1', '')
+          formData.append('activity_location_city', '')
+          formData.append('activity_location_state', '')
+          formData.append('activity_location_country', '')
+          formData.append('activity_location_country_code', '')
+          formData.append('activity_location_state_code', '')
+          formData.append('activity_location_private', '')
+        }
       }
 
       const result = await updatePortfolio(formData)
@@ -381,34 +471,94 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
               </div>
             )}
 
-            {/* Visibility (projects only) */}
+            {/* Visibility and activity (projects only) */}
             {isProjectPortfolio(portfolio) && (
-              <div>
-                <UIText as="label" className="block mb-2">
-                  Visibility
-                </UIText>
-                <div className="flex flex-wrap gap-2">
-                  {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setVisibility(v)}
-                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                        visibility === v
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                      disabled={loading}
-                    >
-                      {v === 'public' && 'Public'}
-                      {v === 'private' && 'Private'}
-                    </button>
-                  ))}
+              <>
+                <div>
+                  <UIText as="label" className="block mb-2">
+                    Visibility
+                  </UIText>
+                  <div className="flex flex-wrap gap-2">
+                    {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setVisibility(v)}
+                        className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                          visibility === v
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                        disabled={loading}
+                      >
+                        {v === 'public' && 'Public'}
+                        {v === 'private' && 'Private'}
+                      </button>
+                    ))}
+                  </div>
+                  <UIText as="p" className="text-xs text-gray-500 mt-1">
+                    Private projects are only visible to you and will not appear in search or feeds.
+                  </UIText>
                 </div>
-                <UIText as="p" className="text-xs text-gray-500 mt-1">
-                  Private projects are only visible to you and will not appear in search or feeds.
-                </UIText>
-              </div>
+                {!activityValue?.start && (
+                  <div className="mt-4">
+                    <UIText as="label" className="block mb-2">
+                      Status
+                    </UIText>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { key: 'in-progress', label: 'Live' },
+                        { key: 'archived', label: 'Archived' },
+                      ].map((option) => {
+                        const selected = projectStatus === option.key
+                        return (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() =>
+                              setProjectStatus(selected ? '' : option.key)
+                            }
+                            className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                              selected
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                            disabled={loading}
+                          >
+                            {option.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <UIText as="p" className="text-xs text-gray-500 mt-1">
+                      Used when no activity date is set to indicate whether the project is live or archived.
+                    </UIText>
+                  </div>
+                )}
+                <div className="mt-4">
+                  <UIText as="label" className="block mb-2">
+                    Activity date &amp; time
+                  </UIText>
+                  <div className="max-w-full">
+                    <ActivityDateTimeBadge
+                      value={activityValue || undefined}
+                      onClick={() => setShowActivityPicker(true)}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <UIText as="label" className="block mb-2">
+                    Location
+                  </UIText>
+                  <div className="max-w-full">
+                    <ActivityLocationBadge
+                      value={activityLocation || undefined}
+                      canSeeFullLocation
+                      onClick={() => setShowLocationPicker(true)}
+                    />
+                  </div>
+                </div>
+              </>
             )}
 
             {/* Error Message */}
@@ -441,6 +591,95 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
         </div>
       </div>
     </div>
+    {isProjectPortfolio(portfolio) && showActivityPicker && (
+      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
+        <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
+          <Card>
+            <ActivityDateTimePicker
+              portfolioTitle={name || basic.name}
+              initialValue={activityValue}
+              onChange={setActivityValue}
+            />
+            <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
+              <Button
+                type="button"
+                variant="text"
+                size="sm"
+                onClick={() => {
+                  setActivityValue(null)
+                  setShowActivityPicker(false)
+                }}
+              >
+                <UIText>Clear</UIText>
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowActivityPicker(false)}
+                >
+                  <UIText>Cancel</UIText>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  disabled={!isActivitySelectionValid}
+                  onClick={() => setShowActivityPicker(false)}
+                >
+                  <UIText>Done</UIText>
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )}
+    {isProjectPortfolio(portfolio) && showLocationPicker && (
+      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
+        <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
+          <Card>
+            <ActivityLocationPicker
+              portfolioTitle={name || basic.name}
+              initialValue={activityLocation}
+              onChange={setActivityLocation}
+            />
+            <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
+              <Button
+                type="button"
+                variant="text"
+                size="sm"
+                onClick={() => {
+                  setActivityLocation(null)
+                  setShowLocationPicker(false)
+                }}
+              >
+                <UIText>Clear</UIText>
+              </Button>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowLocationPicker(false)}
+                >
+                  <UIText>Cancel</UIText>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setShowLocationPicker(false)}
+                >
+                  <UIText>Done</UIText>
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )}
     </>
   )
 }

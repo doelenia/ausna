@@ -14,8 +14,14 @@ import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/a
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
-import { Button, Title, Content, UIText, UserAvatar } from '@/components/ui'
+import { Button, Title, Content, UIText, UserAvatar, Card } from '@/components/ui'
 import { Apple, ChevronRight, BadgeCheck, Lock } from 'lucide-react'
+import type { ActivityDateTimeValue } from '@/lib/datetime'
+import type { ActivityLocationValue } from '@/lib/location'
+import { formatActivityRange, getActivityIconParts } from '@/lib/formatActivityDateTime'
+import { isActivityLive } from '@/lib/activityLive'
+import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
+import { ActivityLocationBadge } from './ActivityLocationBadge'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -502,6 +508,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     }
   }
 
+  const [openActivityOnEdit, setOpenActivityOnEdit] = useState(false)
+  const [openLocationOnEdit, setOpenLocationOnEdit] = useState(false)
+
   if (isEditing) {
     return (
       <PortfolioEditor
@@ -517,6 +526,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           // Use window.location to force a full page reload with fresh data
           window.location.href = portfolioUrl
         }}
+        initialShowActivityPicker={openActivityOnEdit}
+        initialShowLocationPicker={openLocationOnEdit}
       />
     )
   }
@@ -524,6 +535,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const metadata = portfolio.metadata as any
   const members = metadata?.members || []
   const managers = metadata?.managers || []
+  const projectStatus = metadata?.status as string | undefined
 
   // Determine tab label based on portfolio type
   const tabLabel = isHumanPortfolio(portfolio) ? 'Involvement' : 'Navigations'
@@ -576,30 +588,31 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )}
             </div>
 
-            {/* Name, Verified Badge, Visibility, and Project Type */}
+            {/* Name, Verified Badge, LIVE pill, Visibility, and Project Type */}
             <div className="flex items-baseline gap-3 mb-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <Title as="h1">{basic.name}</Title>
-                {(() => {
-                  const meta = portfolio.metadata as any
-                  const isPseudo: boolean | null | undefined = (portfolio as any).is_pseudo
-                  const isApprovedFromMeta = meta?.is_approved === true
-                  const isVerified =
-                    isPseudo === false ? true :
-                    isPseudo === true ? false :
-                    isApprovedFromMeta
+                {isHumanPortfolio(portfolio) &&
+                  (() => {
+                    const meta = portfolio.metadata as any
+                    const isPseudo: boolean | null | undefined = (portfolio as any).is_pseudo
+                    const isApprovedFromMeta = meta?.is_approved === true
+                    const isVerified =
+                      isPseudo === false ? true :
+                      isPseudo === true ? false :
+                      isApprovedFromMeta
 
-                  if (isVerified) {
-                    return (
-                      <BadgeCheck
-                        aria-label="Verified user"
-                        className="w-5 h-5 text-blue-500"
-                        strokeWidth={2}
-                      />
-                    )
-                  }
-                  return null
-                })()}
+                    if (isVerified) {
+                      return (
+                        <BadgeCheck
+                          aria-label="Verified user"
+                          className="w-5 h-5 text-blue-500"
+                          strokeWidth={2}
+                        />
+                      )
+                    }
+                    return null
+                  })()}
               </div>
               {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
                 const metadata = portfolio.metadata as any
@@ -613,6 +626,23 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 }
                 return null
               })()}
+              {isProjectPortfolio(portfolio) && (() => {
+                const props = (portfolio.metadata as any)?.properties
+                const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
+                const hasActivity = !!activity && !!activity.start
+                const effectiveStatus =
+                  projectStatus || (!hasActivity ? 'in-progress' : undefined)
+                const live = isActivityLive(activity, effectiveStatus)
+                if (!live) return null
+                return (
+                  <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <UIText as="span" className="text-[11px] text-black leading-none">
+                      LIVE
+                    </UIText>
+                  </div>
+                )
+              })()}
               {isProjectPortfolio(portfolio) && serverIsOwner && (portfolio as any).visibility === 'private' && (
                 <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
               )}
@@ -622,6 +652,87 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             {basic.description && (
               <Content className="mb-4">{basic.description}</Content>
             )}
+
+            {/* Activity datetime & location badges (projects) */}
+            {isProjectPortfolio(portfolio) && (() => {
+              const props = (portfolio.metadata as any)?.properties
+              const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
+              const location = props?.location as ActivityLocationValue | undefined
+
+              const hasActivity = !!activity && !!activity.start
+              const hasLocation = !!location
+
+              if (!hasActivity && !hasLocation) return null
+
+              const canEditActivity = isOwner || isAdmin
+              const canEditLocation = isOwner || isAdmin
+              const canSeeFullLocation = isOwner || isManager || isMember || isAdmin
+
+              const handleLocationClick = () => {
+                if (!location) return
+                const queryParts: string[] = []
+                if (location.line1 && canSeeFullLocation && !location.isExactLocationPrivate) {
+                  queryParts.push(location.line1)
+                }
+                const cityStateCountry = [location.city, location.state, location.country]
+                  .filter(Boolean)
+                  .join(', ')
+                if (cityStateCountry) {
+                  queryParts.push(cityStateCountry)
+                }
+                if (queryParts.length === 0) return
+                const query = encodeURIComponent(queryParts.join(', '))
+                const url = `https://www.google.com/maps/search/?api=1&query=${query}`
+                window.open(url, '_blank', 'noopener,noreferrer')
+              }
+
+              const handleUnauthorizedClick = () => {
+                alert('Specific location only available for members')
+              }
+
+              return (
+                <div className="mb-4 max-w-full flex flex-wrap gap-2">
+                  {hasActivity && (
+                    <div>
+                      <ActivityDateTimeBadge
+                        value={activity}
+                        disableRootClick={canEditActivity}
+                        showEditIcon={canEditActivity}
+                        onEditIconClick={
+                          canEditActivity
+                            ? () => {
+                                setOpenActivityOnEdit(true)
+                                setOpenLocationOnEdit(false)
+                                setIsEditing(true)
+                              }
+                            : undefined
+                        }
+                      />
+                    </div>
+                  )}
+                  {hasLocation && (
+                    <div>
+                      <ActivityLocationBadge
+                        value={location}
+                        canSeeFullLocation={canSeeFullLocation}
+                        showEditIcon={canEditLocation}
+                        onEditIconClick={
+                          canEditLocation
+                            ? () => {
+                                setOpenLocationOnEdit(true)
+                                setOpenActivityOnEdit(false)
+                                setIsEditing(true)
+                              }
+                            : undefined
+                        }
+                        onClick={canSeeFullLocation ? handleLocationClick : undefined}
+                        onUnauthorizedClick={!canSeeFullLocation ? handleUnauthorizedClick : undefined}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Friends & Communities Section (human portfolios only) - Under description, no title */}
             {isHumanPortfolio(portfolio) && (
