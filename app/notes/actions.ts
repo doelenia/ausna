@@ -68,6 +68,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     const shouldPin = formData.get('should_pin') === 'true'
     const annotationPrivacyRaw = formData.get('annotation_privacy') as string | null
     const noteTypeRaw = formData.get('note_type') as string | null
+    const visibilityRaw = formData.get('visibility') as string | null
     const primaryAnnotationValue = formData.get('primary_annotation')
     const primaryAnnotation =
       typeof primaryAnnotationValue === 'string'
@@ -156,6 +157,10 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         ? (annotationPrivacyRaw as 'authors' | 'friends' | 'everyone')
         : 'everyone'
 
+    // Visibility: only 'public' and 'private' are allowed, default to public
+    const visibility: 'public' | 'private' =
+      visibilityRaw === 'private' ? 'private' : 'public'
+
     // Determine note type:
     // - Explicit note_type from formData takes precedence (validated to the allowed set)
     // - Otherwise, infer 'annotation' when mentioning another note
@@ -180,6 +185,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       deleted_at: null,
       primary_annotation: primaryAnnotation,
       annotation_privacy: annotationPrivacy,
+      visibility,
     }
 
     const { data: note, error: noteError } = await supabase

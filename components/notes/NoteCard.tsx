@@ -16,7 +16,7 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
 import { useDataCache } from '@/lib/cache/useDataCache'
-import { MessageCircle, Heart } from 'lucide-react'
+import { MessageCircle, Heart, Lock } from 'lucide-react'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -96,6 +96,11 @@ export function NoteCard({
   const carouselRef = useRef<HTMLDivElement | null>(null)
   const textRef = useRef<HTMLDivElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
+  const [localVisibility, setLocalVisibility] = useState<'public' | 'private' | null>(null)
+
+  useEffect(() => {
+    setLocalVisibility(null)
+  }, [note.id])
 
   useEffect(() => {
     const fetchPortfolios = async (retryCount = 0) => {
@@ -758,6 +763,8 @@ export function NoteCard({
     : (ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`)
 
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
+  const effectiveVisibility = localVisibility ?? (note as any).visibility ?? 'public'
+  const isPrivate = effectiveVisibility === 'private'
 
   const isCollageView = viewMode === 'collage'
   
@@ -1126,6 +1133,9 @@ export function NoteCard({
             </div>
           )}
         </Link>
+        {isOwner && isPrivate && (
+          <Lock className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none" aria-label="Private" />
+        )}
       </div>
     )
   }
@@ -1161,6 +1171,9 @@ export function NoteCard({
             </div>
           )}
         </Link>
+        {isOwner && isPrivate && (
+          <Lock className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none" aria-label="Private" />
+        )}
       </div>
     )
   }
@@ -1269,9 +1282,12 @@ export function NoteCard({
               )}
             </div>
             
-            {/* View Mode Actions */}
+            {/* View Mode Actions (and private lock to the left when in view mode) */}
             {isViewMode && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {isOwner && isPrivate && (
+                  <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
+                )}
                 {/* Talk to Author Button */}
                 {currentUserId && currentUserId !== note.owner_account_id && (
                   <Button
@@ -1306,6 +1322,7 @@ export function NoteCard({
                     currentUserId={currentUserId}
                     onDelete={onDeleted}
                     onRemoveFromPortfolio={onRemovedFromPortfolio}
+                    onVisibilityChange={setLocalVisibility}
                   />
                 )}
               </div>
@@ -1650,6 +1667,11 @@ export function NoteCard({
     </Link>
   )
 
+  // In view mode the lock is in the header (left of more button). Otherwise use absolute top-right (portfolio/feed).
+  const privateLock = isOwner && isPrivate && !isViewMode ? (
+    <Lock className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none" aria-label="Private" />
+  ) : null
+
   // Flat layout on mobile (no card), card layout on desktop
   if (flatOnMobile) {
     return (
@@ -1658,25 +1680,27 @@ export function NoteCard({
             - Feed: white background only, rely on internal padding
             - Note view: no extra padding (use original inner padding), background provided by page
         */}
-        <div className={`md:hidden ${isViewMode ? '' : 'bg-white'}`}>
+        <div className={`md:hidden relative ${isViewMode ? '' : 'bg-white'}`}>
           {wrappedContent}
+          {privateLock}
         </div>
 
-        {/* Desktop: keep subtle card */}
-        <div className="hidden md:block">
+        {/* Desktop: keep subtle card. Render lock after content so it paints on top. */}
+        <div className="hidden md:block relative">
           <Card
             variant="subtle"
             className="relative overflow-hidden"
             padding="none"
           >
             {wrappedContent}
+            {privateLock}
           </Card>
         </div>
       </div>
     )
   }
 
-  // Default behavior: card on all viewports
+  // Default behavior: card on all viewports. Render lock after content so it paints on top.
   return (
     <div ref={cardRef} className="w-full md:max-w-xl md:mx-auto">
       <Card
@@ -1685,6 +1709,7 @@ export function NoteCard({
         padding="none"
       >
         {wrappedContent}
+        {privateLock}
       </Card>
     </div>
   )

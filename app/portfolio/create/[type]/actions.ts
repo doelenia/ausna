@@ -28,6 +28,7 @@ export async function createPortfolio(
     const projectTypeGeneral = formData.get('project_type_general') as string
     const projectTypeSpecific = formData.get('project_type_specific') as string
     const creatorRole = formData.get('creator_role') as string || 'Creator'
+    const visibilityRaw = formData.get('visibility') as string | null
 
     // Validate type
     if (type !== 'projects' && type !== 'community') {
@@ -99,6 +100,10 @@ export async function createPortfolio(
       slugCounter++
     }
 
+    // Compute visibility for projects (public/private). Communities remain public for now.
+    const visibility: 'public' | 'private' =
+      visibilityRaw === 'private' && type === 'projects' ? 'private' : 'public'
+
     // Create portfolio metadata structure
     const metadata: any = {
       basic: {
@@ -128,6 +133,7 @@ export async function createPortfolio(
         slug,
         user_id: user.id,
         metadata,
+        visibility,
       })
       .select()
       .single()

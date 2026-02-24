@@ -307,7 +307,7 @@ export async function getFeedNotes(
       data: { user },
     } = await supabase.auth.getUser()
 
-    // For logged-out users, return 5 most recent notes
+    // For logged-out users, return 5 most recent PUBLIC notes
     if (!user) {
       const publicLimit = 5
       const { data: notes, error } = await supabase
@@ -315,6 +315,7 @@ export async function getFeedNotes(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null) // Exclude annotations
+        .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(publicLimit)
 
@@ -343,11 +344,13 @@ export async function getFeedNotes(
     const rangeStart = Math.max(0, offset)
     const rangeEnd = rangeStart + limit // inclusive: yields limit+1 rows when available
 
+    // Base query for logged-in users; feeds should only surface PUBLIC notes.
     let notesQuery = supabase
       .from('notes')
       .select('*')
       .is('deleted_at', null)
       .is('mentioned_note_id', null) // Exclude annotations
+      .eq('visibility', 'public')
       .order('created_at', { ascending: false })
       .range(rangeStart, rangeEnd)
 
@@ -402,7 +405,7 @@ export async function getFeedNotes(
       const poolTarget = offset + limit + 1
       const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
-      // Fetch user-based notes (friends/community members)
+      // Fetch user-based notes (friends/community members) - PUBLIC only
       let userNotes: any[] = []
       let userNotesMaybeMore = false
       if (allUserIds.length > 0) {
@@ -411,6 +414,7 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
+          .eq('visibility', 'public')
           .in('owner_account_id', allUserIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit)
@@ -426,7 +430,7 @@ export async function getFeedNotes(
         userNotesMaybeMore = (userNotesData || []).length >= poolLimit
       }
 
-      // Also fetch notes assigned to portfolios
+      // Also fetch notes assigned to portfolios - PUBLIC only
       let portfolioNotes: any[] = []
       let portfolioNotesMaybeMore = false
       if (allPortfolioIds.length > 0) {
@@ -437,6 +441,7 @@ export async function getFeedNotes(
             .select('*')
             .is('deleted_at', null)
             .is('mentioned_note_id', null) // Exclude annotations
+            .eq('visibility', 'public')
             .order('created_at', { ascending: false })
             .limit(poolLimit)
 

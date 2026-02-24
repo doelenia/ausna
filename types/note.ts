@@ -1,4 +1,5 @@
 import { Json } from './supabase'
+import type { PortfolioVisibility } from './portfolio'
 
 /**
  * Image reference in a note
@@ -71,6 +72,7 @@ export interface Note {
   topics?: string[] // Array of topic IDs
   intentions?: string[] // Array of intention IDs
   indexing_status?: IndexingStatus
+  visibility?: PortfolioVisibility
 }
 
 /**
@@ -82,6 +84,7 @@ export interface CreateNoteInput {
   references?: NoteReference[]
   assigned_portfolios?: string[]
   mentioned_note_id?: string | null
+  visibility?: PortfolioVisibility
 }
 
 /**
@@ -93,6 +96,7 @@ export interface UpdateNoteInput {
   references?: NoteReference[]
   assigned_portfolios?: string[]
   mentioned_note_id?: string | null
+  visibility?: PortfolioVisibility
 }
 
 /**

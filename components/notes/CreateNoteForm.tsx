@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, Fragment } from 'react'
 import { createNote } from '@/app/notes/actions'
-import { Portfolio, isProjectPortfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, PortfolioVisibility } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
@@ -58,6 +58,7 @@ export function CreateNoteForm({
   const [pinInfo, setPinInfo] = useState<{ count: number; max: number; canPin: boolean } | null>(null)
   const [loadingPinInfo, setLoadingPinInfo] = useState(false)
   const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone'>('everyone')
+  const [visibility, setVisibility] = useState<PortfolioVisibility>('public')
 
   // Filter to only show project portfolios (exclude human and community)
   const displayablePortfolios = portfolios.filter((p) => isProjectPortfolio(p))
@@ -784,6 +785,9 @@ export function CreateNoteForm({
         formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
       }
 
+      // Visibility: public or private (default public)
+      formData.append('visibility', visibility)
+
       // Add pin preference if user wants to pin
       if (shouldPin && pinInfo?.canPin) {
         formData.append('should_pin', 'true')
@@ -1085,6 +1089,33 @@ export function CreateNoteForm({
           </div>
         </div>
       )}
+
+      {/* Visibility toggle (Public / Private) */}
+      <div>
+        <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
+          Visibility
+        </UIText>
+        <div className="flex flex-wrap gap-2">
+          {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setVisibility(v)}
+              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                visibility === v
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              {v === 'public' && 'Public'}
+              {v === 'private' && 'Private'}
+            </button>
+          ))}
+        </div>
+        <UIText as="p" className="text-xs text-gray-500 mt-1">
+          Private notes are only visible to you and will not appear in feeds.
+        </UIText>
+      </div>
 
       {/* Pin option - only show if user is owner and there's space */}
       {selectedProjectId && pinInfo?.canPin && (
