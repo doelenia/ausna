@@ -1,5 +1,7 @@
 import { Json } from './supabase'
 
+export type PortfolioVisibility = 'public' | 'private'
+
 /**
  * Base portfolio types that all portfolio types extend
  */
@@ -134,6 +136,7 @@ export interface BasePortfolio {
   updated_at: string
   metadata: Json
   is_pseudo?: boolean // If true, portfolio is hidden from customer search but visible to admins (defaults to false in DB)
+  visibility?: PortfolioVisibility // DB default is 'public'; 'private' portfolios are only visible to their owner and admins
 }
 
 /**

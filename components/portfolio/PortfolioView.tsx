@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar } from '@/components/ui'
-import { Apple, ChevronRight, BadgeCheck } from 'lucide-react'
+import { Apple, ChevronRight, BadgeCheck, Lock } from 'lucide-react'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -38,7 +38,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [isMember, setIsMember] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
-  const [projects, setProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string; role?: string; projectType?: string | null }>>([])
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string; role?: string; projectType?: string | null; visibility?: 'public' | 'private' }>>([])
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [memberAvatars, setMemberAvatars] = useState<Array<{ id: string; avatar?: string; name?: string }>>([])
   const [memberAvatarsLoading, setMemberAvatarsLoading] = useState(false)
@@ -174,6 +174,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               emoji: projectMap.get(p.id) as string | undefined,
               role: p.role,
               projectType: p.projectType,
+              visibility: ((p as any).visibility === 'private' ? 'private' : 'public') as 'public' | 'private',
             }))
             setProjects(projectData)
           } else {
@@ -575,7 +576,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )}
             </div>
 
-            {/* Name, Verified Badge, and Project Type */}
+            {/* Name, Verified Badge, Visibility, and Project Type */}
             <div className="flex items-baseline gap-3 mb-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <Title as="h1">{basic.name}</Title>
@@ -612,6 +613,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 }
                 return null
               })()}
+              {isProjectPortfolio(portfolio) && serverIsOwner && (portfolio as any).visibility === 'private' && (
+                <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
+              )}
             </div>
 
             {/* Description */}
@@ -893,8 +897,14 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     {projects.map((project) => (
                       <div
                         key={project.id}
-                        className="flex flex-col items-center flex-shrink-0 w-48"
+                        className="flex flex-col items-center flex-shrink-0 w-48 relative"
                       >
+                        {project.visibility === 'private' && (
+                          <Lock
+                            className="absolute top-2 right-3 w-4 h-4 text-gray-500 z-10"
+                            aria-label="Private"
+                          />
+                        )}
                         <Link
                           href={getPortfolioUrl('projects', project.id)}
                           className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"

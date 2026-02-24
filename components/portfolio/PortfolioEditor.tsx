@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { Portfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PortfolioVisibility } from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
@@ -10,7 +10,6 @@ import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
-import { isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
 import { Title, UIText, Button } from '@/components/ui'
 
 interface PortfolioEditorProps {
@@ -30,6 +29,9 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>(metadata?.project_type_general || '')
   const [projectTypeSpecific, setProjectTypeSpecific] = useState<string>(metadata?.project_type_specific || '')
+  const [visibility, setVisibility] = useState<PortfolioVisibility>(
+    (portfolio as any).visibility === 'private' ? 'private' : 'public'
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -192,6 +194,9 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
       if (projectTypeGeneral && projectTypeSpecific) {
         formData.append('project_type_general', projectTypeGeneral)
         formData.append('project_type_specific', projectTypeSpecific)
+      }
+      if (isProjectPortfolio(portfolio)) {
+        formData.append('visibility', visibility)
       }
 
       const result = await updatePortfolio(formData)
@@ -373,6 +378,36 @@ export function PortfolioEditor({ portfolio, onCancel, onSave }: PortfolioEditor
                     disabled={loading}
                   />
                 )}
+              </div>
+            )}
+
+            {/* Visibility (projects only) */}
+            {isProjectPortfolio(portfolio) && (
+              <div>
+                <UIText as="label" className="block mb-2">
+                  Visibility
+                </UIText>
+                <div className="flex flex-wrap gap-2">
+                  {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setVisibility(v)}
+                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                        visibility === v
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                      disabled={loading}
+                    >
+                      {v === 'public' && 'Public'}
+                      {v === 'private' && 'Private'}
+                    </button>
+                  ))}
+                </div>
+                <UIText as="p" className="text-xs text-gray-500 mt-1">
+                  Private projects are only visible to you and will not appear in search or feeds.
+                </UIText>
               </div>
             )}
 

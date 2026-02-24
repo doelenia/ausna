@@ -71,6 +71,7 @@ export function NotesFeed({
               intentions: noteData.intentions || [],
               indexing_status: noteData.indexing_status || null,
               type: (noteData as any).type || 'post',
+              visibility: (noteData as any).visibility === 'private' ? 'private' : 'public',
             }
           })
 
@@ -335,6 +336,7 @@ export function NotesFeed({
         intentions: item.note!.intentions || [],
         indexing_status: item.note!.indexing_status || null,
         type: (item.note as any).type || 'post',
+        visibility: (item.note as any).visibility === 'private' ? 'private' : 'public',
       }))
       const newPinnedIds = new Set(pinnedNotesData.map(n => n.id))
       setPinnedNotes(pinnedNotesData)

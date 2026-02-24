@@ -14,6 +14,7 @@ interface NoteActionsProps {
   currentUserId?: string
   onDelete?: () => void
   onRemoveFromPortfolio?: () => void
+  onVisibilityChange?: (visibility: 'public' | 'private') => void
   isDeleting?: boolean
   isRemoving?: boolean
 }
@@ -32,6 +33,7 @@ export function NoteActions({
   currentUserId,
   onDelete,
   onRemoveFromPortfolio,
+  onVisibilityChange,
   isDeleting = false,
   isRemoving = false,
 }: NoteActionsProps) {
@@ -48,6 +50,10 @@ export function NoteActions({
   const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone' | null>(null)
   const [loadingPrivacy, setLoadingPrivacy] = useState(true)
   const [updatingPrivacy, setUpdatingPrivacy] = useState(false)
+  const [visibility, setVisibility] = useState<'public' | 'private'>(
+    note.visibility === 'private' ? 'private' : 'public'
+  )
+  const [updatingVisibility, setUpdatingVisibility] = useState(false)
 
   // Fetch pin options (user's human portfolio and assigned projects)
   useEffect(() => {
@@ -298,6 +304,32 @@ export function NoteActions({
     }
   }
 
+  const handleVisibilityChange = async (next: 'public' | 'private') => {
+    if (updatingVisibility || visibility === next) return
+    setUpdatingVisibility(true)
+    try {
+      const response = await fetch(`/api/notes/${note.id}/visibility`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility: next }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data.success) {
+        alert(data.error || 'Failed to update visibility')
+        return
+      }
+      setVisibility(next)
+      onVisibilityChange?.(next)
+    } catch (error: any) {
+      console.error('Error updating visibility:', error)
+      alert(error.message || 'Failed to update visibility')
+    } finally {
+      setUpdatingVisibility(false)
+      setIsOpen(false)
+    }
+  }
+
   // Calculate dropdown position when opening
   const handleToggle = () => {
     if (!isOpen && buttonRef.current) {
@@ -420,6 +452,42 @@ export function NoteActions({
                 >
                   {isRemoving ? 'Removing...' : 'Remove from Portfolio'}
                 </button>
+              )}
+              
+              {/* Visibility - only owner can change */}
+              {currentUserId === note.owner_account_id && (
+                <>
+                  <div className="border-t border-gray-200 my-1" />
+                  <div className="px-4 py-2">
+                    <UIText className="text-xs font-medium text-gray-500 mb-2">Visibility</UIText>
+                    <div className="space-y-1">
+                      <button
+                        onClick={() => handleVisibilityChange('public')}
+                        disabled={updatingVisibility}
+                        className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                          visibility === 'public'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {visibility === 'public' ? '✓ ' : ''}
+                        Public
+                      </button>
+                      <button
+                        onClick={() => handleVisibilityChange('private')}
+                        disabled={updatingVisibility}
+                        className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                          visibility === 'private'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        {visibility === 'private' ? '✓ ' : ''}
+                        Private
+                      </button>
+                    </div>
+                  </div>
+                </>
               )}
               
               {/* Annotation Privacy - only show for note owner */}

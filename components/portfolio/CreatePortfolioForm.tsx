@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { generateSlug } from '@/lib/portfolio/utils'
-import { PortfolioType } from '@/types/portfolio'
+import { PortfolioType, PortfolioVisibility } from '@/types/portfolio'
 import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
@@ -26,6 +26,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>('')
   const [projectTypeSpecific, setProjectTypeSpecific] = useState<string>('')
   const [creatorRole, setCreatorRole] = useState<string>('Creator')
+  const [visibility, setVisibility] = useState<PortfolioVisibility>('public')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -129,6 +130,10 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
         formData.append('project_type_specific', projectTypeSpecific)
       }
       formData.append('creator_role', creatorRole.trim() || 'Creator')
+
+      if (type === 'projects') {
+        formData.append('visibility', visibility)
+      }
 
       const result = await createPortfolio(formData)
 
@@ -295,6 +300,36 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           />
         )}
       </div>
+
+      {/* Visibility (projects only) */}
+      {type === 'projects' && (
+        <div>
+          <UIText as="label" className="block mb-2">
+            Visibility
+          </UIText>
+          <div className="flex flex-wrap gap-2">
+            {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setVisibility(v)}
+                className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                  visibility === v
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+                disabled={loading}
+              >
+                {v === 'public' && 'Public'}
+                {v === 'private' && 'Private'}
+              </button>
+            ))}
+          </div>
+          <UIText as="p" className="text-xs text-gray-500 mt-1">
+            Private projects are only visible to you and will not appear in search or feeds.
+          </UIText>
+        </div>
+      )}
 
       {/* Creator Role Input */}
       <div>

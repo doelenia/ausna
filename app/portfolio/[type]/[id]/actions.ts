@@ -60,6 +60,7 @@ interface PinnedItemWithData {
     topics?: string[]
     intentions?: string[]
     indexing_status?: any
+    visibility?: 'public' | 'private'
   }
 }
 
@@ -138,7 +139,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
       if (ownedProjectsList.length > 0) {
         const { data: ownedProjectsData, error: ownedError } = await supabase
           .from('portfolios')
-          .select('id, type, slug, metadata')
+          .select('id, type, slug, metadata, visibility')
           .eq('type', 'projects')
           .in('id', ownedProjectsList)
 
@@ -159,7 +160,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
       // Note: PostgREST doesn't have great support for JSONB array contains, so we fetch and filter
       const { data: allProjects, error: projectsError } = await supabase
         .from('portfolios')
-        .select('id, type, slug, metadata, user_id')
+        .select('id, type, slug, metadata, user_id, visibility')
         .eq('type', 'projects')
         .order('created_at', { ascending: false })
         .limit(100)
@@ -219,6 +220,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
           slug: p.slug,
           role: userRole,
           projectType: projectTypeSpecific,
+          visibility: (p as any).visibility === 'private' ? 'private' : 'public',
         }
       })
 
@@ -290,6 +292,7 @@ export async function updatePortfolio(
     const emoji = formData.get('emoji') as string | null
     const projectTypeGeneral = formData.get('project_type_general') as string | null
     const projectTypeSpecific = formData.get('project_type_specific') as string | null
+    const visibilityRaw = formData.get('visibility') as string | null
 
     if (!portfolioId) {
       return {
@@ -310,7 +313,7 @@ export async function updatePortfolio(
     // Get portfolio for metadata access
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('metadata, type, user_id')
+      .select('metadata, type, user_id, visibility')
       .eq('id', portfolioId)
       .single()
 
@@ -369,12 +372,23 @@ export async function updatePortfolio(
       })
     }
 
+    // Build update payload
+    const updatePayload: any = {
+      metadata: updatedMetadata,
+    }
+
+    // Allow owner to update visibility for project portfolios
+    if (
+      portfolio.type === 'projects' &&
+      (visibilityRaw === 'public' || visibilityRaw === 'private')
+    ) {
+      updatePayload.visibility = visibilityRaw
+    }
+
     // Update portfolio
     const { error: updateError } = await supabase
       .from('portfolios')
-      .update({
-        metadata: updatedMetadata,
-      })
+      .update(updatePayload)
       .eq('id', portfolioId)
 
     if (updateError) {
@@ -615,6 +629,7 @@ interface PinnedItemWithData {
     topics?: string[]
     intentions?: string[]
     indexing_status?: any
+    visibility?: 'public' | 'private'
   }
 }
 
@@ -760,6 +775,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
               topics: pinnedNote.topics || [],
               intentions: pinnedNote.intentions || [],
               indexing_status: pinnedNote.indexing_status,
+              visibility: (pinnedNote as any).visibility === 'private' ? 'private' : 'public',
             },
           })
         }
