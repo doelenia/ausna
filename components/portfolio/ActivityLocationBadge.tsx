@@ -46,6 +46,7 @@ export function ActivityLocationBadge({
 
   const handleClick = () => {
     if (disableRootClick) return
+
     // In create/edit flows we still want the badge to open the picker
     // even before a location is set.
     if (!hasLocation) {
@@ -53,11 +54,15 @@ export function ActivityLocationBadge({
       return
     }
 
-    if (canSeeFullLocation && googleMapsQuery && onClick) {
+    // Allow opening maps for any public address (non-private), and for private addresses
+    // only when the viewer can see the full location.
+    if (googleMapsQuery && onClick && (!isExactPrivate || canSeeFullLocation)) {
       onClick()
       return
     }
-    if (!canSeeFullLocation && isExactPrivate && onUnauthorizedClick) {
+    // For private addresses where the viewer cannot see full details, show an
+    // unauthorized notification instead of opening maps.
+    if (isExactPrivate && !canSeeFullLocation && onUnauthorizedClick) {
       onUnauthorizedClick()
     }
   }

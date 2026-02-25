@@ -688,7 +688,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               }
 
               const handleUnauthorizedClick = () => {
-                alert('Specific location only available for members')
+                alert('Address is visible for members only.')
               }
 
               return (
@@ -726,7 +726,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                               }
                             : undefined
                         }
-                        onClick={canSeeFullLocation ? handleLocationClick : undefined}
+                        // Always provide onClick so public addresses can open Maps
+                        // even for visitors; privacy is enforced inside the badge.
+                        onClick={handleLocationClick}
                         onUnauthorizedClick={!canSeeFullLocation ? handleUnauthorizedClick : undefined}
                       />
                     </div>
