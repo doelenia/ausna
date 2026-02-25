@@ -664,8 +664,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
               if (!hasActivity && !hasLocation) return null
 
-              const canEditActivity = isOwner || isAdmin
-              const canEditLocation = isOwner || isAdmin
+              // Edit buttons only for portfolio owner or project manager; site admin is treated like a normal user here
+              const canEditActivity = isOwner || isManager
+              const canEditLocation = isOwner || isManager
               const canSeeFullLocation = isOwner || isManager || isMember || isAdmin
 
               const handleLocationClick = () => {
