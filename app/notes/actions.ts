@@ -1,5 +1,5 @@
 'use server'
-
+ 
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { requireAuth } from '@/lib/auth/requireAuth'
@@ -8,7 +8,7 @@ import { uploadNoteImage } from '@/lib/storage/note-images-server'
 import { fetchUrlMetadata } from '@/lib/notes/url-metadata'
 import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio, canAnnotateNote } from '@/lib/notes/helpers'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
-import { isHumanPortfolio, Portfolio } from '@/types/portfolio'
+import type { Portfolio } from '@/types/portfolio'
 
 interface CreateNoteResult {
   success: boolean
@@ -97,34 +97,13 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     if (portfolioIds.length !== 1) {
       return {
         success: false,
-        error: 'Note must be assigned to exactly one project',
+        error: 'Note must be assigned to exactly one portfolio',
       }
     }
 
     const portfolioId = portfolioIds[0]
 
-    // Validate that the assigned portfolio is a project (not human or community)
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('type')
-      .eq('id', portfolioId)
-      .single()
-
-    if (portfolioError || !portfolio) {
-      return {
-        success: false,
-        error: 'Assigned portfolio not found',
-      }
-    }
-
-    if (portfolio.type !== 'projects') {
-      return {
-        success: false,
-        error: 'Note must be assigned to a project (not human or community portfolio)',
-      }
-    }
-
-    // For new notes (not annotations or reactions), user must be a member of the project.
+    // For new notes (not annotations or reactions), user must be a member of the portfolio.
     // For annotations and reactions, specialized creators already enforce permissions.
     const isAnnotation = !!mentionedNoteId && noteTypeRaw !== 'reaction'
     const isReaction = noteTypeRaw === 'reaction'
@@ -133,7 +112,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       if (!canCreate) {
         return {
           success: false,
-          error: 'You must be a member of the project to create notes',
+          error: 'You must be a member of the portfolio to create notes',
         }
       }
     }
@@ -367,7 +346,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
             .single()
 
           if (portfolio) {
-            const portfolioData = portfolio as Portfolio
+            const portfolioData = portfolio as any
             const pinnedCount = getPinnedItemsCount(portfolioData)
 
             // Only add if pinned list is not full (max 9 items)

@@ -37,19 +37,18 @@ export function UsernameEditor({ initialUsername, userId }: UsernameEditorProps)
     setSuccess(false)
 
     try {
-      // Check if username is already taken in human portfolios
+      // Check if username (slug) is already taken in human portfolios
       const { data: existingPortfolios, error: checkError } = await supabase
         .from('portfolios')
-        .select('user_id, metadata')
+        .select('user_id, slug')
         .eq('type', 'human')
         .neq('user_id', userId)
 
       if (checkError) throw checkError
 
-      // Check if any existing portfolio has this username
-      const usernameTaken = existingPortfolios?.some((portfolio: { metadata: unknown }) => {
-        const metadata = portfolio.metadata as any
-        return metadata?.username?.toLowerCase() === username.toLowerCase()
+      // Check if any existing portfolio has this slug (case-insensitive)
+      const usernameTaken = existingPortfolios?.some((portfolio: { slug: string | null }) => {
+        return (portfolio.slug || '').toLowerCase() === username.toLowerCase()
       })
 
       if (usernameTaken) {
@@ -58,7 +57,7 @@ export function UsernameEditor({ initialUsername, userId }: UsernameEditorProps)
         return
       }
 
-      // Update username in human portfolio
+      // Update username (slug) in human portfolio
       await portfolioHelpers.updateHumanPortfolioUsername(userId, username.toLowerCase())
 
       setSuccess(true)

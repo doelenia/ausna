@@ -192,9 +192,9 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                 <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
                   <div className="sm:col-span-2">
                     <UIText as="dt" className="mb-2">Username</UIText>
-                    <dd className="mt-1">
+                    <dd className="mt1">
                       <UsernameEditor 
-                        initialUsername={humanPortfolio.metadata.username || ''} 
+                        initialUsername={humanPortfolio.slug || ''} 
                         userId={user.id} 
                       />
                     </dd>

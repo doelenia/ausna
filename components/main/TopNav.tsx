@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
-import { Home, MessageCircle, Pen, Search } from 'lucide-react'
+import { Home, MessageCircle, Plus, Search } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
 export function TopNav() {
@@ -18,7 +18,13 @@ export function TopNav() {
   const [unreadCount, setUnreadCount] = useState(0)
   const [inviteUnreadCount, setInviteUnreadCount] = useState(0)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
-  const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [showCreateMenu, setShowCreateMenu] = useState(false)
+  const [userProjects, setUserProjects] = useState<
+    Array<{ id: string; name: string; avatar?: string; emoji?: string; status?: string | null }>
+  >([])
+  const [userActivities, setUserActivities] = useState<
+    Array<{ id: string; name: string; avatar?: string; emoji?: string; hostProjectName?: string | null }>
+  >([])
   const [userProjectsLoading, setUserProjectsLoading] = useState(false)
   const [isApproved, setIsApproved] = useState<boolean | null>(null)
   const supabase = useMemo(() => createClient(), [])
@@ -181,11 +187,13 @@ export function TopNav() {
     }
   }, [user])
 
-  // Fetch all projects user is a member of (for project selector popup)
+  // Fetch all projects user is a member of (for project selector popup and create activity flow),
+  // and activities where the user participates.
   useEffect(() => {
     const fetchUserProjects = async () => {
       if (!user) {
         setUserProjects([])
+        setUserActivities([])
         return
       }
 
@@ -194,12 +202,20 @@ export function TopNav() {
         // Fetch all projects
         const { data: allProjects } = await supabase
           .from('portfolios')
-          .select('id, metadata')
+          .select('id, user_id, metadata')
           .eq('type', 'projects')
+          .order('created_at', { ascending: false })
+
+        // Fetch all activities
+        const { data: allActivities } = await supabase
+          .from('portfolios')
+          .select('id, user_id, metadata, host_project_id')
+          .eq('type', 'activities')
           .order('created_at', { ascending: false })
 
         if (!allProjects) {
           setUserProjects([])
+          setUserActivities([])
           setUserProjectsLoading(false)
           return
         }
@@ -210,9 +226,14 @@ export function TopNav() {
             const metadata = p.metadata as any
             const managers = metadata?.managers || []
             const members = metadata?.members || []
-            return p.user_id === user.id || // Creator
-                   (Array.isArray(managers) && managers.includes(user.id)) ||
-                   (Array.isArray(members) && members.includes(user.id))
+            const status = (metadata?.status as string | undefined) || null
+            const isMemberOrManager =
+              p.user_id === user.id ||
+              (Array.isArray(managers) && managers.includes(user.id)) ||
+              (Array.isArray(members) && members.includes(user.id))
+            // Only show non-archived (active) projects in the selector
+            const isActive = status !== 'archived'
+            return isMemberOrManager && isActive
           })
           .map((p: any) => {
             const metadata = p.metadata as any
@@ -222,13 +243,75 @@ export function TopNav() {
               name: basic.name || 'Project',
               avatar: basic.avatar,
               emoji: basic.emoji,
+              status: (metadata?.status as string | undefined) || null,
             }
           })
 
         setUserProjects(userProjectData)
+
+        // Build a map of project id -> name for activity host labels
+        const projectNameById = new Map<string, string>()
+        allProjects.forEach((p: any) => {
+          const meta = p.metadata as any
+          const basic = meta?.basic || {}
+          projectNameById.set(p.id as string, (basic.name as string) || 'Project')
+        })
+
+        // Filter activities where user is owner/manager/member and end time has not passed
+        const now = new Date()
+        const userActivityData =
+          allActivities
+            ?.filter((p: any) => {
+              const metadata = p.metadata as any
+              const managers: string[] = metadata?.managers || []
+              const members: string[] = metadata?.members || []
+              const isOwner = p.user_id === user.id
+              const isManager = Array.isArray(managers) && managers.includes(user.id)
+              const isMember = Array.isArray(members) && members.includes(user.id)
+              if (!isOwner && !isManager && !isMember) {
+                return false
+              }
+
+              const props = metadata?.properties || {}
+              const activity = props.activity_datetime as
+                | { start?: string; end?: string | null }
+                | undefined
+              if (!activity || !activity.start) {
+                return false
+              }
+
+              const start = new Date(activity.start)
+              if (Number.isNaN(start.getTime())) {
+                return false
+              }
+
+              let end: Date | null = null
+              if (activity.end) {
+                const parsedEnd = new Date(activity.end)
+                end = Number.isNaN(parsedEnd.getTime()) ? null : parsedEnd
+              }
+
+              const effectiveEnd = end ?? start
+              return effectiveEnd >= now
+            })
+            .map((p: any) => {
+              const metadata = p.metadata as any
+              const basic = metadata?.basic || {}
+              const hostId = (p as any).host_project_id as string | null | undefined
+              return {
+                id: p.id as string,
+                name: (basic.name as string) || 'Activity',
+                avatar: basic.avatar as string | undefined,
+                emoji: basic.emoji as string | undefined,
+                hostProjectName: hostId ? projectNameById.get(hostId) ?? null : null,
+              }
+            }) ?? []
+
+        setUserActivities(userActivityData)
       } catch (error) {
-        console.error('Failed to fetch user projects:', error)
+        console.error('Failed to fetch user projects and activities:', error)
         setUserProjects([])
+        setUserActivities([])
       } finally {
         setUserProjectsLoading(false)
       }
@@ -292,10 +375,10 @@ export function TopNav() {
                 className="md:hidden"
               />
               <IconButton
-                icon={Pen}
-                onClick={() => setShowProjectSelector(true)}
-                title="Create Note"
-                aria-label="Create Note"
+                icon={Plus}
+                onClick={() => setShowCreateMenu(true)}
+                title="Create"
+                aria-label="Create"
                 className="md:hidden"
               />
               <IconButton
@@ -328,10 +411,10 @@ export function TopNav() {
                   aria-label="Search"
                 />
                 <IconButton
-                  icon={Pen}
-                  onClick={() => setShowProjectSelector(true)}
-                  title="Create Note"
-                  aria-label="Create Note"
+                  icon={Plus}
+                  onClick={() => setShowCreateMenu(true)}
+                  title="Create"
+                  aria-label="Create"
                 />
                 <IconButton
                   icon={MessageCircle}
@@ -388,7 +471,64 @@ export function TopNav() {
         </div>
       </div>
 
-      {/* Project Selector Popup */}
+      {/* Create menu */}
+      {showCreateMenu && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowCreateMenu(false)}
+        >
+          <div
+            className="bg-white rounded-xl w-full max-w-sm mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Card variant="default" padding="md">
+              <Title as="h2" className="mb-4">
+                Create
+              </Title>
+              <div className="flex flex-col gap-3 mb-4">
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setShowCreateMenu(false)
+                    setShowProjectSelector(true)
+                  }}
+                >
+                  <UIText>New note</UIText>
+                </Button>
+                {isApproved && (
+                  <>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setShowCreateMenu(false)
+                        window.location.href = '/portfolio/create/activities'
+                      }}
+                    >
+                      <UIText>New activity</UIText>
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setShowCreateMenu(false)
+                        window.location.href = '/portfolio/create/projects'
+                      }}
+                    >
+                      <UIText>New project</UIText>
+                    </Button>
+                  </>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <Button variant="secondary" onClick={() => setShowCreateMenu(false)}>
+                  <UIText>Cancel</UIText>
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* Project & Activity Selector Popup */}
       {showProjectSelector && (
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
@@ -400,7 +540,7 @@ export function TopNav() {
           >
             <Card variant="default" padding="sm">
               <div className="mb-6">
-                <UIText>Choose a project to post note with</UIText>
+                <UIText>Choose a project or activity to post note with</UIText>
               </div>
               
               {userProjectsLoading ? (
@@ -408,53 +548,101 @@ export function TopNav() {
                   <UIText className="text-gray-500">Loading projects...</UIText>
                 </div>
               ) : (
-                <div className="grid grid-cols-3 gap-x-4 gap-y-8 mb-4">
-                  {userProjects.map((project) => (
-                    <Link
-                      key={project.id}
-                      href={`/notes/create?portfolio=${project.id}`}
-                      className="flex flex-col items-center gap-4 py-8 px-8 hover:opacity-80 transition-opacity"
-                      onClick={() => setShowProjectSelector(false)}
-                    >
-                      <StickerAvatar
-                        src={project.avatar}
-                        alt={project.name}
-                        type="projects"
-                        size={96}
-                        emoji={project.emoji}
-                        name={project.name}
-                      />
-                      <UIText className="text-center max-w-[96px] truncate" title={project.name}>
-                        {project.name}
-                      </UIText>
-                    </Link>
-                  ))}
+                <>
+                  <div className="mb-4">
+                    <UIText className="mb-2">Projects</UIText>
+                    {userProjects.length === 0 ? (
+                      <UIText className="text-gray-500 text-sm">No active projects available.</UIText>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-x-4 gap-y-8">
+                        {userProjects.map((project) => (
+                          <Link
+                            key={project.id}
+                            href={`/notes/create?portfolio=${project.id}`}
+                            className="flex flex-col items-center gap-4 py-6 px-4 hover:opacity-80 transition-opacity"
+                            onClick={() => setShowProjectSelector(false)}
+                          >
+                            <StickerAvatar
+                              src={project.avatar}
+                              alt={project.name}
+                              type="projects"
+                              size={72}
+                              emoji={project.emoji}
+                              name={project.name}
+                            />
+                            <UIText className="text-center max-w-[96px] truncate" title={project.name}>
+                              {project.name}
+                            </UIText>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {userActivities.length > 0 && (
+                    <div className="mb-4">
+                      <UIText className="mb-2">Activities</UIText>
+                      <div className="grid grid-cols-3 gap-x-4 gap-y-8">
+                        {userActivities.map((activity) => (
+                          <Link
+                            key={activity.id}
+                            href={`/notes/create?portfolio=${activity.id}`}
+                            className="flex flex-col items-center gap-4 py-6 px-4 hover:opacity-80 transition-opacity"
+                            onClick={() => setShowProjectSelector(false)}
+                          >
+                            <StickerAvatar
+                              src={activity.avatar}
+                              alt={activity.name}
+                              type="activities"
+                              size={72}
+                              emoji={activity.emoji}
+                              name={activity.name}
+                            />
+                            <UIText
+                              className="text-center max-w-[96px] truncate"
+                              title={activity.name}
+                            >
+                              {activity.name}
+                            </UIText>
+                            {activity.hostProjectName && (
+                              <UIText className="text-xs text-gray-500 text-center max-w-[96px] truncate">
+                                {activity.hostProjectName}
+                              </UIText>
+                            )}
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Create Project Button - only for approved users */}
                   {isApproved && (
-                    <Link
-                      href="/portfolio/create/projects"
-                      className="flex flex-col items-center gap-4 py-4 px-4 hover:opacity-80 transition-opacity"
-                      onClick={() => setShowProjectSelector(false)}
-                    >
-                      <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center">
-                        <svg
-                          className="h-12 w-12 text-gray-600"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 4v16m8-8H4"
-                          />
-                        </svg>
-                      </div>
-                      <UIText className="text-center max-w-[96px] truncate">Create Project</UIText>
-                    </Link>
+                    <div className="mt-2 flex justify-center">
+                      <Link
+                        href="/portfolio/create/projects"
+                        className="flex flex-col items-center gap-2 py-2 px-4 hover:opacity-80 transition-opacity"
+                        onClick={() => setShowProjectSelector(false)}
+                      >
+                        <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center">
+                          <svg
+                            className="h-8 w-8 text-gray-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 4v16m8-8H4"
+                            />
+                          </svg>
+                        </div>
+                        <UIText className="text-center max-w-[120px] truncate">Create Project</UIText>
+                      </Link>
+                    </div>
                   )}
-                </div>
+                </>
               )}
               
               <div className="flex justify-end">

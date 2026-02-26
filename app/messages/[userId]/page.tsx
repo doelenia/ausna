@@ -766,6 +766,14 @@ function ConversationViewContent() {
             {[...messages].reverse().map((message) => {
               const isSent = message.sender_id === currentUserId
               const isFriendRequestMessage = message.text.includes('friend request')
+              const isApplyToJoinMessage =
+                message.text.includes('applied to join') &&
+                message.text.includes('(activity). Review:')
+              const applyToJoinMatch = isApplyToJoinMessage
+                ? message.text.match(/applied to join (.+?) \(activity\)\. Review: (\S+)/)
+                : null
+              const applyToJoinActivityName = applyToJoinMatch ? applyToJoinMatch[1].trim() : null
+              const applyToJoinReviewPath = applyToJoinMatch ? applyToJoinMatch[2].trim() : null
               const isInviteMessage = message.text.includes('invited you to join') || message.text.includes('invited you to become a manager')
               const isManagerInviteMessage = message.text.includes('invited you to become a manager')
               const isAcceptMessage = message.text.includes('accepted your invitation to join') || message.text.includes('accepted your invitation to become a manager')
@@ -878,7 +886,18 @@ function ConversationViewContent() {
                       } ${(message as any).isOptimistic ? 'opacity-75' : ''}`}
                     >
                       <div className="flex items-center gap-2">
-                        <UIText as="p">{message.text}</UIText>
+                        {isApplyToJoinMessage && !isSent && applyToJoinReviewPath ? (
+                          <div className="flex flex-col gap-2">
+                            <UIText as="p">
+                              Applied to join {applyToJoinActivityName || 'this activity'} (activity).
+                            </UIText>
+                            <Button variant="primary" size="sm" asLink href={applyToJoinReviewPath}>
+                              <UIText>View requests</UIText>
+                            </Button>
+                          </div>
+                        ) : (
+                          <UIText as="p">{message.text}</UIText>
+                        )}
                         {(message as any).isOptimistic && (
                           <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>

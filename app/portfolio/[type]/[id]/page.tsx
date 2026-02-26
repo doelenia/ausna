@@ -1,12 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute } from '@/lib/portfolio/routes'
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, isActivityPortfolio } from '@/types/portfolio'
+import { getCurrentUserPendingActivityRequest } from './actions'
 import { notFound } from 'next/navigation'
 import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { PortfolioView } from '@/components/portfolio/PortfolioView'
 import { getTopInterestedTopics } from '@/lib/indexing/interest-tracking'
 import { checkAdmin } from '@/lib/auth/requireAdmin'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 
 interface PortfolioPageProps {
   params: {
@@ -94,6 +96,11 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
     notFound()
   }
 
+  // Normalize URL: always use slug in visible URL for sharing
+  if (portfolio.slug && id !== portfolio.slug) {
+    redirect(`/portfolio/${type}/${portfolio.slug}`)
+  }
+
   // Check if user is owner - simple comparison (more reliable than separate query)
   // Compare portfolio.user_id with authenticated user.id
   const isOwner = user ? portfolio.user_id === user.id : false
@@ -115,6 +122,13 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
   const adminUser = await checkAdmin()
   const isAdmin = adminUser !== null
 
+  // For activities: whether current user has a pending join request (show "under review" instead of Apply)
+  let hasPendingApplication = false
+  if (user && isActivityPortfolio(portfolio)) {
+    const res = await getCurrentUserPendingActivityRequest(portfolio.id)
+    if (res.success && res.hasPending) hasPendingApplication = true
+  }
+
   return (
     <PortfolioView
       portfolio={portfolio}
@@ -123,6 +137,7 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
       currentUserId={user?.id}
       topInterests={topInterests}
       isAdmin={isAdmin}
+      hasPendingApplication={hasPendingApplication}
     />
   )
 }

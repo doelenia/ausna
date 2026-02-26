@@ -21,7 +21,7 @@ export async function POST(
     }
 
     const { portfolioId } = params
-    const { userId } = await request.json()
+    const { userId, message } = await request.json()
 
     if (!userId) {
       return NextResponse.json(
@@ -62,10 +62,10 @@ export async function POST(
       )
     }
 
-    // Only projects and communities can have managers
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    // Only projects, activities, and communities can have managers
+    if (portfolio.type !== 'projects' && portfolio.type !== 'community' && portfolio.type !== 'activities') {
       return NextResponse.json(
-        { error: 'Only projects and communities can have managers' },
+        { error: 'Only projects, activities, and communities can have managers' },
         { status: 400 }
       )
     }
@@ -138,6 +138,7 @@ export async function POST(
         invitee_id: userId,
         status: 'pending',
         invitation_type: 'manager',
+        message: message && typeof message === 'string' && message.trim().length > 0 ? message.trim() : null,
       })
       .select()
       .single()
@@ -155,12 +156,17 @@ export async function POST(
     const portfolioName = basic.name || 'this portfolio'
 
     // Send invitation message
+    const customMessage =
+      message && typeof message === 'string' && message.trim().length > 0
+        ? `\n\nMessage: ${message.trim()}`
+        : ''
+
     const { error: messageError } = await supabase
       .from('messages')
       .insert({
         sender_id: user.id,
         receiver_id: userId,
-        text: `invited you to become a manager of ${portfolioName} (${portfolio.type === 'projects' ? 'project' : 'community'})`,
+        text: `invited you to become a manager of ${portfolioName} (${portfolio.type === 'projects' ? 'project' : portfolio.type === 'activities' ? 'activity' : 'community'})${customMessage}`,
       })
 
     if (messageError) {

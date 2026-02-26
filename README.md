@@ -74,7 +74,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Next Steps
 
-- Set up your Supabase database schema (profiles table, etc.)
+- Set up your Supabase database schema (including the `portfolios` and related tables)
 - Configure OAuth providers in Supabase dashboard
 - Add your API keys to `.env.local`
 - Start building your social media features!

@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute, getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import Link from 'next/link'
 import { Title, UIText, UserAvatar } from '@/components/ui'
@@ -62,6 +62,11 @@ export default async function FriendsPage({ params }: FriendsPageProps) {
 
   if (!portfolio || !isHumanPortfolio(portfolio)) {
     notFound()
+  }
+
+  // Normalize URL to slug
+  if (portfolio.slug && params.id !== portfolio.slug) {
+    redirect(`/portfolio/human/${portfolio.slug}/friends`)
   }
 
   const basic = getPortfolioBasic(portfolio)

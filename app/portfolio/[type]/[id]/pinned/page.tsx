@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { EditPinnedView } from '@/components/portfolio/EditPinnedView'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { redirect } from 'next/navigation'
 import { Title, UIText } from '@/components/ui'
 
 interface EditPinnedPageProps {
@@ -75,6 +76,11 @@ export default async function EditPinnedPage({ params }: EditPinnedPageProps) {
 
   if (!portfolio) {
     notFound()
+  }
+
+  // Normalize URL to slug
+  if (portfolio.slug && id !== portfolio.slug) {
+    redirect(`/portfolio/${type}/${portfolio.slug}/pinned`)
   }
 
   // Check if user is owner

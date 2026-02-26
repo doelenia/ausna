@@ -5,7 +5,7 @@ import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import Link from 'next/link'
 import { Title, UIText } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 
 interface CommunitiesPageProps {
   params: {
@@ -63,6 +63,11 @@ export default async function CommunitiesPage({ params }: CommunitiesPageProps) 
 
   if (!portfolio || !isHumanPortfolio(portfolio)) {
     notFound()
+  }
+
+  // Normalize URL to slug
+  if (portfolio.slug && params.id !== portfolio.slug) {
+    redirect(`/portfolio/human/${portfolio.slug}/communities`)
   }
 
   const basic = getPortfolioBasic(portfolio)

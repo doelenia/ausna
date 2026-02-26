@@ -72,7 +72,7 @@ export function createHumanPortfolioHelpers(supabase: Client) {
 
       const email = user.email || ''
       const username = email.split('@')[0] || 'user'
-      const fullName = user.user_metadata?.full_name || 
+      const fullName = user.user_metadata?.full_name ||
                        user.user_metadata?.name || 
                        username
 
@@ -100,7 +100,6 @@ export function createHumanPortfolioHelpers(supabase: Client) {
             settings: {},
             username, // Keep for backward compatibility
             email,
-            full_name: fullName,
             avatar_url: user.user_metadata?.avatar_url, // Keep for backward compatibility
           } as HumanPortfolioMetadata,
         } as any)
@@ -159,15 +158,27 @@ export function createHumanPortfolioHelpers(supabase: Client) {
       userId: string,
       username: string
     ): Promise<HumanPortfolio> {
-      return this.updateHumanPortfolioMetadata(userId, { username })
+      // Update slug (canonical username/handle) for the human portfolio
+      const { data, error } = await (supabase
+        .from('portfolios') as any)
+        .update({ slug: username })
+        .eq('user_id', userId)
+        .eq('type', 'human')
+        .select()
+        .single()
+
+      if (error || !data) {
+        throw new Error(error?.message || 'Failed to update username')
+      }
+
+      return data as HumanPortfolio
     },
 
     async getUsername(userId: string): Promise<string | null> {
       const portfolio = await this.getHumanPortfolio(userId)
       if (!portfolio) return null
       
-      const metadata = portfolio.metadata as HumanPortfolioMetadata
-      return metadata.username || null
+      return portfolio.slug || null
     },
   }
 }

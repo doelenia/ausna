@@ -24,26 +24,22 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
     redirect('/')
   }
 
-  // Get source portfolio if provided - must be a project
+  // Get source portfolio if provided - must be a project or activity
   let sourcePortfolio: Portfolio | null = null
   if (searchParams.portfolio) {
     const { data, error } = await supabase
       .from('portfolios')
       .select('*')
       .eq('id', searchParams.portfolio)
-      .eq('type', 'projects')
+      .in('type', ['projects', 'activities'])
       .single()
 
     if (!error && data) {
       sourcePortfolio = data as Portfolio
-      // Verify it's actually a project portfolio
-      if (sourcePortfolio.type !== 'projects') {
-        sourcePortfolio = null
-      }
     }
   }
   
-  // If portfolio was provided but is not a project, redirect
+  // If portfolio was provided but is invalid, redirect
   if (searchParams.portfolio && !sourcePortfolio) {
     redirect('/portfolio')
   }

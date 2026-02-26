@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
+import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio, isActivityPortfolio } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Button, UIText, Dropdown, DropdownItem, Card } from '@/components/ui'
 import { FriendButton } from './FriendButton'
@@ -352,8 +352,8 @@ export function PortfolioActions({
     )
   }
 
-  // Project portfolio - Member view
-  if (isProjectPortfolio(portfolio) && (isOwner || isManager || isMember)) {
+  // Project or Activity portfolio - Member view
+  if ((isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio)) && (isOwner || isManager || isMember)) {
     const dropdownItems: DropdownItem[] = []
     
     if (isOwner || isManager) {
@@ -393,8 +393,8 @@ export function PortfolioActions({
     )
   }
 
-  // Project portfolio - Non-member view
-  if (isProjectPortfolio(portfolio) && !isOwner && !isMember) {
+  // Project or Activity portfolio - Non-member view
+  if ((isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio)) && !isOwner && !isMember) {
     const dropdownItems: DropdownItem[] = []
 
     return (

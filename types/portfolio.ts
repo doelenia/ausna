@@ -6,7 +6,7 @@ export type PortfolioVisibility = 'public' | 'private'
 /**
  * Base portfolio types that all portfolio types extend
  */
-export type PortfolioType = 'human' | 'projects' | 'community'
+export type PortfolioType = 'human' | 'projects' | 'community' | 'activities'
 
 /**
  * Basic metadata fields shared by all portfolios
@@ -95,6 +95,67 @@ export interface ProjectPortfolioProperties {
   location?: ActivityLocationValue
 }
 
+export interface ActivityCallToJoinRoleOption {
+  id: string
+  label: string
+  /**
+   * Internal membership role this option maps to for activities.
+   * Typically 'member' or 'manager', but kept as string for forward compatibility.
+   */
+  activityRole: string
+}
+
+export interface ActivityCallToJoinConfig {
+  enabled: boolean
+  description?: string
+  /**
+   * ISO datetime in UTC after which new applications are closed.
+   */
+  join_by?: string | null
+  /**
+   * Whether applications require explicit approval by owner/manager.
+   */
+  require_approval: boolean
+  /**
+   * Optional question shown to applicants when require_approval is true.
+   */
+  prompt?: string | null
+  /**
+   * Role options applicants can choose from when applying.
+   */
+  roles?: ActivityCallToJoinRoleOption[]
+  /**
+   * If true, the system may auto-adjust join_by when the activity end datetime changes.
+   * Once a user explicitly edits the join_by value, this should be set to false.
+   */
+  join_by_auto_managed?: boolean
+}
+
+/**
+ * Activity portfolio properties template
+ * Mirrors ProjectPortfolioProperties so activities can carry their own
+ * goals, asks, and scheduling/location information.
+ */
+export interface ActivityPortfolioProperties {
+  /** Portfolio IDs of projects that host this activity (owner/managers can add their projects). */
+  host_project_ids?: string[]
+  goals?: string
+  timelines?: string
+  asks?: ProjectPortfolioAsk[]
+  activity_datetime?: {
+    start: string
+    end?: string | null
+    inProgress?: boolean
+    allDay?: boolean
+  }
+  location?: ActivityLocationValue
+  /**
+   * Optional call-to-join configuration controlling how non-members can apply
+   * to join this activity.
+   */
+  call_to_join?: ActivityCallToJoinConfig
+}
+
 /**
  * Project portfolio metadata
  */
@@ -133,6 +194,28 @@ export interface CommunityPortfolioMetadata extends PortfolioMetadata {
 }
 
 /**
+ * Activity portfolio metadata
+ * Closely mirrors ProjectPortfolioMetadata but is associated with
+ * a host project via portfolios.host_project_id at the table level.
+ */
+export interface ActivityPortfolioMetadata extends PortfolioMetadata {
+  members: string[]
+  managers: string[]
+  project_type_general?: string
+  project_type_specific?: string
+  memberRoles?: { [userId: string]: string }
+  technologies?: string[]
+  github_url?: string
+  live_url?: string
+  status?: 'idea' | 'in-progress' | 'completed' | 'archived'
+  collaborators?: string[]
+  start_date?: string
+  end_date?: string
+  properties?: ActivityPortfolioProperties
+  [key: string]: any
+}
+
+/**
  * Base portfolio interface - common fields for all portfolio types
  */
 export interface BasePortfolio {
@@ -140,6 +223,7 @@ export interface BasePortfolio {
   type: PortfolioType
   slug: string
   user_id: string
+  host_project_id?: string | null
   created_at: string
   updated_at: string
   metadata: Json
@@ -160,6 +244,11 @@ export interface ProjectPortfolio extends BasePortfolio {
   metadata: ProjectPortfolioMetadata
 }
 
+export interface ActivityPortfolio extends BasePortfolio {
+  type: 'activities'
+  metadata: ActivityPortfolioMetadata
+}
+
 export interface CommunityPortfolio extends BasePortfolio {
   type: 'community'
   metadata: CommunityPortfolioMetadata
@@ -168,7 +257,11 @@ export interface CommunityPortfolio extends BasePortfolio {
 /**
  * Union type for all portfolio types
  */
-export type Portfolio = HumanPortfolio | ProjectPortfolio | CommunityPortfolio
+export type Portfolio =
+  | HumanPortfolio
+  | ProjectPortfolio
+  | ActivityPortfolio
+  | CommunityPortfolio
 
 /**
  * Type guard functions
@@ -179,6 +272,10 @@ export function isHumanPortfolio(portfolio: Portfolio): portfolio is HumanPortfo
 
 export function isProjectPortfolio(portfolio: Portfolio): portfolio is ProjectPortfolio {
   return portfolio.type === 'projects'
+}
+
+export function isActivityPortfolio(portfolio: Portfolio): portfolio is ActivityPortfolio {
+  return portfolio.type === 'activities'
 }
 
 export function isCommunityPortfolio(portfolio: Portfolio): portfolio is CommunityPortfolio {

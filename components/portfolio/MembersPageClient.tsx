@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
+import { approveActivityJoinRequest, respondToActivityJoinRequest } from '@/app/portfolio/[type]/[id]/actions'
 
 interface UserInfo {
   id: string
@@ -16,6 +17,16 @@ interface UserInfo {
   role?: string | null
 }
 
+interface ActivityJoinRequest {
+  id: string
+  applicant: UserInfo
+  status: string
+  createdAt: string
+  promptAnswer: string | null
+  activityRole: string | null
+  respondedAt?: string | null
+}
+
 interface MembersPageClientProps {
   portfolioId: string
   portfolioName: string
@@ -25,6 +36,9 @@ interface MembersPageClientProps {
   subscriberDetails: UserInfo[]
   canManage: boolean
   currentUserId?: string
+  joinRequests?: ActivityJoinRequest[]
+  /** When e.g. ?tab=requests is in the URL, open directly to that tab */
+  initialTab?: 'members' | 'subscribers' | 'requests'
 }
 
 export function MembersPageClient({
@@ -36,8 +50,13 @@ export function MembersPageClient({
   subscriberDetails,
   canManage,
   currentUserId,
+  joinRequests = [],
+  initialTab = 'members',
 }: MembersPageClientProps) {
-  const [activeTab, setActiveTab] = useState<'members' | 'subscribers'>('members')
+  const [activeTab, setActiveTab] = useState<'members' | 'subscribers' | 'requests'>(initialTab)
+  useEffect(() => {
+    setActiveTab(initialTab)
+  }, [initialTab])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<UserInfo[]>([])
   const [searching, setSearching] = useState(false)
@@ -46,12 +65,17 @@ export function MembersPageClient({
   const [invitedManagers, setInvitedManagers] = useState<Set<string>>(new Set())
   const [removing, setRemoving] = useState<string | null>(null)
   const [inviteRoleInputs, setInviteRoleInputs] = useState<{ [userId: string]: string }>({})
+  const [inviteMessageInputs, setInviteMessageInputs] = useState<{ [userId: string]: string }>({})
   const [members, setMembers] = useState(memberDetails)
   const [showCreatorTransfer, setShowCreatorTransfer] = useState(false)
   const [newCreatorId, setNewCreatorId] = useState<string>('')
   const [editingRole, setEditingRole] = useState<string | null>(null)
   const [roleInputs, setRoleInputs] = useState<{ [userId: string]: string }>({})
   const router = useRouter()
+  const [processingRequestId, setProcessingRequestId] = useState<string | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
+  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null)
+  const [respondMessage, setRespondMessage] = useState('')
   
   // Filter members to separate creators, managers, and regular members
   const creator = creatorInfo
@@ -159,18 +183,28 @@ export function MembersPageClient({
   const handleInvite = async (userId: string, role: string = 'Member') => {
     setInviting(userId)
     try {
+      const message = inviteMessageInputs[userId] || ''
       const response = await fetch(`/api/portfolios/${portfolioId}/members/invite`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ userId, role }),
+        body: JSON.stringify({
+          userId,
+          role,
+          message: message.trim().length > 0 ? message.trim() : undefined,
+        }),
       })
 
       if (response.ok) {
         alert('Invitation sent successfully!')
         setSearchQuery('')
         setSearchResults([])
+        setInviteMessageInputs((prev) => {
+          const next = { ...prev }
+          delete next[userId]
+          return next
+        })
       } else {
         const data = await response.json()
         alert(data.error || 'Failed to send invitation')
@@ -376,6 +410,23 @@ export function MembersPageClient({
         >
           <UIText as="span">Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
         </button>
+        {portfolioType === 'activities' && canManage && (
+          <button
+            onClick={(e) => {
+              e.preventDefault()
+              setActiveTab('requests')
+            }}
+            className={`pb-2 px-1 border-b-2 transition-colors ${
+              activeTab === 'requests'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <UIText as="span">
+              Requests &amp; Invites {joinRequests.length > 0 && `(${joinRequests.length})`}
+            </UIText>
+          </button>
+        )}
       </div>
 
       {/* Members Tab */}
@@ -433,6 +484,16 @@ export function MembersPageClient({
                       placeholder="Role (max 2 words)"
                       maxLength={50}
                       className="px-2 py-1 text-sm border border-gray-300 rounded w-32"
+                    />
+                    <input
+                      type="text"
+                      value={inviteMessageInputs[user.id] || ''}
+                      onChange={(e) =>
+                        setInviteMessageInputs({ ...inviteMessageInputs, [user.id]: e.target.value })
+                      }
+                      placeholder="Message (optional)"
+                      maxLength={200}
+                      className="px-2 py-1 text-sm border border-gray-300 rounded w-48"
                     />
                     <Button
                       variant="primary"
@@ -650,6 +711,198 @@ export function MembersPageClient({
                   </Link>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Requests Tab (activities only, managers/owner) */}
+      {activeTab === 'requests' && portfolioType === 'activities' && canManage && (
+        <div>
+          <div className="mb-3 flex items-center gap-2 flex-wrap">
+            <UIText as="h2">Join requests {joinRequests.length > 0 && `(${joinRequests.length})`}</UIText>
+            {(() => {
+              const unprocessed = joinRequests.filter((r) => r.status === 'pending' && !r.respondedAt).length
+              return unprocessed > 0 ? (
+                <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium">
+                  {unprocessed}
+                </span>
+              ) : null
+            })()}
+          </div>
+          {requestError && (
+            <Content className="mb-2 text-red-600">{requestError}</Content>
+          )}
+          {joinRequests.length === 0 ? (
+            <div>
+              <UIText>No join requests yet</UIText>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {joinRequests.map((req) => {
+                const { applicant } = req
+                const displayName = getDisplayName(applicant)
+                const isUnprocessed = req.status === 'pending' && !req.respondedAt
+                const statusLabel =
+                  req.status === 'pending'
+                    ? req.respondedAt
+                      ? 'Pending (responded)'
+                      : 'Pending'
+                    : req.status === 'approved'
+                    ? 'Approved'
+                    : req.status === 'rejected'
+                    ? 'Rejected'
+                    : req.status
+
+                const handleApprove = async () => {
+                  setProcessingRequestId(req.id)
+                  setRequestError(null)
+                  try {
+                    const result = await approveActivityJoinRequest(req.id)
+                    if (!result || !result.success) {
+                      setRequestError(result?.error || 'Failed to approve request')
+                      return
+                    }
+                    router.refresh()
+                  } catch (error) {
+                    console.error('Error approving join request:', error)
+                    setRequestError('An unexpected error occurred while approving request')
+                  } finally {
+                    setProcessingRequestId(null)
+                  }
+                }
+
+                const handleOpenRespond = () => {
+                  setRespondingRequestId(req.id)
+                  setRespondMessage('')
+                  setRequestError(null)
+                }
+
+                const handleSendRespond = async () => {
+                  if (!respondingRequestId || respondingRequestId !== req.id) return
+                  setProcessingRequestId(req.id)
+                  setRequestError(null)
+                  try {
+                    const result = await respondToActivityJoinRequest(respondingRequestId, respondMessage)
+                    if (!result || !result.success) {
+                      setRequestError(result?.error || 'Failed to send message')
+                      return
+                    }
+                    setRespondingRequestId(null)
+                    setRespondMessage('')
+                    router.refresh()
+                  } catch (error) {
+                    console.error('Error responding to join request:', error)
+                    setRequestError('An unexpected error occurred')
+                  } finally {
+                    setProcessingRequestId(null)
+                  }
+                }
+
+                return (
+                  <div
+                    key={req.id}
+                    className="flex flex-col gap-2 p-3 bg-gray-50 rounded-md"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="relative flex-shrink-0">
+                          <img
+                            src={getAvatarUrl(applicant)}
+                            alt={displayName}
+                            className="h-10 w-10 rounded-full"
+                          />
+                          {isUnprocessed && (
+                            <span
+                              className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-blue-600 border-2 border-white"
+                              title="Unprocessed application"
+                              aria-hidden
+                            />
+                          )}
+                        </div>
+                        <div>
+                          <UIText as="div">{displayName}</UIText>
+                          {applicant.username && (
+                            <UIText as="div">@{applicant.username}</UIText>
+                          )}
+                          <UIText as="div" className="text-gray-600 text-xs mt-1">
+                            {statusLabel} ·{' '}
+                            {new Date(req.createdAt).toLocaleString()}
+                          </UIText>
+                          {req.activityRole && (
+                            <UIText as="div" className="text-gray-600 text-xs mt-1">
+                              Requested as: {req.activityRole}
+                            </UIText>
+                          )}
+                        </div>
+                      </div>
+                      {req.status === 'pending' && (
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={handleOpenRespond}
+                            disabled={processingRequestId === req.id}
+                          >
+                            <UIText>Respond</UIText>
+                          </Button>
+                          <Button
+                            variant="success"
+                            size="sm"
+                            onClick={handleApprove}
+                            disabled={processingRequestId === req.id}
+                          >
+                            <UIText>
+                              {processingRequestId === req.id
+                                ? 'Processing...'
+                                : 'Approve'}
+                            </UIText>
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                    {respondingRequestId === req.id && (
+                      <div className="mt-2 p-2 bg-white rounded border border-gray-200 flex flex-col gap-2">
+                        <UIText as="label">Message to applicant</UIText>
+                        <textarea
+                          value={respondMessage}
+                          onChange={(e) => setRespondMessage(e.target.value)}
+                          placeholder="Optional: add a message (e.g. asking for more info)"
+                          className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded-md text-sm"
+                          rows={3}
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={handleSendRespond}
+                            disabled={processingRequestId === req.id}
+                          >
+                            <UIText>{processingRequestId === req.id ? 'Sending...' : 'Send'}</UIText>
+                          </Button>
+                          <Button
+                            variant="text"
+                            size="sm"
+                            onClick={() => {
+                              setRespondingRequestId(null)
+                              setRespondMessage('')
+                            }}
+                          >
+                            <UIText>Cancel</UIText>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {req.promptAnswer && (
+                      <div className="mt-1">
+                        <UIText className="text-gray-700 text-sm">
+                          Answer: {req.promptAnswer}
+                        </UIText>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

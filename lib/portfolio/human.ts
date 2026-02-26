@@ -70,7 +70,6 @@ export async function ensureHumanPortfolio(userId: string): Promise<HumanPortfol
         settings: {},
         username, // Keep for backward compatibility
         email,
-        full_name: fullName,
         avatar_url: currentUser?.user_metadata?.avatar_url, // Keep for backward compatibility
       } as HumanPortfolioMetadata,
     })
@@ -130,7 +129,21 @@ export async function updateHumanPortfolioUsername(
   userId: string,
   username: string
 ): Promise<HumanPortfolio> {
-  return updateHumanPortfolioMetadata(userId, { username })
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('portfolios')
+    .update({ slug: username })
+    .eq('user_id', userId)
+    .eq('type', 'human')
+    .select()
+    .single()
+
+  if (error || !data) {
+    throw new Error(`Failed to update human portfolio username: ${error?.message}`)
+  }
+
+  return data as HumanPortfolio
 }
 
 /**
@@ -140,8 +153,7 @@ export async function getUsername(userId: string): Promise<string | null> {
   const portfolio = await getHumanPortfolio(userId)
   if (!portfolio) return null
   
-  const metadata = portfolio.metadata as HumanPortfolioMetadata
-  return metadata.username || null
+  return portfolio.slug || null
 }
 
 /**

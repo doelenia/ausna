@@ -1,6 +1,6 @@
 'use client'
 
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, isActivityPortfolio, ActivityCallToJoinConfig } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
@@ -10,16 +10,18 @@ import { StickerAvatar } from './StickerAvatar'
 import { CommunityMembersGrid } from './CommunityMembersGrid'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { deletePortfolio, getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
+import { deletePortfolio, getSubPortfolios, applyToActivityCallToJoin, updateActivityCallToJoin, getPendingJoinRequestsCount } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar, Card } from '@/components/ui'
-import { Apple, ChevronRight, BadgeCheck, Lock } from 'lucide-react'
+import { Apple, ChevronRight, BadgeCheck, Lock, Megaphone, Timer, History } from 'lucide-react'
+import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
 import { formatActivityRange, getActivityIconParts } from '@/lib/formatActivityDateTime'
 import { isActivityLive } from '@/lib/activityLive'
+import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
 import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationBadge } from './ActivityLocationBadge'
 
@@ -34,9 +36,11 @@ interface PortfolioViewProps {
   currentUserId?: string
   topInterests?: Array<{ topic: Topic; memory_score: number; aggregate_score: number }>
   isAdmin?: boolean
+  /** When true, current user has applied and request is pending; show "under review" instead of description + Apply */
+  hasPendingApplication?: boolean
 }
 
-export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [], isAdmin = false }: PortfolioViewProps) {
+export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [], isAdmin = false, hasPendingApplication = false }: PortfolioViewProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
@@ -55,6 +59,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [communitiesLoading, setCommunitiesLoading] = useState(false)
   const [totalMutualCommunities, setTotalMutualCommunities] = useState<number>(0)
   const involvementScrollRef = useRef<HTMLDivElement | null>(null)
+  const activitiesScrollRef = useRef<HTMLDivElement | null>(null)
+  const [activities, setActivities] = useState<
+    Array<{ id: string; name: string; avatar?: string; emoji?: string; hostProjectName?: string | null }>
+  >([])
+  const [activitiesLoading, setActivitiesLoading] = useState(false)
+  const [activityHostProjects, setActivityHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState<number | null>(null)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
   
@@ -94,8 +105,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
         // Only trust server check if it matches client check, otherwise use client check
         setIsOwner(clientIsOwner && (serverIsOwner || clientIsOwner))
         
-        // Check if user is a manager or member (for project/community portfolios)
-        if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) {
+        // Check if user is a manager or member (for project/community/activity portfolios)
+        if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio) || isActivityPortfolio(portfolio)) {
           const metadata = portfolio.metadata as any
           const managers = metadata?.managers || []
           const members = metadata?.members || []
@@ -204,10 +215,150 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     fetchProjects()
   }, [portfolio.id, portfolio.type, supabase])
 
-  // Fetch member avatars for projects and communities
+  // Fetch activities for human and project portfolios (for all visitors)
+  useEffect(() => {
+    const fetchActivities = async () => {
+      if (!isHumanPortfolio(portfolio) && !isProjectPortfolio(portfolio)) {
+        return
+      }
+
+      setActivitiesLoading(true)
+      try {
+        if (isHumanPortfolio(portfolio)) {
+          // Activities where this human is a member/manager/owner
+          const ownerId = portfolio.user_id
+          const { data: allActivities } = await supabase
+            .from('portfolios')
+            .select('id, user_id, metadata, type')
+            .eq('type', 'activities')
+            .order('created_at', { ascending: false })
+
+          if (!allActivities || allActivities.length === 0) {
+            setActivities([])
+            setActivitiesLoading(false)
+            return
+          }
+
+          const userActivities = (allActivities as any[]).filter((p: any) => {
+            const meta = p.metadata as any
+            const managers: string[] = meta?.managers || []
+            const members: string[] = meta?.members || []
+            const isOwner = p.user_id === ownerId
+            const isManager = Array.isArray(managers) && managers.includes(ownerId)
+            const isMember = Array.isArray(members) && members.includes(ownerId)
+            return isOwner || isManager || isMember
+          })
+
+          const mapped = userActivities.map((p: any) => {
+            const meta = p.metadata as any
+            const basic = meta?.basic || {}
+            return {
+              id: p.id as string,
+              name: (basic.name as string) || 'Activity',
+              avatar: basic.avatar as string | undefined,
+              emoji: basic.emoji as string | undefined,
+              hostProjectName: null,
+            }
+          })
+
+          setActivities(mapped)
+        } else if (isProjectPortfolio(portfolio)) {
+          // Activities hosted by this project
+          const { data: hosted } = await supabase
+            .from('portfolios')
+            .select('id, metadata, host_project_id')
+            .eq('type', 'activities')
+            .eq('host_project_id', portfolio.id)
+            .order('created_at', { ascending: false })
+
+          if (!hosted || hosted.length === 0) {
+            setActivities([])
+            setActivitiesLoading(false)
+            return
+          }
+
+          const mapped = (hosted as any[]).map((p: any) => {
+            const meta = p.metadata as any
+            const basic = meta?.basic || {}
+            return {
+              id: p.id as string,
+              name: (basic.name as string) || 'Activity',
+              avatar: basic.avatar as string | undefined,
+              emoji: basic.emoji as string | undefined,
+              hostProjectName: basic.name as string | undefined,
+            }
+          })
+
+          setActivities(mapped)
+        }
+      } catch (error) {
+        console.error('Failed to fetch activities:', error)
+        setActivities([])
+      } finally {
+        setActivitiesLoading(false)
+      }
+    }
+
+    fetchActivities()
+  }, [portfolio, supabase])
+
+  // Fetch host project details for activity view (for host project pills)
+  useEffect(() => {
+    if (!isActivityPortfolio(portfolio)) {
+      setActivityHostProjects([])
+      return
+    }
+    const props = (portfolio.metadata as any)?.properties
+    const ids = (props?.host_project_ids as string[] | undefined) || ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
+    if (ids.length === 0) {
+      setActivityHostProjects([])
+      return
+    }
+    let cancelled = false
+    const load = async () => {
+      const { data: projects } = await supabase
+        .from('portfolios')
+        .select('id, metadata')
+        .eq('type', 'projects')
+        .in('id', ids)
+      if (cancelled || !projects?.length) {
+        if (!cancelled) setActivityHostProjects([])
+        return
+      }
+      const list = projects.map((p: any) => {
+        const basic = (p.metadata as any)?.basic || {}
+        return {
+          id: p.id,
+          name: (basic.name as string) || 'Project',
+          avatar: basic.avatar as string | undefined,
+          emoji: basic.emoji as string | undefined,
+        }
+      })
+      if (!cancelled) setActivityHostProjects(list)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [portfolio, supabase])
+
+  // Pending join requests count for activity owner/manager (call-to-join card badge)
+  useEffect(() => {
+    if (!isActivityPortfolio(portfolio) || (!isOwner && !isManager)) {
+      setPendingJoinRequestsCount(null)
+      return
+    }
+    let cancelled = false
+    getPendingJoinRequestsCount(portfolio.id).then((res) => {
+      if (!cancelled && res.success && res.count !== undefined) {
+        setPendingJoinRequestsCount(res.count)
+      }
+    })
+    return () => { cancelled = true }
+  }, [portfolio, isOwner, isManager])
+
+  // Fetch member avatars for projects, activities, and communities
   useEffect(() => {
     const fetchMemberAvatars = async () => {
-      if (!isProjectPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
+      if (!isProjectPortfolio(portfolio) && !isActivityPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
         return
       }
 
@@ -510,6 +661,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
   const [openActivityOnEdit, setOpenActivityOnEdit] = useState(false)
   const [openLocationOnEdit, setOpenLocationOnEdit] = useState(false)
+  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false)
+  const [applyPromptAnswer, setApplyPromptAnswer] = useState('')
+  const [applySelectedRoleId, setApplySelectedRoleId] = useState<string | undefined>(undefined)
+  const [isApplying, setIsApplying] = useState(false)
+  const [applyFeedback, setApplyFeedback] = useState<string | null>(null)
+  const [isEditingCallToJoin, setIsEditingCallToJoin] = useState(false)
+  const [editCallToJoinDraft, setEditCallToJoinDraft] = useState<ActivityCallToJoinConfig | null>(null)
 
   if (isEditing) {
     return (
@@ -536,9 +694,15 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const members = metadata?.members || []
   const managers = metadata?.managers || []
   const projectStatus = metadata?.status as string | undefined
+  const activityProperties: Record<string, any> | undefined = (metadata as any)?.properties
+  const activityCallToJoin: ActivityCallToJoinConfig | null =
+    activityProperties?.call_to_join || null
+  const activityHostProjectIds: string[] =
+    (activityProperties?.host_project_ids as string[] | undefined) ||
+    ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
 
   // Determine tab label based on portfolio type
-  const tabLabel = isHumanPortfolio(portfolio) ? 'Involvement' : 'Navigations'
+  const tabLabel = isHumanPortfolio(portfolio) ? 'Projects' : 'Navigations'
 
   return (
     <>
@@ -588,7 +752,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )}
             </div>
 
-            {/* Name, Verified Badge, LIVE pill, Visibility, and Project Type */}
+            {/* Name, Verified Badge, LIVE pill, Visibility, and Project/Activity Type */}
             <div className="flex items-baseline gap-3 mb-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <Title as="h1">{basic.name}</Title>
@@ -614,7 +778,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     return null
                   })()}
               </div>
-              {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
+              {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio) || isActivityPortfolio(portfolio)) && (() => {
                 const metadata = portfolio.metadata as any
                 const projectTypeSpecific = metadata?.project_type_specific
                 if (projectTypeSpecific) {
@@ -626,19 +790,77 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 }
                 return null
               })()}
-              {isProjectPortfolio(portfolio) && (() => {
-                const props = (portfolio.metadata as any)?.properties
+              {(isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio)) && (() => {
+                const metadataAny = portfolio.metadata as any
+                const props = metadataAny?.properties
                 const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
                 const hasActivity = !!activity && !!activity.start
-                const effectiveStatus =
-                  projectStatus || (!hasActivity ? 'in-progress' : undefined)
-                const live = isActivityLive(activity, effectiveStatus)
-                if (!live) return null
+                const status = metadataAny?.status as string | undefined || null
+
+                if (!hasActivity) return null
+
+                const live = isActivityLive(activity, status)
+                if (live) {
+                  return (
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      <UIText as="span" className="text-[11px] text-black leading-none">
+                        LIVE
+                      </UIText>
+                    </div>
+                  )
+                }
+
+                const now = new Date()
+                const start = activity?.start ? new Date(activity.start) : null
+                const end = activity?.end ? new Date(activity.end) : null
+                const validStart = start && !Number.isNaN(start.getTime()) ? start : null
+                const validEnd = end && !Number.isNaN(end.getTime()) ? end : null
+
+                let label: string | null = null
+                let isUpcoming = false
+                let target: Date | null = null
+
+                if (status === 'archived') {
+                  label = 'past event'
+                } else if (validStart) {
+                  // Determine upcoming vs past using start/end
+                  if (now < validStart) {
+                    isUpcoming = true
+                    target = validStart
+                  } else {
+                    const pastTarget = validEnd || validStart
+                    if (now > pastTarget) {
+                      target = pastTarget
+                    }
+                  }
+                }
+
+                if (!label && target) {
+                  if (isUpcoming) {
+                    const relative = formatDistanceToNowStrict(target, { addSuffix: true })
+                    label = relative
+                  } else {
+                    label = 'activity ended'
+                  }
+                }
+
+                if (!label) return null
+
                 return (
                   <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                    <UIText as="span" className="text-[11px] text-black leading-none">
-                      LIVE
+                    {isUpcoming ? (
+                      <Timer className="w-3 h-3 text-blue-600 flex-shrink-0" aria-hidden />
+                    ) : (
+                      <History className="w-3 h-3 text-gray-500 flex-shrink-0" aria-hidden />
+                    )}
+                    <UIText
+                      as="span"
+                      className={`text-[11px] leading-none ${
+                        isUpcoming ? 'text-blue-600' : 'text-gray-700'
+                      }`}
+                    >
+                      {label}
                     </UIText>
                   </div>
                 )
@@ -653,8 +875,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               <Content className="mb-4">{basic.description}</Content>
             )}
 
-            {/* Activity datetime & location badges (projects) */}
-            {isProjectPortfolio(portfolio) && (() => {
+            {/* Activity datetime & location badges (activities) */}
+            {isActivityPortfolio(portfolio) && (() => {
               const props = (portfolio.metadata as any)?.properties
               const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
               const location = props?.location as ActivityLocationValue | undefined
@@ -664,7 +886,6 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
               if (!hasActivity && !hasLocation) return null
 
-              // Edit buttons only for portfolio owner or project manager; site admin is treated like a normal user here
               const canEditActivity = isOwner || isManager
               const canEditLocation = isOwner || isManager
               const canSeeFullLocation = isOwner || isManager || isMember || isAdmin
@@ -726,14 +947,127 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                               }
                             : undefined
                         }
-                        // Always provide onClick so public addresses can open Maps
-                        // even for visitors; privacy is enforced inside the badge.
                         onClick={handleLocationClick}
                         onUnauthorizedClick={!canSeeFullLocation ? handleUnauthorizedClick : undefined}
                       />
                     </div>
                   )}
                 </div>
+              )
+            })()}
+
+            {/* Activity Call-to-Join Card (activities only; on when not private) */}
+            {isActivityPortfolio(portfolio) && activityCallToJoin && (portfolio as any).visibility !== 'private' && (() => {
+              const config = activityCallToJoin
+              const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+              const activityDateTime = (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null
+              const joinWindowOpen = isCallToJoinWindowOpen(visibility, config, activityDateTime, projectStatus)
+              const joinByDate = config.join_by ? new Date(config.join_by) : null
+
+              const canSeeOwnerManagerCard = (isOwner || isManager)
+              const canApplyAsVisitor =
+                !isOwner &&
+                !isManager &&
+                !isMember &&
+                isAuthenticated &&
+                joinWindowOpen
+
+              if (!canSeeOwnerManagerCard && !canApplyAsVisitor) {
+                return null
+              }
+
+              const roles = config.roles || []
+
+              const handleOpenApply = () => {
+                if (!isAuthenticated) {
+                  router.push('/login')
+                  return
+                }
+                setApplyFeedback(null)
+                setApplyPromptAnswer('')
+                setApplySelectedRoleId(roles[0]?.id)
+                setIsApplyModalOpen(true)
+              }
+
+              const handleOpenEdit = () => {
+                setEditCallToJoinDraft({
+                  enabled: config.enabled !== false,
+                  description: config.description,
+                  join_by: config.join_by ?? null,
+                  require_approval: config.require_approval ?? true,
+                  prompt: config.prompt ?? null,
+                  roles: roles.length > 0 ? roles : [
+                    { id: 'default-member', label: 'Member', activityRole: 'member' },
+                  ],
+                  join_by_auto_managed: config.join_by_auto_managed ?? true,
+                })
+                setIsEditingCallToJoin(true)
+              }
+
+              const membersRequestsUrl = `${getPortfolioUrl(portfolio.type, portfolio.id)}/members?tab=requests`
+              const pendingCount = pendingJoinRequestsCount ?? 0
+
+              return (
+                <>
+                  <Card variant="subtle" padding="sm" className="mb-4 self-start">
+                    <div className="flex flex-col gap-1.5 text-left">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-shrink-0">
+                          <Megaphone className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden />
+                          <UIText as="span" className="text-gray-600">
+                            Call to join
+                          </UIText>
+                        </div>
+                        {canSeeOwnerManagerCard && (
+                          <div className="flex items-center gap-2 flex-wrap justify-end">
+                            {pendingCount > 0 && (
+                              <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium">
+                                {pendingCount}
+                              </span>
+                            )}
+                            <Button variant="secondary" size="sm" onClick={handleOpenEdit}>
+                              <UIText>Edit</UIText>
+                            </Button>
+                            <Button variant="secondary" size="sm" asLink href={membersRequestsUrl}>
+                              <UIText>Manage requests</UIText>
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      {hasPendingApplication ? (
+                        <Content className="my-1.5">
+                          Your application is received and under review.
+                        </Content>
+                      ) : (
+                        <>
+                          <Content className="my-1.5">
+                            {config.description?.trim() || 'Join this activity.'}
+                          </Content>
+                          {(canApplyAsVisitor || (!canSeeOwnerManagerCard && !joinWindowOpen)) && (
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {canApplyAsVisitor && (
+                                <Button
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={handleOpenApply}
+                                  disabled={!joinWindowOpen}
+                                >
+                                  <UIText>Apply to join</UIText>
+                                </Button>
+                              )}
+                              {!canApplyAsVisitor && !joinWindowOpen && (
+                                <UIText className="text-gray-500">Join window closed</UIText>
+                              )}
+                              {applyFeedback && (
+                                <UIText className="text-gray-600">{applyFeedback}</UIText>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </Card>
+                </>
               )
             })()}
 
@@ -858,95 +1192,97 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               </div>
             )}
 
-            {/* Members Section - Projects and Communities */}
-            {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
+            {/* Members Section - Projects, Activities, and Communities */}
+            {(isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
               // Combine all members: creator, managers, members
               const allMemberIds: string[] = []
-              
-              // Add creator
               allMemberIds.push(portfolio.user_id)
-              
-              // Add managers (excluding creator)
               managers.forEach((managerId: string) => {
-                if (managerId !== portfolio.user_id) {
-                  allMemberIds.push(managerId)
-                }
+                if (managerId !== portfolio.user_id) allMemberIds.push(managerId)
               })
-              
-              // Add members (excluding creator and managers)
               members.forEach((memberId: string) => {
-                if (memberId !== portfolio.user_id && !managers.includes(memberId)) {
-                  allMemberIds.push(memberId)
-                }
+                if (memberId !== portfolio.user_id && !managers.includes(memberId)) allMemberIds.push(memberId)
               })
-              
-              // Only show section if there are members
-              if (allMemberIds.length === 0) {
-                return null
-              }
-              
               const totalMembers = allMemberIds.length
-              
+              const hasMembers = totalMembers > 0
+              const hasHostProjects = isActivityPortfolio(portfolio) && activityHostProjects.length > 0
+
+              if (!hasMembers && !hasHostProjects) return null
+
               return (
-                <div className="mb-4">
-                  {memberAvatarsLoading ? (
-                    <UIText className="text-gray-500">Loading members...</UIText>
-                  ) : (
-                    <Link
-                      href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
-                      className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
-                      title="View all members"
-                    >
-                      {(() => {
-                        // Create member info array with avatars
-                        const memberInfo = allMemberIds.map((memberId: string) => {
-                          const avatarInfo = memberAvatars.find(m => m.id === memberId)
-                          return {
-                            id: memberId,
-                            avatar: avatarInfo?.avatar || null,
-                            name: avatarInfo?.name || null,
-                          }
-                        })
-                        
-                        // Sort: current user first if they're a member
-                        const sortedMembers = [...memberInfo].sort((a, b) => {
-                          if (currentUserId && a.id === currentUserId) return -1
-                          if (currentUserId && b.id === currentUserId) return 1
-                          return 0
-                        })
-                        
-                        // Limit to 5
-                        const displayMembers = sortedMembers.slice(0, 5)
-                        
-                        return (
-                          <div className="flex items-center gap-2">
-                            {/* Stacked member avatars */}
-                            <div className="flex -space-x-2">
-                              {displayMembers.map((member, index) => (
-                                <div
-                                  key={member.id}
-                                  className="relative"
-                                  style={{ zIndex: displayMembers.length - index }}
-                                >
-                                  <UserAvatar
-                                    userId={member.id}
-                                    name={member.name}
-                                    avatar={member.avatar}
-                                    size={32}
-                                    showLink={false}
-                                  />
-                                </div>
-                              ))}
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  {hasMembers && (
+                    memberAvatarsLoading ? (
+                      <div className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100">
+                        <UIText className="text-gray-500">Loading members...</UIText>
+                      </div>
+                    ) : (
+                      <Link
+                        href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
+                        className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
+                        title="View all members"
+                      >
+                        {(() => {
+                          const memberInfo = allMemberIds.map((memberId: string) => {
+                            const avatarInfo = memberAvatars.find(m => m.id === memberId)
+                            return { id: memberId, avatar: avatarInfo?.avatar || null, name: avatarInfo?.name || null }
+                          })
+                          const sortedMembers = [...memberInfo].sort((a, b) => {
+                            if (currentUserId && a.id === currentUserId) return -1
+                            if (currentUserId && b.id === currentUserId) return 1
+                            return 0
+                          })
+                          const displayMembers = sortedMembers.slice(0, 5)
+                          return (
+                            <div className="flex items-center gap-2">
+                              <div className="flex -space-x-2">
+                                {displayMembers.map((member, index) => (
+                                  <div key={member.id} className="relative" style={{ zIndex: displayMembers.length - index }}>
+                                    <UserAvatar userId={member.id} name={member.name} avatar={member.avatar} size={32} showLink={false} />
+                                  </div>
+                                ))}
+                              </div>
+                              <UIText className="text-gray-600">
+                                {totalMembers} {totalMembers === 1 ? 'member' : 'members'}
+                              </UIText>
                             </div>
-                            {/* Member count text */}
-                            <UIText className="text-gray-600">
-                              {totalMembers}{' '}
-                              {totalMembers === 1 ? 'member' : 'members'}
-                            </UIText>
-                          </div>
-                        )
-                      })()}
-                    </Link>
+                          )
+                        })()}
+                      </Link>
+                    )
+                  )}
+                  {/* Host projects pill (activities only) — same look as community pill */}
+                  {hasHostProjects && (
+                    <div
+                      className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+                      title={activityHostProjects.length === 1 ? activityHostProjects[0].name : `Hosted by ${activityHostProjects.length} projects`}
+                    >
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {activityHostProjects.slice(0, 5).map((proj) => (
+                          <Link
+                            key={proj.id}
+                            href={getPortfolioUrl('projects', proj.id)}
+                            className="block hover:opacity-90"
+                          >
+                            <StickerAvatar
+                              src={proj.avatar}
+                              alt={proj.name}
+                              type="projects"
+                              size={34}
+                              emoji={proj.emoji}
+                              name={proj.name}
+                              normalizeScale={1.0}
+                              variant="mini"
+                            />
+                          </Link>
+                        ))}
+                      </div>
+                      <UIText className="text-gray-600 whitespace-nowrap">
+                        {activityHostProjects.length === 1
+                          ? `hosted by ${activityHostProjects[0].name}`
+                          : `hosted by ${activityHostProjects.length} projects`}
+                      </UIText>
+                    </div>
                   )}
                 </div>
               )
@@ -974,7 +1310,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             <div className="mt-4 mb-8 group">
               <div className="flex items-center gap-2 mb-4">
                 <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                <UIText>Involvement</UIText>
+                <UIText>Projects</UIText>
               </div>
               <div className="relative">
                 {/* Horizontal scroll buttons for mouse users */}
@@ -1118,6 +1454,84 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
           )}
 
+          {/* Activities Row (for all visitors, human and project portfolios) */}
+          {(isHumanPortfolio(portfolio) || isProjectPortfolio(portfolio)) && activities.length > 0 && (
+            <div className="mt-4 mb-8 group">
+              <div className="flex items-center gap-2 mb-4">
+                <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                <UIText>Activities</UIText>
+              </div>
+              <div className="relative">
+                <button
+                  type="button"
+                  className="hidden group-hover:flex items-center justify-center absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
+                  onClick={() => {
+                    if (activitiesScrollRef.current) {
+                      activitiesScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' })
+                    }
+                  }}
+                >
+                  <ChevronRight className="w-5 h-5 rotate-180 text-gray-700" strokeWidth={1.5} />
+                </button>
+                <button
+                  type="button"
+                  className="hidden group-hover:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
+                  onClick={() => {
+                    if (activitiesScrollRef.current) {
+                      activitiesScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' })
+                    }
+                  }}
+                >
+                  <ChevronRight className="w-5 h-5 text-gray-700" strokeWidth={1.5} />
+                </button>
+                <div
+                  ref={activitiesScrollRef}
+                  className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth"
+                >
+                  {activitiesLoading ? (
+                    <UIText className="text-gray-500">Loading activities...</UIText>
+                  ) : (
+                    activities.map((activity) => (
+                      <div
+                        key={activity.id}
+                        className="flex flex-col items-center flex-shrink-0 w-48"
+                      >
+                        <Link
+                          href={getPortfolioUrl('activities', activity.id)}
+                          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                        >
+                          <div className="flex flex-col items-center gap-3">
+                            <StickerAvatar
+                              src={activity.avatar}
+                              alt={activity.name}
+                              type="activities"
+                              size={96}
+                              emoji={activity.emoji}
+                              name={activity.name}
+                            />
+                            <div className="flex flex-col items-center gap-1 w-full">
+                              <Content
+                                className="text-center max-w-[140px] mx-auto line-clamp-2"
+                                title={activity.name}
+                              >
+                                {activity.name}
+                              </Content>
+                              {activity.hostProjectName && (
+                                <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
+                                  {activity.hostProjectName}
+                                </UIText>
+                              )}
+                            </div>
+                          </div>
+                        </Link>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
 
 
           {/* Community Members Grid (for communities) or Notes Feed (for projects/humans) */}
@@ -1139,6 +1553,252 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             />
           )}
         </div>
+
+        {/* Apply to Join Modal (activities only) */}
+        {isActivityPortfolio(portfolio) && isApplyModalOpen && activityCallToJoin && (() => {
+          const config = activityCallToJoin
+          const requiresPrompt = !!config.require_approval && !!config.prompt
+
+          const handleSubmit = async (e: React.FormEvent) => {
+            e.preventDefault()
+            if (requiresPrompt && !applyPromptAnswer.trim()) {
+              setApplyFeedback('Please answer the prompt.')
+              return
+            }
+
+            setIsApplying(true)
+            setApplyFeedback(null)
+            try {
+              const result = await applyToActivityCallToJoin({
+                portfolioId: portfolio.id,
+                promptAnswer: requiresPrompt ? applyPromptAnswer.trim() : undefined,
+              })
+
+              if (!result || !result.success) {
+                setApplyFeedback(result?.error || 'Failed to apply to join.')
+                return
+              }
+
+              setApplyFeedback(
+                config.require_approval
+                  ? 'Application submitted. Waiting for approval.'
+                  : 'You have joined this activity.'
+              )
+              setIsApplyModalOpen(false)
+              // Refresh to reflect membership changes if auto-joined
+              if (!config.require_approval) {
+                router.refresh()
+              }
+            } catch (error) {
+              console.error('Failed to apply to activity:', error)
+              setApplyFeedback('An unexpected error occurred.')
+            } finally {
+              setIsApplying(false)
+            }
+          }
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-white rounded-xl w-full max-w-md mx-4 p-6">
+                <Title as="h2" className="mb-3">
+                  Apply to join
+                </Title>
+                {config.prompt && (
+                  <Content className="mb-2">
+                    {config.prompt}
+                  </Content>
+                )}
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {requiresPrompt && (
+                    <div>
+                      <UIText as="label" className="block mb-1">
+                        Your answer
+                      </UIText>
+                      <textarea
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        rows={4}
+                        value={applyPromptAnswer}
+                        onChange={(e) => setApplyPromptAnswer(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  {applyFeedback && (
+                    <UIText className="text-gray-600">
+                      {applyFeedback}
+                    </UIText>
+                  )}
+                  <div className="flex justify-end gap-2 mt-4">
+                    <Button
+                      variant="secondary"
+                      type="button"
+                      onClick={() => setIsApplyModalOpen(false)}
+                      disabled={isApplying}
+                    >
+                      <UIText>Cancel</UIText>
+                    </Button>
+                    <Button
+                      variant="primary"
+                      type="submit"
+                      disabled={isApplying}
+                    >
+                      <UIText>{isApplying ? 'Submitting...' : 'Submit'}</UIText>
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* Edit Call-to-Join Modal (activities only, owner/manager) */}
+        {isActivityPortfolio(portfolio) && isEditingCallToJoin && editCallToJoinDraft && (() => {
+          const draft = editCallToJoinDraft
+
+          const handleDraftChange = (partial: Partial<ActivityCallToJoinConfig>) => {
+            setEditCallToJoinDraft({
+              ...draft,
+              ...partial,
+            })
+          }
+
+          const handleSave = async (e: React.FormEvent) => {
+            e.preventDefault()
+            const joinBy =
+              draft.join_by && draft.join_by.trim().length > 0
+                ? draft.join_by
+                : null
+
+            try {
+              const result = await updateActivityCallToJoin(portfolio.id, {
+                enabled: draft.enabled !== false,
+                description: draft.description || undefined,
+                joinBy,
+                requireApproval: draft.require_approval ?? true,
+                prompt: draft.require_approval ? draft.prompt || undefined : undefined,
+                roles: (draft.roles || []).map((r) => ({
+                  id: r.id,
+                  label: r.label,
+                  activityRole: r.activityRole,
+                })),
+              })
+
+              if (!result || !result.success) {
+                alert(result?.error || 'Failed to update call-to-join.')
+                return
+              }
+
+              setIsEditingCallToJoin(false)
+              router.refresh()
+            } catch (error) {
+              console.error('Failed to update call-to-join:', error)
+              alert('An unexpected error occurred.')
+            }
+          }
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+              <div className="bg-white rounded-xl w-full max-w-lg mx-4 p-6">
+                <Title as="h2" className="mb-3">
+                  Edit call to join
+                </Title>
+                <form onSubmit={handleSave} className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="call-to-join-enabled"
+                      type="checkbox"
+                      checked={draft.enabled !== false}
+                      onChange={(e) =>
+                        handleDraftChange({ enabled: e.target.checked })
+                      }
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <UIText as="label" htmlFor="call-to-join-enabled">
+                      Enable call to join
+                    </UIText>
+                  </div>
+                  <div>
+                    <UIText as="label" className="block mb-1">
+                      Description
+                    </UIText>
+                    <textarea
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      rows={3}
+                      value={draft.description || ''}
+                      onChange={(e) =>
+                        handleDraftChange({ description: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <UIText as="label" className="block mb-1">
+                      Join by (ISO datetime, optional)
+                    </UIText>
+                    <input
+                      type="datetime-local"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      value={
+                        draft.join_by
+                          ? new Date(draft.join_by).toISOString().slice(0, 16)
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const value = e.target.value
+                        handleDraftChange({
+                          join_by: value ? new Date(value).toISOString() : null,
+                          join_by_auto_managed: false,
+                        })
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="call-to-join-require-approval"
+                      type="checkbox"
+                      checked={draft.require_approval ?? true}
+                      onChange={(e) =>
+                        handleDraftChange({ require_approval: e.target.checked })
+                      }
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <UIText as="label" htmlFor="call-to-join-require-approval">
+                      Require approval
+                    </UIText>
+                  </div>
+                  {draft.require_approval && (
+                    <div>
+                      <UIText as="label" className="block mb-1">
+                        Prompt (optional)
+                      </UIText>
+                      <textarea
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        rows={3}
+                        value={draft.prompt || ''}
+                        onChange={(e) =>
+                          handleDraftChange({ prompt: e.target.value })
+                        }
+                      />
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-2 mt-4">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setIsEditingCallToJoin(false)}
+                    >
+                      <UIText>Cancel</UIText>
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                    >
+                      <UIText>Save</UIText>
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )
+        })()}
     </>
   )
 }

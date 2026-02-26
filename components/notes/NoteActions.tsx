@@ -55,7 +55,7 @@ export function NoteActions({
   )
   const [updatingVisibility, setUpdatingVisibility] = useState(false)
 
-  // Fetch pin options (user's human portfolio and assigned projects)
+  // Fetch pin options (user's human portfolio and assigned portfolios)
   useEffect(() => {
     const fetchPinOptions = async () => {
       if (!currentUserId) {
@@ -93,16 +93,15 @@ export function NoteActions({
           })
         }
 
-        // Get assigned project portfolios
+        // Get assigned portfolios (e.g. projects, activities)
         if (note.assigned_portfolios && note.assigned_portfolios.length > 0) {
-          const { data: projectPortfolios } = await supabase
+          const { data: assignedPortfolios } = await supabase
             .from('portfolios')
             .select('*')
             .in('id', note.assigned_portfolios)
-            .eq('type', 'projects')
 
-          if (projectPortfolios) {
-            for (const portfolio of projectPortfolios as Portfolio[]) {
+          if (assignedPortfolios) {
+            for (const portfolio of assignedPortfolios as Portfolio[]) {
               const metadata = portfolio.metadata as any
               const pinned = metadata?.pinned || []
               const pinnedArray = Array.isArray(pinned) ? pinned : []

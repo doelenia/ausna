@@ -1,19 +1,29 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute, getPortfolioUrl } from '@/lib/portfolio/routes'
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isActivityPortfolio } from '@/types/portfolio'
 import { notFound } from 'next/navigation'
 import { isPortfolioManager, isPortfolioCreator, getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { MembersPageClient } from '@/components/portfolio/MembersPageClient'
 import { Title, UIText } from '@/components/ui'
+import { redirect } from 'next/navigation'
 
 interface MembersPageProps {
   params: {
     type: string
     id: string
   }
+  searchParams?: Promise<{ tab?: string }> | { tab?: string }
 }
 
-export default async function MembersPage({ params }: MembersPageProps) {
+export default async function MembersPage({ params, searchParams }: MembersPageProps) {
+  const resolvedSearchParams = searchParams && typeof (searchParams as any).then === 'function'
+    ? await (searchParams as Promise<{ tab?: string }>)
+    : (searchParams as { tab?: string } | undefined)
+  const initialTab = resolvedSearchParams?.tab === 'requests'
+    ? 'requests'
+    : resolvedSearchParams?.tab === 'subscribers'
+      ? 'subscribers'
+      : 'members'
   const { type, id, isValid } = parsePortfolioRoute(params.type, params.id)
 
   if (!isValid || !type) {
@@ -69,8 +79,13 @@ export default async function MembersPage({ params }: MembersPageProps) {
     notFound()
   }
 
-  // Only projects and communities have members
-  if (!isProjectPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
+  // Normalize URL to slug
+  if (portfolio.slug && id !== portfolio.slug) {
+    redirect(`/portfolio/${type}/${portfolio.slug}/members?tab=${initialTab}`)
+  }
+
+  // Only projects, activities, and communities have members
+  if (!isProjectPortfolio(portfolio) && !isActivityPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
     notFound()
   }
 
@@ -104,7 +119,7 @@ export default async function MembersPage({ params }: MembersPageProps) {
         return {
           id: memberId,
           username: memberMetadata?.username || null,
-          name: memberBasic.name || memberMetadata?.full_name || null,
+          name: memberBasic.name || memberMetadata?.username || null,
           avatar: memberBasic.avatar || memberMetadata?.avatar_url || null,
           isManager: managers.includes(memberId),
           isCreator: portfolio.user_id === memberId,
@@ -138,7 +153,7 @@ export default async function MembersPage({ params }: MembersPageProps) {
     creatorInfo = {
       id: portfolio.user_id,
       username: creatorMetadata?.username || null,
-      name: creatorBasic.name || creatorMetadata?.full_name || null,
+      name: creatorBasic.name || creatorMetadata?.username || null,
       avatar: creatorBasic.avatar || creatorMetadata?.avatar_url || null,
     }
   }
@@ -166,7 +181,7 @@ export default async function MembersPage({ params }: MembersPageProps) {
         return {
           id: subscriberId,
           username: subscriberMetadata?.username || null,
-          name: subscriberBasic.name || subscriberMetadata?.full_name || null,
+          name: subscriberBasic.name || subscriberMetadata?.username || null,
           avatar: subscriberBasic.avatar || subscriberMetadata?.avatar_url || null,
         }
       }
@@ -178,6 +193,86 @@ export default async function MembersPage({ params }: MembersPageProps) {
       }
     })
   )
+
+  // Load activity join requests for activities so managers can approve/reject
+  let joinRequests: {
+    id: string
+    applicant: {
+      id: string
+      username: string | null
+      name: string | null
+      avatar: string | null
+    }
+    status: string
+    createdAt: string
+    promptAnswer: string | null
+    activityRole: string | null
+    respondedAt: string | null
+  }[] = []
+
+  if (canManage && isActivityPortfolio(portfolio)) {
+    const { data: requestRows } = await supabase
+      .from('activity_join_requests')
+      .select('id, applicant_user_id, status, created_at, prompt_answer, activity_role, responded_at')
+      .eq('activity_portfolio_id', portfolio.id)
+      .order('created_at', { ascending: false })
+
+    const applicantIds = Array.from(
+      new Set((requestRows || []).map((r: any) => r.applicant_user_id as string))
+    )
+
+    let applicantInfoMap = new Map<
+      string,
+      {
+        id: string
+        username: string | null
+        name: string | null
+        avatar: string | null
+      }
+    >()
+
+    if (applicantIds.length > 0) {
+      const { data: applicantPortfolios } = await supabase
+        .from('portfolios')
+        .select('user_id, metadata')
+        .eq('type', 'human')
+        .in('user_id', applicantIds)
+
+      if (applicantPortfolios) {
+        applicantPortfolios.forEach((p: any) => {
+          const m = p.metadata as any
+          const basic = m?.basic || {}
+          applicantInfoMap.set(p.user_id as string, {
+            id: p.user_id as string,
+            username: m?.username || null,
+            name: basic.name || m?.username || null,
+            avatar: basic.avatar || m?.avatar_url || null,
+          })
+        })
+      }
+    }
+
+    joinRequests =
+      (requestRows || []).map((r: any) => {
+        const applicantId: string = r.applicant_user_id
+        const info =
+          applicantInfoMap.get(applicantId) || {
+            id: applicantId,
+            username: null,
+            name: null,
+            avatar: null,
+          }
+        return {
+          id: r.id as string,
+          applicant: info,
+          status: (r.status as string) || 'pending',
+          createdAt: r.created_at as string,
+          promptAnswer: (r.prompt_answer as string | null) ?? null,
+          activityRole: (r.activity_role as string | null) ?? null,
+          respondedAt: (r.responded_at as string | null) ?? null,
+        }
+      }) || []
+  }
 
   return (
     <div>
@@ -197,6 +292,8 @@ export default async function MembersPage({ params }: MembersPageProps) {
         subscriberDetails={subscriberDetails}
         canManage={canManage}
         currentUserId={user?.id}
+        joinRequests={joinRequests}
+        initialTab={initialTab}
       />
     </div>
   )
