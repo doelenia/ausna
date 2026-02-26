@@ -150,7 +150,7 @@ export async function GET(request: NextRequest) {
           const basic = metadata?.basic || {}
           const name = (basic.name || '').toLowerCase()
           const description = (basic.description || '').toLowerCase()
-          const username = ((metadata?.username || '') as string).toLowerCase()
+          const username = ((p.slug || '') as string).toLowerCase()
           
           return (
             name.includes(searchTerm) ||
@@ -162,7 +162,7 @@ export async function GET(request: NextRequest) {
           const metadata = p.metadata as any
           const basic = metadata?.basic || {}
           const name = basic.name || ''
-          const username = metadata?.username || ''
+          const username = (p.slug as string | null) || ''
           
           // Calculate similarity scores
           const nameScore = calculateSimilarity(query, name)
@@ -206,7 +206,7 @@ export async function GET(request: NextRequest) {
         description: basic.description || '',
         avatar: basic.avatar || null,
         emoji: basic.emoji || null,
-        username: metadata?.username || null,
+          username: p.slug || null,
         projectType: metadata?.project_type_specific || null,
         user_id: p.user_id,
         created_at: p.created_at,

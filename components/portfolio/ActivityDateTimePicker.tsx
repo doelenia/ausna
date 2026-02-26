@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react'
 import { dateFnsLocalizer, View, Views } from 'react-big-calendar'
 import { Calendar as BaseCalendar } from 'react-big-calendar'
 import withDragAndDrop from 'react-big-calendar/lib/addons/dragAndDrop'
@@ -35,6 +35,7 @@ export function ActivityDateTimePicker({
   initialValue,
   onChange,
 }: ActivityDateTimePickerProps) {
+  const hasInitializedDefault = useRef(false)
   const [value, setValue] = useState<ActivityDateTimeValue | null>(initialValue || null)
   const [calendarDate, setCalendarDate] = useState<Date>(() => {
     if (initialValue?.start) {
@@ -54,8 +55,29 @@ export function ActivityDateTimePicker({
   })
 
   useEffect(() => {
+    // When there is no existing datetime configured, auto-fill today (all-day)
+    // the first time the picker is opened.
+    if (!initialValue && !hasInitializedDefault.current) {
+      const start = new Date()
+      start.setHours(0, 0, 0, 0)
+      const endExclusive = new Date(start)
+      endExclusive.setDate(endExclusive.getDate() + 1)
+
+      const defaultValue: ActivityDateTimeValue = {
+        start: start.toISOString(),
+        end: endExclusive.toISOString(),
+        inProgress: false,
+        allDay: true,
+      }
+
+      hasInitializedDefault.current = true
+      setValue(defaultValue)
+      onChange(defaultValue)
+      return
+    }
+
     setValue(initialValue || null)
-  }, [initialValue])
+  }, [initialValue, onChange])
 
   const events = useMemo(() => {
     return activityToCalendarEvent(value, portfolioTitle)

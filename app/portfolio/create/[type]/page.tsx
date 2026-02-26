@@ -3,6 +3,7 @@ import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { isValidPortfolioType } from '@/lib/portfolio/routes'
 import { notFound, redirect } from 'next/navigation'
 import { CreatePortfolioForm } from '@/components/portfolio/CreatePortfolioForm'
+import { CreateActivityForm } from '@/components/portfolio/CreateActivityForm'
 import { Title } from '@/components/ui'
 
 interface CreatePortfolioPageProps {
@@ -17,17 +18,16 @@ export default async function CreatePortfolioPage({
   await requireAuth()
   
   // Validate type directly (create page doesn't need id)
-  // Only allow creating projects or communities
   if (!params.type || !isValidPortfolioType(params.type)) {
     notFound()
   }
   
   const normalizedType = params.type.toLowerCase()
-  if (normalizedType !== 'projects' && normalizedType !== 'community') {
+  if (normalizedType !== 'projects' && normalizedType !== 'community' && normalizedType !== 'activities') {
     notFound()
   }
   
-  const type = normalizedType as 'projects' | 'community'
+  const type = normalizedType as 'projects' | 'community' | 'activities'
 
   // Check if user is admin for community creation
   if (type === 'community') {
@@ -39,11 +39,17 @@ export default async function CreatePortfolioPage({
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
-            <Title as="h1" className="mb-6">
-              Create {type === 'projects' ? 'Project' : 'Community'} Portfolio
-            </Title>
-          <CreatePortfolioForm type={type} />
-        </div>
+      <Title as="h1" className="mb-6">
+        {type === 'projects' && 'Create Project Portfolio'}
+        {type === 'community' && 'Create Community Portfolio'}
+        {type === 'activities' && 'Create Activity'}
+      </Title>
+      {type === 'activities' ? (
+        <CreateActivityForm />
+      ) : (
+        <CreatePortfolioForm type={type} />
+      )}
+    </div>
   )
 }
 

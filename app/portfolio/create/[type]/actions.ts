@@ -42,12 +42,29 @@ export async function createPortfolio(
     const activityLocationCountryCodeRaw = formData.get('activity_location_country_code') as string | null
     const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
+    const activityCallToJoinDescriptionRaw = formData.get('activity_call_to_join_description') as string | null
+    const activityCallToJoinJoinByRaw = formData.get('activity_call_to_join_join_by') as string | null
+    const activityCallToJoinRequireApprovalRaw = formData.get('activity_call_to_join_require_approval') as string | null
+    const activityCallToJoinPromptRaw = formData.get('activity_call_to_join_prompt') as string | null
+    const activityCallToJoinRolesRaw = formData.get('activity_call_to_join_roles') as string | null
+    const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
+    const hostProjectIds: string[] =
+      hostProjectIdsRaw && typeof hostProjectIdsRaw === 'string'
+        ? (() => {
+            try {
+              const parsed = JSON.parse(hostProjectIdsRaw)
+              return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+            } catch {
+              return []
+            }
+          })()
+        : []
 
     // Validate type
-    if (type !== 'projects' && type !== 'community') {
+    if (type !== 'projects' && type !== 'community' && type !== 'activities') {
       return {
         success: false,
-        error: 'Invalid portfolio type. Only projects and communities can be created.',
+        error: 'Invalid portfolio type. Only projects, activities, and communities can be created.',
       }
     }
 
@@ -113,9 +130,11 @@ export async function createPortfolio(
       slugCounter++
     }
 
-    // Compute visibility for projects (public/private). Communities remain public for now.
+    // Compute visibility for projects/activities (public/private). Communities remain public for now.
     const visibility: 'public' | 'private' =
-      visibilityRaw === 'private' && type === 'projects' ? 'private' : 'public'
+      visibilityRaw === 'private' && (type === 'projects' || type === 'activities')
+        ? 'private'
+        : 'public'
 
     // Create portfolio metadata structure
     const metadata: any = {
@@ -140,8 +159,10 @@ export async function createPortfolio(
       },
     }
 
-    // Attach initial activity_datetime and location for projects when provided
-    if (type === 'projects') {
+    // Attach initial activity_datetime, location, and call-to-join for activities when provided
+    if (type === 'activities') {
+      let activityNormalized: any = null
+
       const hasAnyActivityField =
         (activityStartRaw && activityStartRaw.trim().length > 0) ||
         (activityEndRaw && activityEndRaw.trim().length > 0) ||
@@ -158,8 +179,9 @@ export async function createPortfolio(
           },
           { intervalMinutes: 15 }
         )
-
+        
         if (normalized) {
+          activityNormalized = normalized
           metadata.properties = {
             ...(metadata.properties || {}),
             activity_datetime: normalized,
@@ -200,6 +222,65 @@ export async function createPortfolio(
         }
       }
 
+      // Call-to-join: on when activity is not private (no separate enable/disable).
+      // No default join_by; window closes when activity end has passed or status is archived.
+      if (visibility !== 'private') {
+        const existingProperties: Record<string, any> = metadata.properties || {}
+
+        let callToJoinRoles: Array<{ id: string; label: string; activityRole: string }> = [
+          { id: 'default-member', label: 'Member', activityRole: 'member' },
+        ]
+        if (activityCallToJoinRolesRaw && typeof activityCallToJoinRolesRaw === 'string') {
+          try {
+            const parsed = JSON.parse(activityCallToJoinRolesRaw)
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              callToJoinRoles = parsed
+            }
+          } catch {
+            // Ignore parse errors and keep default roles
+          }
+        }
+
+        const descriptionOverride =
+          activityCallToJoinDescriptionRaw && activityCallToJoinDescriptionRaw.trim().length > 0
+            ? activityCallToJoinDescriptionRaw.trim()
+            : 'Join us!'
+
+        const requireApproval =
+          activityCallToJoinRequireApprovalRaw == null
+            ? true
+            : activityCallToJoinRequireApprovalRaw === 'true'
+
+        let joinBy: string | null = null
+        if (activityCallToJoinJoinByRaw && activityCallToJoinJoinByRaw.trim().length > 0) {
+          const explicit = new Date(activityCallToJoinJoinByRaw)
+          if (!Number.isNaN(explicit.getTime())) {
+            joinBy = explicit.toISOString()
+          }
+        }
+
+        const defaultPrompt = 'Why do you want to join this activity?'
+        let prompt: string | null = requireApproval ? defaultPrompt : null
+        if (requireApproval && activityCallToJoinPromptRaw && activityCallToJoinPromptRaw.trim().length > 0) {
+          prompt = activityCallToJoinPromptRaw.trim()
+        }
+
+        metadata.properties = {
+          ...existingProperties,
+          call_to_join: {
+            enabled: true,
+            description: descriptionOverride,
+            join_by: joinBy,
+            require_approval: requireApproval,
+            prompt,
+            roles: callToJoinRoles,
+          },
+        }
+      }
+    }
+
+    // Normalize project/activity status
+    if (type === 'projects' || type === 'activities') {
       if (projectStatusRaw) {
         const normalizedStatus =
           projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
@@ -208,18 +289,61 @@ export async function createPortfolio(
         if (normalizedStatus) {
           metadata.status = normalizedStatus
         }
+      } else if (type === 'activities') {
+        // Activities without datetime: default to live when no status set (create form has no Status field)
+        if (metadata.status == null || metadata.status === '') {
+          metadata.status = 'in-progress'
+        }
       }
     }
+
+    // For activities, optionally validate and resolve host projects (multiple)
+    let resolvedHostProjectIds: string[] = []
+    if (type === 'activities' && hostProjectIds.length > 0) {
+      const { data: projects, error: hostError } = await supabase
+        .from('portfolios')
+        .select('id, user_id, metadata, type')
+        .eq('type', 'projects')
+        .in('id', hostProjectIds)
+
+      if (hostError || !projects?.length) {
+        return {
+          success: false,
+          error: 'One or more host projects not found',
+        }
+      }
+
+      for (const proj of projects) {
+        const hostMeta = (proj.metadata as any) || {}
+        const managers: string[] = hostMeta?.managers || []
+        const isOwner = proj.user_id === user.id
+        const isManager = Array.isArray(managers) && managers.includes(user.id)
+        if (!isOwner && !isManager) {
+          return {
+            success: false,
+            error: 'You must be owner or manager of each host project',
+          }
+        }
+        resolvedHostProjectIds.push(proj.id)
+      }
+      // Dedupe and preserve order
+      resolvedHostProjectIds = [...new Set(resolvedHostProjectIds)]
+      const activityProps = (metadata.properties || {}) as Record<string, any>
+      metadata.properties = { ...activityProps, host_project_ids: resolvedHostProjectIds }
+    }
+
+    const firstHostId = type === 'activities' && resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null
 
     // Create portfolio
     const { data: portfolio, error: createError } = await supabase
       .from('portfolios')
       .insert({
-        type: type as 'projects' | 'community',
+        type: type as 'projects' | 'community' | 'activities',
         slug,
         user_id: user.id,
         metadata,
         visibility,
+        host_project_id: firstHostId,
       })
       .select()
       .single()

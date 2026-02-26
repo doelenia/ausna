@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
     // We need to search human portfolios for username matches
     const { data: portfolios, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('user_id, metadata')
+      .select('user_id, slug, metadata')
       .eq('type', 'human')
       .limit(50)
 
@@ -42,10 +42,10 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // Filter portfolios by username match
+    // Filter portfolios by username/handle match (using slug as canonical handle)
     const matchingPortfolios = (portfolios || []).filter((portfolio: any) => {
       const metadata = portfolio.metadata as any
-      const username = metadata?.username?.toLowerCase() || ''
+      const username = (portfolio.slug as string | null)?.toLowerCase() || ''
       const basicName = metadata?.basic?.name?.toLowerCase() || ''
       return username.includes(searchTerm) || basicName.includes(searchTerm)
     })
@@ -58,8 +58,8 @@ export async function GET(request: NextRequest) {
       const basic = metadata?.basic || {}
       return {
         id: portfolio.user_id,
-        username: metadata?.username || null,
-        name: basic.name || metadata?.full_name || null,
+        username: portfolio.slug || null,
+        name: basic.name || portfolio.slug || null,
         avatar: basic.avatar || metadata?.avatar_url || null,
       }
     })
@@ -80,8 +80,8 @@ export async function GET(request: NextRequest) {
         if (!existingUser) {
           users.push({
             id: portfolio.user_id,
-            username: metadata?.username || null,
-            name: basic.name || metadata?.full_name || null,
+            username: portfolio.slug || null,
+            name: basic.name || portfolio.slug || null,
             avatar: basic.avatar || metadata?.avatar_url || null,
           })
         }

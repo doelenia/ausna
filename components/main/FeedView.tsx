@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Note } from '@/types/note'
 import { NoteCard } from '@/components/notes/NoteCard'
-import { FeedTabs, FeedType } from './FeedTabs'
+import type { FeedType } from './FeedTabs'
 import { Button, Title, Content, UIText } from '@/components/ui'
 import { LazyLoad } from '@/components/ui/LazyLoad'
 import { SkeletonCard } from '@/components/ui/Skeleton'
@@ -164,23 +164,9 @@ export function FeedView({ currentUserId }: FeedViewProps) {
     }
   }, [currentUserId, hasMore, loadingMore, loading])
 
-  const handleFeedChange = (feedType: FeedType, communityId?: string | null) => {
-    // Optimistic update - update state immediately for instant UI feedback
-    setActiveFeed(feedType)
-    setActiveCommunityId(communityId || null)
-    // Data will load via useEffect, but UI updates instantly
-  }
-
   if (loading && notes.length === 0) {
     return (
       <>
-        {currentUserId && (
-          <FeedTabs
-            activeFeed={activeFeed}
-            activeCommunityId={activeCommunityId}
-            onFeedChange={handleFeedChange}
-          />
-        )}
         <div className="text-center py-12">
           <UIText>Loading feed...</UIText>
         </div>
@@ -192,13 +178,6 @@ export function FeedView({ currentUserId }: FeedViewProps) {
 
   return (
     <>
-      {currentUserId && (
-        <FeedTabs
-          activeFeed={activeFeed}
-          activeCommunityId={activeCommunityId}
-          onFeedChange={handleFeedChange}
-        />
-      )}
       <div>
           {error ? (
             <div className="text-center py-12">

@@ -21,7 +21,7 @@ export async function POST(
     }
 
     const { portfolioId } = params
-    const { userId, role } = await request.json()
+    const { userId, role, message } = await request.json()
     const memberRole = role && typeof role === 'string' && role.trim() ? role.trim() : 'Member'
     
     // Validate role (max 2 words)
@@ -74,10 +74,10 @@ export async function POST(
       )
     }
 
-    // Only projects and communities can have members
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    // Only projects, activities, and communities can have members
+    if (portfolio.type !== 'projects' && portfolio.type !== 'community' && portfolio.type !== 'activities') {
       return NextResponse.json(
-        { error: 'Only projects and communities can have members' },
+        { error: 'Only projects, activities, and communities can have members' },
         { status: 400 }
       )
     }
@@ -135,6 +135,7 @@ export async function POST(
         status: 'pending',
         invitation_type: 'member',
         role: memberRole,
+        message: message && typeof message === 'string' && message.trim().length > 0 ? message.trim() : null,
       })
       .select()
       .single()
@@ -152,12 +153,17 @@ export async function POST(
     const portfolioName = basic.name || 'this portfolio'
 
     // Send invitation message
+    const customMessage =
+      message && typeof message === 'string' && message.trim().length > 0
+        ? `\n\nMessage: ${message.trim()}`
+        : ''
+
     const { error: messageError } = await supabase
       .from('messages')
       .insert({
         sender_id: user.id,
         receiver_id: userId,
-        text: `invited you to join ${portfolioName} (${portfolio.type === 'projects' ? 'project' : 'community'})`,
+        text: `invited you to join ${portfolioName} (${portfolio.type === 'projects' ? 'project' : portfolio.type === 'activities' ? 'activity' : 'community'})${customMessage}`,
       })
 
     if (messageError) {

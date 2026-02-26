@@ -25,7 +25,10 @@ export default function RootLayout({
           <div className="h-[100dvh] bg-gray-50">
             <div className="mx-auto h-full relative" style={{ maxWidth: 'var(--max-content-width)' }}>
               <div className="h-full overflow-auto w-full app-scroll">
-                {children}
+                {/* Universal content padding so TopNav (top on desktop, bottom on mobile) never overlaps content */}
+                <div className="pt-0 md:pt-2 pb-2 md:pb-0">
+                  {children}
+                </div>
               </div>
             <div className="hidden md:block absolute top-0 left-0 right-0 pointer-events-none">
               <div className="pointer-events-auto">

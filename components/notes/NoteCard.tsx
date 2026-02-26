@@ -194,14 +194,13 @@ export function NoteCard({
           // This is normal and will use the fallback name
         }
 
-        // Fetch assigned project portfolios (only projects, not communities)
+        // Fetch assigned portfolios (any type currently used for notes, e.g. projects/activities)
         // First try from note's assigned_portfolios
         if (note.assigned_portfolios && note.assigned_portfolios.length > 0) {
           const { data: assignedPortfolios, error: projectError } = await supabase
             .from('portfolios')
             .select('*')
             .in('id', note.assigned_portfolios)
-            .eq('type', 'projects')
 
           if (projectError) {
             console.error('[NoteCard] Error fetching assigned projects:', {
@@ -222,20 +221,19 @@ export function NoteCard({
               await new Promise(resolve => setTimeout(resolve, 500))
             }
           } else if (assignedPortfolios && assignedPortfolios.length > 0) {
-            const projects = assignedPortfolios as Portfolio[]
-            setAssignedProjects(projects)
+            const portfolios = assignedPortfolios as Portfolio[]
+            setAssignedProjects(portfolios)
             // Cache each portfolio
-            projects.forEach(project => {
-              setCachedPortfolio(project.id, project)
+            portfolios.forEach(p => {
+              setCachedPortfolio(p.id, p)
             })
           } else {
-            // Fallback: if portfolioId is provided and it's a project, use it
+            // Fallback: if portfolioId is provided, use it
             if (portfolioId) {
               const { data: portfolioData, error: fallbackError } = await supabase
                 .from('portfolios')
                 .select('*')
                 .eq('id', portfolioId)
-                .eq('type', 'projects')
                 .maybeSingle()
               
               if (fallbackError) {
@@ -254,12 +252,11 @@ export function NoteCard({
             }
           }
         } else if (portfolioId) {
-          // If note has no assigned_portfolios but portfolioId is provided, check if it's a project
+          // If note has no assigned_portfolios but portfolioId is provided, load that portfolio
           const { data: portfolioData, error: portfolioError } = await supabase
             .from('portfolios')
             .select('*')
             .eq('id', portfolioId)
-            .eq('type', 'projects')
             .maybeSingle()
           
           if (portfolioError) {
@@ -1178,14 +1175,14 @@ export function NoteCard({
     )
   }
 
-  // Project Assignment Banner - rendered at the end of the main card content,
+  // Portfolio Assignment Banner - rendered at the end of the main card content,
   // visually matching search result items (avatar + name/type + second line)
   const projectBanner = loadingPortfolios ? (
     <SkeletonBanner avatarSize={48} />
   ) : assignedProjects.length > 0 ? (() => {
-    const project = assignedProjects[0]
-    const basic = getPortfolioBasic(project)
-    const metadata = project.metadata as any
+    const portfolio = assignedProjects[0]
+    const basic = getPortfolioBasic(portfolio)
+    const metadata = portfolio.metadata as any
     const emoji = metadata?.basic?.emoji
     // Match search result logic: use project_type_specific when available
     const projectType: string | null = metadata?.project_type_specific || null
@@ -1193,7 +1190,7 @@ export function NoteCard({
 
     return (
       <Link
-        href={getPortfolioUrl('projects', project.id)}
+        href={getPortfolioUrl(portfolio.type, portfolio.id)}
         onClick={(e) => e.stopPropagation()}
         className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-gray-100"
       >
@@ -1202,7 +1199,7 @@ export function NoteCard({
           <StickerAvatar
             src={basic.avatar}
             alt={basic.name}
-            type="projects"
+            type={portfolio.type}
             size={48}
             emoji={emoji}
             name={basic.name}

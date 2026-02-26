@@ -380,7 +380,7 @@ export async function getUsers(): Promise<GetUsersResult> {
     // Combine user data with portfolio info
     const users = (authUsers.users || []).map((authUser) => {
       const portfolio = portfolioMap.get(authUser.id) as
-        | { id: string; metadata: any; is_pseudo?: boolean }
+        | { id: string; metadata: any; is_pseudo?: boolean; slug?: string }
         | undefined
       const metadata = portfolio?.metadata || {}
       const userMetadata = authUser.user_metadata || {}
@@ -392,8 +392,8 @@ export async function getUsers(): Promise<GetUsersResult> {
       return {
         id: authUser.id,
         email: authUser.email || '',
-        username: metadata.username || userMetadata.username || null,
-        name: metadata.basic?.name || metadata.full_name || userMetadata.full_name || null,
+        username: portfolio?.slug || userMetadata.username || null,
+        name: metadata.basic?.name || userMetadata.full_name || null,
         created_at: authUser.created_at,
         is_blocked: userMetadata.is_blocked === true,
         human_portfolio_id: portfolio?.id || null,
@@ -848,11 +848,13 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
       .filter((authUser) => {
         const email = authUser.email?.toLowerCase() || ''
         const userId = authUser.id.toLowerCase()
-        const portfolio = portfolioMap.get(authUser.id)
+        const portfolio = portfolioMap.get(authUser.id) as
+          | { id: string; metadata: any; is_pseudo?: boolean | null; slug?: string }
+          | undefined
         const metadata = portfolio?.metadata || {}
         const userMetadata = authUser.user_metadata || {}
-        const name = (metadata.basic?.name || metadata.full_name || userMetadata.full_name || '').toLowerCase()
-        const username = (metadata.username || userMetadata.username || '').toLowerCase()
+        const name = (metadata.basic?.name || userMetadata.full_name || '').toLowerCase()
+        const username = ((portfolio?.slug || userMetadata.username || '') as string).toLowerCase()
 
         return (
           email.includes(searchTerm) ||
@@ -863,7 +865,7 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
       })
       .map((authUser) => {
         const portfolio = portfolioMap.get(authUser.id) as
-          | { id: string; metadata: any; is_pseudo?: boolean | null }
+          | { id: string; metadata: any; is_pseudo?: boolean | null; slug?: string }
           | undefined
         const metadata = portfolio?.metadata || {}
         const userMetadata = authUser.user_metadata || {}
@@ -874,8 +876,8 @@ export async function searchUsers(query: string): Promise<SearchUsersResult> {
         return {
           id: authUser.id,
           email: authUser.email || '',
-          username: metadata.username || userMetadata.username || null,
-          name: metadata.basic?.name || metadata.full_name || userMetadata.full_name || null,
+          username: portfolio?.slug || userMetadata.username || null,
+          name: metadata.basic?.name || userMetadata.full_name || null,
           created_at: authUser.created_at,
           is_blocked: userMetadata.is_blocked === true,
           human_portfolio_id: portfolio?.id || null,

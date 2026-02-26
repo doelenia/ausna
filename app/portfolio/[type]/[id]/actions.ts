@@ -2,9 +2,24 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PinnedItem } from '@/types/portfolio'
+import {
+  Portfolio,
+  isProjectPortfolio,
+  isCommunityPortfolio,
+  isHumanPortfolio,
+  PinnedItem,
+  ActivityCallToJoinConfig,
+} from '@/types/portfolio'
 import { normalizeActivityDateTime } from '@/lib/datetime'
-import { getPortfolioBasic, canEditPortfolio, canDeletePortfolio, canManagePinned, canAddToPinned, getPinnedItemsCount, isNoteAssignedToPortfolio } from '@/lib/portfolio/helpers'
+import {
+  getPortfolioBasic,
+  canEditPortfolio,
+  canDeletePortfolio,
+  canManagePinned,
+  canAddToPinned,
+  getPinnedItemsCount,
+  isNoteAssignedToPortfolio,
+} from '@/lib/portfolio/helpers'
 import { Note } from '@/types/note'
 import { revalidatePath } from 'next/cache'
 
@@ -306,6 +321,7 @@ export async function updatePortfolio(
     const activityLocationCountryCodeRaw = formData.get('activity_location_country_code') as string | null
     const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
+    const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
 
     if (!portfolioId) {
       return {
@@ -371,8 +387,23 @@ export async function updatePortfolio(
       // If not provided in formData, leave existing values unchanged
     }
 
-    // For project portfolios, update activity_datetime and location inside metadata.properties
+    // For project portfolios, keep status/visibility but do not manage activity datetime/location
     if (portfolio.type === 'projects') {
+      if (projectStatusRaw !== null) {
+        const normalizedStatus =
+          projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
+            ? projectStatusRaw
+            : undefined
+        if (normalizedStatus) {
+          updatedMetadata.status = normalizedStatus
+        } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
+          delete updatedMetadata.status
+        }
+      }
+    }
+
+    // For activity portfolios, update activity_datetime, location, and status inside metadata
+    if (portfolio.type === 'activities') {
       const properties = (currentMetadata.properties || {}) as Record<string, any>
       const hasAnyActivityField =
         (activityStartRaw && activityStartRaw.trim().length > 0) ||
@@ -383,19 +414,23 @@ export async function updatePortfolio(
       if (hasAnyActivityField) {
         const normalized = normalizeActivityDateTime(
           {
-            start: activityStartRaw || '',
-            end: activityEndRaw || undefined,
-            inProgress: activityInProgressRaw === 'true',
-            allDay: activityAllDayRaw === 'true',
+          start: activityStartRaw || '',
+          end: activityEndRaw || undefined,
+          inProgress: activityInProgressRaw === 'true',
+          allDay: activityAllDayRaw === 'true',
           },
           { intervalMinutes: 15 }
         )
 
         if (normalized) {
-          updatedMetadata.properties = {
-            ...properties,
-            activity_datetime: normalized,
-          }
+        const nextProperties: Record<string, any> = {
+          ...properties,
+          activity_datetime: normalized,
+        }
+
+        // Call-to-join: no auto-managed join_by. When no join_by is set, window closes
+        // when activity end has passed or status is archived (evaluated at read/apply time).
+        updatedMetadata.properties = nextProperties
         } else {
           // If normalization failed, remove the property rather than saving invalid data
           const { activity_datetime, ...rest } = properties
@@ -446,6 +481,7 @@ export async function updatePortfolio(
           if (locationPrivate) location.isExactLocationPrivate = true
 
           nextProperties.location = Object.keys(location).length > 0 ? location : undefined
+          updatedMetadata.properties = nextProperties
         } else if (Object.prototype.hasOwnProperty.call(nextProperties, 'location')) {
           const { location, ...rest } = nextProperties
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
@@ -463,6 +499,41 @@ export async function updatePortfolio(
           updatedMetadata.status = normalizedStatus
         } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
           delete updatedMetadata.status
+        }
+      }
+
+      // Host projects (multiple): owner/managers can add their projects
+      if (hostProjectIdsRaw !== null && hostProjectIdsRaw !== undefined) {
+        let resolvedHostProjectIds: string[] = []
+        try {
+          const parsed = typeof hostProjectIdsRaw === 'string' ? JSON.parse(hostProjectIdsRaw) : hostProjectIdsRaw
+          const ids = Array.isArray(parsed) ? parsed.filter((id: unknown) => typeof id === 'string') : []
+          if (ids.length > 0) {
+            const { data: projects } = await supabase
+              .from('portfolios')
+              .select('id, user_id, metadata, type')
+              .eq('type', 'projects')
+              .in('id', ids)
+            if (projects?.length) {
+              for (const proj of projects) {
+                const hostMeta = (proj.metadata as any) || {}
+                const managers: string[] = hostMeta?.managers || []
+                const isOwner = proj.user_id === user.id
+                const isManager = Array.isArray(managers) && managers.includes(user.id)
+                if (isOwner || isManager) {
+                  resolvedHostProjectIds.push(proj.id)
+                }
+              }
+              resolvedHostProjectIds = [...new Set(resolvedHostProjectIds)]
+            }
+          }
+        } catch {
+          // ignore invalid JSON
+        }
+        const nextProperties = (updatedMetadata.properties || {}) as Record<string, any>
+        updatedMetadata.properties = {
+          ...nextProperties,
+          host_project_ids: resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds : undefined,
         }
       }
     }
@@ -486,12 +557,19 @@ export async function updatePortfolio(
       metadata: updatedMetadata,
     }
 
-    // Allow owner to update visibility for project portfolios
+    // Allow owner to update visibility for project and activity portfolios
     if (
-      portfolio.type === 'projects' &&
+      (portfolio.type === 'projects' || portfolio.type === 'activities') &&
       (visibilityRaw === 'public' || visibilityRaw === 'private')
     ) {
       updatePayload.visibility = visibilityRaw
+    }
+
+    // For activities, sync host_project_id from metadata.properties.host_project_ids (first)
+    if (portfolio.type === 'activities') {
+      const props = (updatedMetadata.properties || {}) as Record<string, any>
+      const ids = props.host_project_ids as string[] | undefined
+      updatePayload.host_project_id = Array.isArray(ids) && ids.length > 0 ? ids[0] : null
     }
 
     // Update portfolio
@@ -700,6 +778,761 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
         throw error
       }
     }
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+// ------------------------------------------------------------
+// Activity call-to-join and join request actions
+// ------------------------------------------------------------
+
+interface SimpleResult {
+  success: boolean
+  error?: string
+}
+
+interface ApplyActivityCallToJoinInput {
+  portfolioId: string
+  roleOptionId?: string
+  promptAnswer?: string
+}
+
+/**
+ * Update call-to-join configuration for an activity portfolio.
+ * Only the activity owner or managers can update this configuration.
+ */
+export async function updateActivityCallToJoin(
+  portfolioId: string,
+  config: {
+    enabled: boolean
+    description?: string
+    joinBy?: string | null
+    requireApproval: boolean
+    prompt?: string | null
+    roles?: { id: string; label: string; activityRole: string }[]
+  }
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+
+    if (portfolioError || !portfolio) {
+      return { success: false, error: 'Activity not found' }
+    }
+
+    if (portfolio.type !== 'activities') {
+      return { success: false, error: 'Call-to-join is only available for activities' }
+    }
+
+    const metadata = (portfolio.metadata as any) || {}
+    const properties: Record<string, any> = (metadata.properties || {}) as Record<string, any>
+    const existingCallToJoin: ActivityCallToJoinConfig = (properties.call_to_join ||
+      {}) as ActivityCallToJoinConfig
+
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+
+    if (!isOwner && !isManager) {
+      return {
+        success: false,
+        error: 'Only the activity owner or managers can update call-to-join settings',
+      }
+    }
+
+    // Validate joinBy relative to activity end datetime if present
+    const activityDateTime = properties.activity_datetime as
+      | { start?: string; end?: string | null }
+      | undefined
+
+    if (config.joinBy) {
+      const joinByDate = new Date(config.joinBy)
+      if (Number.isNaN(joinByDate.getTime())) {
+        return { success: false, error: 'Invalid join-by datetime' }
+      }
+
+      const now = new Date()
+      if (joinByDate.getTime() <= now.getTime()) {
+        return { success: false, error: 'Join-by datetime must be in the future' }
+      }
+
+      if (activityDateTime?.end) {
+        const endDate = new Date(activityDateTime.end)
+        if (!Number.isNaN(endDate.getTime()) && joinByDate.getTime() > endDate.getTime()) {
+          return {
+            success: false,
+            error: 'Join-by datetime must be before or equal to the activity end time',
+          }
+        }
+      }
+    }
+
+    const normalizedConfig: ActivityCallToJoinConfig = {
+      enabled: config.enabled,
+      description: config.description || undefined,
+      join_by:
+        config.joinBy !== undefined
+          ? config.joinBy
+          : existingCallToJoin.join_by ?? null,
+      require_approval: config.requireApproval,
+      prompt: config.requireApproval ? config.prompt ?? null : null,
+      roles:
+        (config.roles && config.roles.length > 0
+          ? config.roles
+          : existingCallToJoin.roles) || [],
+      join_by_auto_managed:
+        config.joinBy !== undefined
+          ? false
+          : existingCallToJoin.join_by_auto_managed ?? true,
+    }
+
+    const nextProperties: Record<string, any> = {
+      ...properties,
+      call_to_join: normalizedConfig,
+    }
+
+    const updatedMetadata = {
+      ...metadata,
+      properties: Object.keys(nextProperties).length > 0 ? nextProperties : undefined,
+    }
+
+    const { error: updateError } = await supabase
+      .from('portfolios')
+      .update({ metadata: updatedMetadata })
+      .eq('id', portfolioId)
+
+    if (updateError) {
+      return {
+        success: false,
+        error: updateError.message || 'Failed to update call-to-join configuration',
+      }
+    }
+
+    revalidatePath(`/portfolio/activities/${portfolioId}`)
+    revalidatePath(`/portfolio/activities/${portfolioId}/members`)
+
+    return { success: true }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Get count of unprocessed join requests (pending and not yet responded to).
+ * Owner/manager only. Used for the blue-dot badge on the call-to-join card.
+ */
+export async function getPendingJoinRequestsCount(
+  portfolioId: string
+): Promise<{ success: boolean; count?: number; error?: string }> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+    if (!portfolio || portfolio.type !== 'activities') {
+      return { success: false, error: 'Not found' }
+    }
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+    if (!isOwner && !isManager) {
+      return { success: false, error: 'Forbidden' }
+    }
+    let query = supabase
+      .from('activity_join_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('activity_portfolio_id', portfolioId)
+      .eq('status', 'pending')
+    const { count, error } = await query.is('responded_at', null)
+    if (error) return { success: false, error: error.message }
+    return { success: true, count: count ?? 0 }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Failed to get count' }
+  }
+}
+
+/**
+ * Check whether the current user has a pending (not yet approved/rejected) join request for this activity.
+ */
+export async function getCurrentUserPendingActivityRequest(
+  portfolioId: string
+): Promise<{ success: boolean; hasPending?: boolean; error?: string }> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id, type')
+      .eq('id', portfolioId)
+      .single()
+    if (!portfolio || portfolio.type !== 'activities') {
+      return { success: false, error: 'Not found' }
+    }
+    const { data: request, error } = await supabase
+      .from('activity_join_requests')
+      .select('id')
+      .eq('activity_portfolio_id', portfolioId)
+      .eq('applicant_user_id', user.id)
+      .eq('status', 'pending')
+      .maybeSingle()
+    if (error) return { success: false, error: error.message }
+    return { success: true, hasPending: !!request }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Failed to check request' }
+  }
+}
+
+/**
+ * Send a message to an applicant (activity join request) and mark the request as responded.
+ * Does not approve or reject; applicant remains pending. Owner/manager only.
+ */
+export async function respondToActivityJoinRequest(
+  requestId: string,
+  message: string
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+
+    const { data: request, error: requestError } = await supabase
+      .from('activity_join_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+
+    if (requestError || !request) {
+      return { success: false, error: 'Join request not found' }
+    }
+
+    if (request.status !== 'pending') {
+      return { success: false, error: 'Join request is not pending' }
+    }
+
+    const activityId: string = request.activity_portfolio_id
+
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', activityId)
+      .single()
+
+    if (portfolioError || !portfolio || portfolio.type !== 'activities') {
+      return { success: false, error: 'Activity not found for this request' }
+    }
+
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+
+    if (!isOwner && !isManager) {
+      return {
+        success: false,
+        error: 'Only the activity owner or managers can respond to requests',
+      }
+    }
+
+    const { error: updateRequestError } = await supabase
+      .from('activity_join_requests')
+      .update({
+        responded_at: new Date().toISOString(),
+      })
+      .eq('id', requestId)
+
+    if (updateRequestError) {
+      return {
+        success: false,
+        error: updateRequestError.message || 'Failed to update join request',
+      }
+    }
+
+    const basic = metadata?.basic || {}
+    const activityName = (basic.name as string) || 'this activity'
+    const text =
+      message.trim().length > 0
+        ? `Regarding your request to join ${activityName} (activity): ${message.trim()}`
+        : `We received your request to join ${activityName} (activity). We’ll get back to you soon.`
+
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: request.applicant_user_id,
+      text,
+    })
+
+    revalidatePath(`/portfolio/activities/${activityId}`)
+    revalidatePath(`/portfolio/activities/${activityId}/members`)
+
+    return { success: true }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Apply to join an activity via its call-to-join configuration.
+ * - When approval is required: creates a pending activity_join_requests record.
+ * - When approval is not required: immediately adds the user as a member/manager.
+ */
+export async function applyToActivityCallToJoin(
+  input: ApplyActivityCallToJoinInput
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+
+    const { portfolioId, promptAnswer } = input
+
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata, visibility')
+      .eq('id', portfolioId)
+      .single()
+
+    if (portfolioError || !portfolio) {
+      return { success: false, error: 'Activity not found' }
+    }
+
+    if (portfolio.type !== 'activities') {
+      return { success: false, error: 'Call-to-join is only available for activities' }
+    }
+
+    const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+    if (visibility === 'private') {
+      return { success: false, error: 'Call-to-join is not available for private activities' }
+    }
+
+    const metadata = (portfolio.metadata as any) || {}
+    const properties: Record<string, any> = (metadata.properties || {}) as Record<string, any>
+    const callToJoin: ActivityCallToJoinConfig | undefined = properties.call_to_join
+
+    if (!callToJoin) {
+      return { success: false, error: 'Call-to-join is not configured for this activity' }
+    }
+
+    const activityDateTime = (properties.activity_datetime || null) as import('@/lib/datetime').ActivityDateTimeValue | null
+    const status = (metadata.status as string) || null
+    const { isCallToJoinWindowOpen } = await import('@/lib/callToJoin')
+    if (!isCallToJoinWindowOpen(visibility, callToJoin, activityDateTime, status)) {
+      return { success: false, error: 'The call-to-join window for this activity is closed' }
+    }
+
+    const members: string[] = metadata?.members || []
+    const managers: string[] = metadata?.managers || []
+
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+    const isMember = Array.isArray(members) && members.includes(user.id)
+
+    if (isOwner || isManager || isMember) {
+      return { success: false, error: 'You are already part of this activity' }
+    }
+
+    // Role is configured after joining; new members join as member by default
+    const activityRole = 'member'
+    const memberRoleLabel = 'Member'
+
+    const sendMessage = async (receiverId: string, text: string) => {
+      await supabase.from('messages').insert({
+        sender_id: user.id,
+        receiver_id: receiverId,
+        text,
+      })
+    }
+
+    const basic = metadata?.basic || {}
+    const activityName = (basic.name as string) || 'this activity'
+
+    if (callToJoin.require_approval) {
+      // Create or reuse a pending join request
+      const { data: existingRequest } = await supabase
+        .from('activity_join_requests')
+        .select('id, status')
+        .eq('activity_portfolio_id', portfolioId)
+        .eq('applicant_user_id', user.id)
+        .eq('status', 'pending')
+        .maybeSingle()
+
+      if (existingRequest) {
+        return {
+          success: false,
+          error: 'You already have a pending request for this activity',
+        }
+      }
+
+      const { error: insertError } = await supabase.from('activity_join_requests').insert({
+        activity_portfolio_id: portfolioId,
+        applicant_user_id: user.id,
+        prompt_answer: callToJoin.prompt ? promptAnswer || null : null,
+        role_option_id: null,
+        activity_role: activityRole,
+        status: 'pending',
+      })
+
+      if (insertError) {
+        return {
+          success: false,
+          error: insertError.message || 'Failed to submit join request',
+        }
+      }
+
+      // Notify activity owner; link directs to Requests & Invites tab
+      const requestsUrl = `/portfolio/activities/${portfolioId}/members?tab=requests`
+      await sendMessage(
+        portfolio.user_id,
+        `applied to join ${activityName} (activity). Review: ${requestsUrl}`
+      )
+
+      return {
+        success: true,
+      }
+    }
+
+    // Auto-join flow (no approval required)
+    const currentMembers: string[] = metadata?.members || []
+    const currentManagers: string[] = metadata?.managers || []
+    const currentMemberRoles = metadata?.memberRoles || {}
+
+    const nextMembers = currentMembers.includes(user.id)
+      ? currentMembers
+      : [...currentMembers, user.id]
+
+    const nextManagers =
+      (activityRole as string) === 'manager'
+        ? currentManagers.includes(user.id)
+          ? currentManagers
+          : [...currentManagers, user.id]
+        : currentManagers
+
+    const nextMemberRoles = {
+      ...currentMemberRoles,
+      [user.id]: memberRoleLabel,
+    }
+
+    const updatedMetadata = {
+      ...metadata,
+      members: nextMembers,
+      managers: nextManagers,
+      memberRoles: nextMemberRoles,
+    }
+
+    // Keep RLS-consistent by using existing RPC for members, then update metadata
+    const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
+      portfolio_id: portfolioId,
+      new_members: nextMembers,
+    })
+
+    if (rpcError) {
+      // Try direct update as fallback
+      const { error: directError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', portfolioId)
+
+      if (directError) {
+        return {
+          success: false,
+          error: directError.message || 'Failed to join activity',
+        }
+      }
+    } else {
+      const { error: metadataError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', portfolioId)
+
+      if (metadataError) {
+        return {
+          success: false,
+          error: metadataError.message || 'Failed to update activity membership',
+        }
+      }
+    }
+
+    // Optionally record the auto-accepted request for history
+    await supabase.from('activity_join_requests').insert({
+      activity_portfolio_id: portfolioId,
+      applicant_user_id: user.id,
+      prompt_answer: null,
+      role_option_id: null,
+      activity_role: activityRole,
+      status: 'auto_accepted',
+      approved_by: user.id,
+      approved_at: new Date().toISOString(),
+    })
+
+    // Notify owner about the new member
+    await sendMessage(
+      portfolio.user_id,
+      `joined ${activityName} (activity) as ${memberRoleLabel}`
+    )
+
+    revalidatePath(`/portfolio/activities/${portfolioId}`)
+    revalidatePath(`/portfolio/activities/${portfolioId}/members`)
+
+    return { success: true }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Approve an activity join request and add the applicant as a member/manager.
+ */
+export async function approveActivityJoinRequest(
+  requestId: string
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+
+    const { data: request, error: requestError } = await supabase
+      .from('activity_join_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+
+    if (requestError || !request) {
+      return { success: false, error: 'Join request not found' }
+    }
+
+    if (request.status !== 'pending') {
+      return { success: false, error: 'Join request is not pending' }
+    }
+
+    const activityId: string = request.activity_portfolio_id
+
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', activityId)
+      .single()
+
+    if (portfolioError || !portfolio || portfolio.type !== 'activities') {
+      return { success: false, error: 'Activity not found for this request' }
+    }
+
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+
+    if (!isOwner && !isManager) {
+      return {
+        success: false,
+        error: 'Only the activity owner or managers can approve requests',
+      }
+    }
+
+    const applicantId: string = request.applicant_user_id
+    const activityRole: string = request.activity_role || 'member'
+
+    const currentMembers: string[] = metadata?.members || []
+    const currentManagers: string[] = metadata?.managers || []
+    const currentMemberRoles = metadata?.memberRoles || {}
+
+    const nextMembers = currentMembers.includes(applicantId)
+      ? currentMembers
+      : [...currentMembers, applicantId]
+
+    const nextManagers =
+      activityRole === 'manager'
+        ? currentManagers.includes(applicantId)
+          ? currentManagers
+          : [...currentManagers, applicantId]
+        : currentManagers
+
+    const memberRoleLabel =
+      (request.role_option_id && request.activity_role === 'manager'
+        ? 'Manager'
+        : currentMemberRoles[applicantId]) || 'Member'
+
+    const nextMemberRoles = {
+      ...currentMemberRoles,
+      [applicantId]: memberRoleLabel,
+    }
+
+    const updatedMetadata = {
+      ...metadata,
+      members: nextMembers,
+      managers: nextManagers,
+      memberRoles: nextMemberRoles,
+    }
+
+    const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
+      portfolio_id: activityId,
+      new_members: nextMembers,
+    })
+
+    if (rpcError) {
+      const { error: directError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', activityId)
+
+      if (directError) {
+        return {
+          success: false,
+          error: directError.message || 'Failed to approve join request',
+        }
+      }
+    } else {
+      const { error: metadataError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', activityId)
+
+      if (metadataError) {
+        return {
+          success: false,
+          error: metadataError.message || 'Failed to update activity membership',
+        }
+      }
+    }
+
+    const { error: updateRequestError } = await supabase
+      .from('activity_join_requests')
+      .update({
+        status: 'approved',
+        approved_by: user.id,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', requestId)
+
+    if (updateRequestError) {
+      return {
+        success: false,
+        error: updateRequestError.message || 'Failed to update join request',
+      }
+    }
+
+    const basic = metadata?.basic || {}
+    const activityName = (basic.name as string) || 'this activity'
+
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: applicantId,
+      text: `approved your request to join ${activityName} (activity) as ${memberRoleLabel}`,
+    })
+
+    revalidatePath(`/portfolio/activities/${activityId}`)
+    revalidatePath(`/portfolio/activities/${activityId}/members`)
+
+    return { success: true }
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
+/**
+ * Reject an activity join request and optionally send a message to the applicant.
+ */
+export async function rejectActivityJoinRequest(
+  requestId: string,
+  rejectionMessage?: string
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+
+    const { data: request, error: requestError } = await supabase
+      .from('activity_join_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+
+    if (requestError || !request) {
+      return { success: false, error: 'Join request not found' }
+    }
+
+    if (request.status !== 'pending') {
+      return { success: false, error: 'Join request is not pending' }
+    }
+
+    const activityId: string = request.activity_portfolio_id
+
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', activityId)
+      .single()
+
+    if (portfolioError || !portfolio || portfolio.type !== 'activities') {
+      return { success: false, error: 'Activity not found for this request' }
+    }
+
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+
+    if (!isOwner && !isManager) {
+      return {
+        success: false,
+        error: 'Only the activity owner or managers can reject requests',
+      }
+    }
+
+    const { error: updateRequestError } = await supabase
+      .from('activity_join_requests')
+      .update({
+        status: 'rejected',
+        rejected_by: user.id,
+        rejected_at: new Date().toISOString(),
+        rejection_reason: rejectionMessage || null,
+      })
+      .eq('id', requestId)
+
+    if (updateRequestError) {
+      return {
+        success: false,
+        error: updateRequestError.message || 'Failed to update join request',
+      }
+    }
+
+    const basic = metadata?.basic || {}
+    const activityName = (basic.name as string) || 'this activity'
+
+    let text = `rejected your request to join ${activityName} (activity)`
+    if (rejectionMessage && rejectionMessage.trim().length > 0) {
+      text += `: ${rejectionMessage.trim()}`
+    }
+
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: request.applicant_user_id,
+      text,
+    })
+
+    revalidatePath(`/portfolio/activities/${activityId}`)
+    revalidatePath(`/portfolio/activities/${activityId}/members`)
+
+    return { success: true }
+  } catch (error: any) {
     return {
       success: false,
       error: error.message || 'An unexpected error occurred',

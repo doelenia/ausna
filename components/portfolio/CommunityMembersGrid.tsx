@@ -103,9 +103,9 @@ export function CommunityMembersGrid({
             return {
               id: memberId,
               portfolioId: portfolio.id || null,
-              name: basic.name || metadata?.username || null,
+              name: basic.name || null,
               avatar: basic.avatar || metadata?.avatar_url || null,
-              username: metadata?.username || null,
+              username: portfolio.slug || null,
               isCreator,
               isManager,
               role: customRole,

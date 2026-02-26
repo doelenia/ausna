@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, Fragment } from 'react'
 import { createNote } from '@/app/notes/actions'
-import { Portfolio, isProjectPortfolio, PortfolioVisibility } from '@/types/portfolio'
+import { Portfolio, isProjectPortfolio, isActivityPortfolio, PortfolioVisibility } from '@/types/portfolio'
 import { useRouter } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
@@ -59,27 +59,28 @@ export function CreateNoteForm({
   const [loadingPinInfo, setLoadingPinInfo] = useState(false)
   const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone'>('everyone')
   const [visibility, setVisibility] = useState<PortfolioVisibility>('public')
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
-  // Filter to only show project portfolios (exclude human and community)
-  const displayablePortfolios = portfolios.filter((p) => isProjectPortfolio(p))
+  // Filter to show portfolios passed in (currently projects/activities only)
+  const displayablePortfolios = portfolios
 
-  // Get the selected project portfolio ID
-  const selectedProjectId = selectedPortfolios.find((id) => {
+  // Get the selected context portfolio ID (project or activity)
+  const selectedContextId = selectedPortfolios.find((id) => {
     const portfolio = portfolios.find((p) => p.id === id)
-    return portfolio && isProjectPortfolio(portfolio)
+    return portfolio && (isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio))
   })
 
-  // Fetch collections for the selected project
+  // Fetch collections for the selected project or activity
   useEffect(() => {
     const fetchCollections = async () => {
-      if (!selectedProjectId) {
+      if (!selectedContextId) {
         setCollections([])
         return
       }
 
       setLoadingCollections(true)
       try {
-        const response = await fetch(`/api/collections?portfolio_id=${selectedProjectId}`)
+        const response = await fetch(`/api/collections?portfolio_id=${selectedContextId}`)
         if (response.ok) {
           const data = await response.json()
           if (data.success) {
@@ -94,12 +95,12 @@ export function CreateNoteForm({
     }
 
     fetchCollections()
-  }, [selectedProjectId])
+  }, [selectedContextId])
 
-  // Fetch pin info for the selected project
+  // Fetch pin info for the selected project or activity
   useEffect(() => {
     const fetchPinInfo = async () => {
-      if (!selectedProjectId) {
+      if (!selectedContextId) {
         setPinInfo(null)
         setShouldPin(false)
         return
@@ -107,7 +108,7 @@ export function CreateNoteForm({
 
       setLoadingPinInfo(true)
       try {
-        const response = await fetch(`/api/portfolios/${selectedProjectId}/pin-info`)
+        const response = await fetch(`/api/portfolios/${selectedContextId}/pin-info`)
         if (response.ok) {
           const data = await response.json()
           if (data.success) {
@@ -138,12 +139,12 @@ export function CreateNoteForm({
     }
 
     fetchPinInfo()
-  }, [selectedProjectId])
+  }, [selectedContextId])
 
-  // Reset selected collections when project changes
+  // Reset selected collections when context portfolio changes
   useEffect(() => {
     setSelectedCollectionIds([])
-  }, [selectedProjectId])
+  }, [selectedContextId])
 
   /**
    * Read EXIF orientation from image file
@@ -696,7 +697,7 @@ export function CreateNoteForm({
   }
 
   const handleCreateCollection = async () => {
-    if (!newCollectionName.trim() || !selectedProjectId) return
+    if (!newCollectionName.trim() || !selectedContextId) return
 
     setIsCreatingCollection(true)
     try {
@@ -704,7 +705,7 @@ export function CreateNoteForm({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          portfolio_id: selectedProjectId,
+          portfolio_id: selectedContextId,
           name: newCollectionName.trim(),
         }),
       })
@@ -758,20 +759,19 @@ export function CreateNoteForm({
         })
       }
       
-      // Only allow project portfolios - filter out any non-project portfolios
-      const projectPortfolios = selectedPortfolios.filter((id) => {
-        const portfolio = portfolios.find((p) => p.id === id)
-        return portfolio && isProjectPortfolio(portfolio)
-      })
+      // Only allow IDs that correspond to portfolios we know about
+      const contextPortfolios = selectedPortfolios.filter((id) =>
+        portfolios.some((p) => p.id === id)
+      )
       
-      // Must have exactly one project assigned
-      if (projectPortfolios.length !== 1) {
-        setError('Note must be assigned to exactly one project')
+      // Must have exactly one portfolio assigned
+      if (contextPortfolios.length !== 1) {
+        setError('Note must be assigned to exactly one portfolio')
         setIsSubmitting(false)
         return
       }
       
-      formData.append('assigned_portfolios', JSON.stringify(projectPortfolios))
+      formData.append('assigned_portfolios', JSON.stringify(contextPortfolios))
       
       if (mentionedNoteId) {
         formData.append('mentioned_note_id', mentionedNoteId)
@@ -1020,24 +1020,31 @@ export function CreateNoteForm({
       )}
 
       {/* Assigned project banner (same style as NoteCard) */}
-      {selectedProjectId && (() => {
-        const project = portfolios.find((p) => p.id === selectedProjectId && isProjectPortfolio(p))
-        if (!project) return null
-        const basic = getPortfolioBasic(project)
-        const metadata = project.metadata as { basic?: { emoji?: string }; project_type_specific?: string } | undefined
+      {selectedContextId && (() => {
+        const context = portfolios.find(
+          (p) =>
+            p.id === selectedContextId &&
+            (isProjectPortfolio(p) || isActivityPortfolio(p))
+        )
+        if (!context) return null
+        const basic = getPortfolioBasic(context)
+        const metadata = context.metadata as {
+          basic?: { emoji?: string }
+          project_type_specific?: string
+        } | undefined
         const emoji = metadata?.basic?.emoji
         const projectType = metadata?.project_type_specific ?? null
         const description = basic.description
         return (
           <Link
-            href={getPortfolioUrl('projects', project.id)}
+            href={getPortfolioUrl(context.type, context.id)}
             className="flex items-start gap-3 p-3 rounded-lg bg-gray-100"
           >
             <div className="flex-shrink-0">
               <StickerAvatar
                 src={basic.avatar}
                 alt={basic.name}
-                type="projects"
+                  type={context.type}
                 size={48}
                 emoji={emoji}
                 name={basic.name}
@@ -1063,62 +1070,8 @@ export function CreateNoteForm({
         <UIText as="p" className="text-red-600">A project must be assigned to create a note</UIText>
       )}
 
-      {/* Comment privacy - who can comment (post note only) */}
-      {!mentionedNoteId && (
-        <div>
-          <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
-            Who can comment
-          </UIText>
-          <div className="flex flex-wrap gap-2">
-            {(['everyone', 'friends', 'authors'] as const).map((privacy) => (
-              <button
-                key={privacy}
-                type="button"
-                onClick={() => setAnnotationPrivacy(privacy)}
-                className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                  annotationPrivacy === privacy
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                {privacy === 'everyone' && 'Everyone'}
-                {privacy === 'friends' && 'Friends only'}
-                {privacy === 'authors' && 'Authors only'}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Visibility toggle (Public / Private) */}
-      <div>
-        <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
-          Visibility
-        </UIText>
-        <div className="flex flex-wrap gap-2">
-          {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setVisibility(v)}
-              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                visibility === v
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-              }`}
-            >
-              {v === 'public' && 'Public'}
-              {v === 'private' && 'Private'}
-            </button>
-          ))}
-        </div>
-        <UIText as="p" className="text-xs text-gray-500 mt-1">
-          Private notes are only visible to you and will not appear in feeds.
-        </UIText>
-      </div>
-
       {/* Pin option - only show if user is owner and there's space */}
-      {selectedProjectId && pinInfo?.canPin && (
+      {selectedContextId && pinInfo?.canPin && (
         <div>
           <label className="flex items-center gap-2">
             <input
@@ -1127,70 +1080,148 @@ export function CreateNoteForm({
               onChange={(e) => setShouldPin(e.target.checked)}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
-            <UIText as="span">
-              Pin to project ({pinInfo.count}/{pinInfo.max} pinned)
-            </UIText>
+              <UIText as="span">
+                Pin to portfolio ({pinInfo.count}/{pinInfo.max} pinned)
+              </UIText>
           </label>
         </div>
       )}
 
-      {/* Collection selection - only show if a project is selected */}
-      {selectedProjectId && (
-        <div>
-          <UIText as="label" className="block mb-2">
-            Collections (optional)
+      {/* Advanced settings: who can comment, visibility, collections — collapsed by default */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          className="w-full flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+          aria-expanded={advancedOpen}
+        >
+          <UIText as="span" className="font-medium text-gray-900">
+            Advanced settings
           </UIText>
-          
-          {/* Existing collections */}
-          {loadingCollections ? (
-            <UIText className="text-gray-500">Loading collections...</UIText>
-          ) : collections.length > 0 ? (
-            <div className="flex flex-wrap gap-2 mb-3">
-              {collections.map((collection) => (
-                <button
-                  key={collection.id}
-                  type="button"
-                  onClick={() => toggleCollection(collection.id)}
-                  className={`px-3 py-1 rounded-full text-sm transition-colors ${
-                    selectedCollectionIds.includes(collection.id)
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  {collection.name}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <UIText className="text-gray-500 mb-3">No collections yet. Create one below.</UIText>
-          )}
+          <svg
+            className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {advancedOpen && (
+          <div className="p-4 pt-2 space-y-4 border-t border-gray-200">
+            {/* Comment privacy - who can comment (post note only) */}
+            {!mentionedNoteId && (
+              <div>
+                <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
+                  Who can comment
+                </UIText>
+                <div className="flex flex-wrap gap-2">
+                  {(['everyone', 'friends', 'authors'] as const).map((privacy) => (
+                    <button
+                      key={privacy}
+                      type="button"
+                      onClick={() => setAnnotationPrivacy(privacy)}
+                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                        annotationPrivacy === privacy
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {privacy === 'everyone' && 'Everyone'}
+                      {privacy === 'friends' && 'Friends only'}
+                      {privacy === 'authors' && 'Authors only'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          {/* Create new collection */}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newCollectionName}
-              onChange={(e) => setNewCollectionName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  handleCreateCollection()
-                }
-              }}
-              placeholder="New collection name"
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={handleCreateCollection}
-              disabled={!newCollectionName.trim() || isCreatingCollection}
-            >
-              <UIText>{isCreatingCollection ? 'Creating...' : 'Create'}</UIText>
-            </Button>
+            {/* Visibility toggle (Public / Private) */}
+            <div>
+              <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
+                Visibility
+              </UIText>
+              <div className="flex flex-wrap gap-2">
+                {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVisibility(v)}
+                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                      visibility === v
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    {v === 'public' && 'Public'}
+                    {v === 'private' && 'Private'}
+                  </button>
+                ))}
+              </div>
+              <UIText as="p" className="text-xs text-gray-500 mt-1">
+                Private notes are only visible to you and will not appear in feeds.
+              </UIText>
+            </div>
+
+            {/* Collection selection - only show if a context portfolio is selected */}
+            {selectedContextId && (
+              <div>
+                <UIText as="label" className="block mb-2">
+                  Collections (optional)
+                </UIText>
+
+                {loadingCollections ? (
+                  <UIText className="text-gray-500">Loading collections...</UIText>
+                ) : collections.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {collections.map((collection) => (
+                      <button
+                        key={collection.id}
+                        type="button"
+                        onClick={() => toggleCollection(collection.id)}
+                        className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                          selectedCollectionIds.includes(collection.id)
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {collection.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <UIText className="text-gray-500 mb-3">No collections yet. Create one below.</UIText>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newCollectionName}
+                    onChange={(e) => setNewCollectionName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        handleCreateCollection()
+                      }
+                    }}
+                    placeholder="New collection name"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleCreateCollection}
+                    disabled={!newCollectionName.trim() || isCreatingCollection}
+                  >
+                    <UIText>{isCreatingCollection ? 'Creating...' : 'Create'}</UIText>
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Actions */}
       <div className="flex gap-2">

@@ -113,7 +113,6 @@ export async function createPlaceholderHumanPortfolio(
         settings: {},
         email: email.toLowerCase(),
         username: email.split('@')[0] || 'user',
-        full_name: name,
       } as HumanPortfolioMetadata,
     })
     .select()

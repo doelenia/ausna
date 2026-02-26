@@ -2,7 +2,7 @@
 
 ## Overview
 
-This migration converts the existing `profiles` table structure to the new unified `portfolios` system, where each user has exactly one human portfolio.
+This migration (now completed in the main project) converted the existing `profiles` table structure to the unified `portfolios` system, where each user has exactly one human portfolio. The `public.profiles` table and its triggers/policies have since been removed; human portfolios are now the sole source of truth for user profiles.
 
 ## Migration Steps
 
@@ -54,27 +54,19 @@ SELECT COUNT(*) FROM portfolios WHERE type = 'human';
 The application code has been updated to:
 - Use `ensureHumanPortfolio()` instead of querying `profiles`
 - Store profile data in portfolio `metadata` JSONB field
-- Access username via `portfolio.metadata.username`
+- Access username/handle via `portfolio.slug` (for human portfolios)
 
-### 5. (Optional) Archive Old Profiles Table
+### 5. Legacy Notes About the Old Profiles Table
 
-After verifying everything works, you can optionally archive the old profiles table:
-
-```sql
--- Rename old table (don't delete yet, keep as backup)
-ALTER TABLE profiles RENAME TO profiles_archived;
-
--- Or if you're confident, drop it:
--- DROP TABLE profiles;
-```
+In earlier iterations, you could optionally archive the old `profiles` table after migration. In the current system, this table has already been dropped via migrations executed through Supabase MCP, so no additional manual action is required here.
 
 ## Data Mapping
 
 | Old `profiles` Field | New `portfolios` Field | Location |
 |---------------------|----------------------|----------|
 | `id` | `user_id` | Direct column |
-| `username` | `metadata.username` | JSONB |
-| `full_name` | `metadata.full_name` | JSONB |
+| `username` | `slug` (for human portfolios) | column |
+| `full_name` | `metadata.basic.name` (initially) | JSONB |
 | `avatar_url` | `metadata.avatar_url` | JSONB |
 | `email` | `metadata.email` | JSONB |
 | `created_at` | `created_at` | Direct column |
@@ -86,7 +78,7 @@ ALTER TABLE profiles RENAME TO profiles_archived;
 
 New users automatically get a human portfolio created via database trigger. The portfolio includes:
 - Title: User's full name or email username
-- Slug: `user-{user_id}`
+- Slug: a username-style, globally unique handle (derived from metadata/email) stored in `portfolios.slug`
 - Metadata: Username, email, and other profile info
 
 ### Helper Functions
@@ -116,10 +108,10 @@ If you need to rollback:
 
 ## Notes
 
-- The `profiles` table structure is preserved in the migration for compatibility
-- Username uniqueness is now checked across all human portfolios
-- The human portfolio slug is auto-generated as `user-{user_id}` but can be customized
-- All existing profile data is preserved in the portfolio `metadata` field
+- The `profiles` table has been fully removed; user identity is represented solely by human portfolios
+- Username/handle uniqueness is enforced via `portfolios.slug` for `type = 'human'`
+- Human portfolio slugs are generated using a username-style algorithm (email/metadata based) and used as the canonical username/handle (in `portfolios.slug`)
+- All existing profile data is preserved in the portfolio `metadata` field (excluding username/full_name, which are now represented via slug and basic.name)
 
 
 

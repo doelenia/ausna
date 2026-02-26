@@ -17,7 +17,9 @@ export async function POST(request: NextRequest) {
     const portfolio = await findHumanPortfolioByEmail(email.toLowerCase().trim())
 
     if (portfolio) {
-      const name = portfolio.metadata.basic?.name || portfolio.metadata.full_name || 'User'
+      const metadata = portfolio.metadata as any
+      const basic = metadata?.basic || {}
+      const name = basic.name || metadata?.username || 'User'
       return NextResponse.json<EmailCheckResponse>({
         exists: true,
         name,

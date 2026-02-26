@@ -1,16 +1,23 @@
 'use client'
 
-import { useState, useRef, useMemo } from 'react'
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, PortfolioVisibility } from '@/types/portfolio'
+import { useState, useRef, useMemo, useEffect } from 'react'
+import {
+  Portfolio,
+  isProjectPortfolio,
+  isCommunityPortfolio,
+  isHumanPortfolio,
+  PortfolioVisibility,
+  ActivityCallToJoinConfig,
+} from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
-import { updatePortfolio } from '@/app/portfolio/[type]/[id]/actions'
+import { updatePortfolio, updateActivityCallToJoin } from '@/app/portfolio/[type]/[id]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
-import { Title, UIText, Button, Card } from '@/components/ui'
+import { Title, UIText, Button, Card, Content } from '@/components/ui'
 import { ActivityDateTimePicker } from './ActivityDateTimePicker'
 import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationPicker } from './ActivityLocationPicker'
@@ -64,11 +71,63 @@ export function PortfolioEditor({
   const [projectStatus, setProjectStatus] = useState<string>(
     metadata?.status || (!initialActivity ? 'in-progress' : '')
   )
+  const initialCallToJoin: ActivityCallToJoinConfig | null =
+    (metadata?.properties?.call_to_join as ActivityCallToJoinConfig | undefined) || null
+  const [callToJoinConfig, setCallToJoinConfig] = useState<ActivityCallToJoinConfig | null>(
+    initialCallToJoin
+  )
+  const [showCallToJoinModal, setShowCallToJoinModal] = useState(false)
+  const initialHostProjectIds: string[] =
+    (metadata?.properties?.host_project_ids as string[] | undefined) ||
+    ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
+  const [hostProjectIds, setHostProjectIds] = useState<string[]>(initialHostProjectIds)
+  const [hostProjects, setHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
+  const [showHostSelector, setShowHostSelector] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const isActivitySelectionValid = useMemo(
     () => !activityValue || !!activityValue.start,
     [activityValue]
   )
+
+  useEffect(() => {
+    if (portfolio.type !== 'activities') return
+    let cancelled = false
+    const load = async () => {
+      setHostProjectsLoading(true)
+      try {
+        const { data: { user: u } } = await supabase.auth.getUser()
+        if (!u || cancelled) return
+        const { data: projects } = await supabase
+          .from('portfolios')
+          .select('id, user_id, metadata')
+          .eq('type', 'projects')
+          .order('created_at', { ascending: false })
+        const list = (projects || []).filter((p: any) => {
+          const meta = p.metadata as any
+          const managers: string[] = meta?.managers || []
+          return p.user_id === u.id || managers.includes(u.id)
+        }).map((p: any) => {
+          const meta = p.metadata as any
+          const basic = meta?.basic || {}
+          return {
+            id: p.id,
+            name: (basic.name as string) || 'Project',
+            avatar: basic.avatar as string | undefined,
+            emoji: basic.emoji as string | undefined,
+          }
+        })
+        if (!cancelled) setHostProjects(list)
+      } catch (e) {
+        console.error('Failed to load host projects', e)
+      } finally {
+        if (!cancelled) setHostProjectsLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [portfolio.type])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -227,7 +286,7 @@ export function PortfolioEditor({
         formData.append('project_type_general', projectTypeGeneral)
         formData.append('project_type_specific', projectTypeSpecific)
       }
-      if (isProjectPortfolio(portfolio)) {
+      if (isProjectPortfolio(portfolio) || portfolio.type === 'activities') {
         formData.append('visibility', visibility)
         formData.append('project_status', projectStatus || '')
         if (activityValue?.start) {
@@ -288,6 +347,9 @@ export function PortfolioEditor({
           formData.append('activity_location_private', '')
         }
       }
+      if (portfolio.type === 'activities') {
+        formData.append('host_project_ids', JSON.stringify(hostProjectIds))
+      }
 
       const result = await updatePortfolio(formData)
 
@@ -295,6 +357,40 @@ export function PortfolioEditor({
         setError(result.error)
         setLoading(false)
         return
+      }
+
+      // Update activity call-to-join configuration from editor
+      if (portfolio.type === 'activities') {
+        const cfg: ActivityCallToJoinConfig =
+          callToJoinConfig ||
+          initialCallToJoin || {
+            enabled: (visibility !== 'private'),
+            description: 'Join us!',
+            join_by: null,
+            require_approval: true,
+            prompt: 'Why do you want to join this activity?',
+            roles: [
+              {
+                id: 'default-member',
+                label: 'Member',
+                activityRole: 'member',
+              },
+            ],
+            join_by_auto_managed: true,
+          }
+
+        await updateActivityCallToJoin(portfolio.id, {
+          enabled: (visibility !== 'private'),
+          description: cfg.description,
+          joinBy: cfg.join_by ?? null,
+          requireApproval: cfg.require_approval ?? true,
+          prompt: cfg.prompt ?? null,
+          roles: (cfg.roles || []).map((r) => ({
+            id: r.id,
+            label: r.label,
+            activityRole: r.activityRole,
+          })),
+        })
       }
 
       onSave()
@@ -444,7 +540,7 @@ export function PortfolioEditor({
               />
             </div>
 
-            {/* Type Selection (for projects and communities only) */}
+            {/* Type Selection (projects and communities only; activities use Advanced) */}
             {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
               <div>
                 {isProjectPortfolio(portfolio) ? (
@@ -471,7 +567,7 @@ export function PortfolioEditor({
               </div>
             )}
 
-            {/* Visibility and activity (projects only) */}
+            {/* Visibility and Status (projects only; activities use Advanced) */}
             {isProjectPortfolio(portfolio) && (
               <>
                 <div>
@@ -500,41 +596,100 @@ export function PortfolioEditor({
                     Private projects are only visible to you and will not appear in search or feeds.
                   </UIText>
                 </div>
-                {!activityValue?.start && (
-                  <div className="mt-4">
-                    <UIText as="label" className="block mb-2">
-                      Status
-                    </UIText>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { key: 'in-progress', label: 'Live' },
-                        { key: 'archived', label: 'Archived' },
-                      ].map((option) => {
-                        const selected = projectStatus === option.key
-                        return (
+                <div className="mt-4">
+                  <UIText as="label" className="block mb-2">
+                    Status
+                  </UIText>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { key: 'in-progress', label: 'Live' },
+                      { key: 'archived', label: 'Archived' },
+                    ].map((option) => {
+                      const selected = projectStatus === option.key
+                      return (
+                        <button
+                          key={option.key}
+                          type="button"
+                          onClick={() =>
+                            setProjectStatus(selected ? '' : option.key)
+                          }
+                          className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                            selected
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                          disabled={loading}
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <UIText as="p" className="text-xs text-gray-500 mt-1">
+                    Used to indicate whether this project is live or archived.
+                  </UIText>
+                </div>
+              </>
+            )}
+
+            {/* Activity edit: same order as create — Host projects, Date & time, Location, then Advanced */}
+            {portfolio.type === 'activities' && (
+              <>
+                <div>
+                  <UIText as="label" className="block mb-2">
+                    Host projects
+                  </UIText>
+                  <UIText as="p" className="text-xs text-gray-500 mb-2">
+                    Projects that host this activity. You can add projects where you are owner or manager.
+                  </UIText>
+                  <div className="flex flex-wrap gap-2">
+                    {hostProjectIds.map((id) => {
+                      const p = hostProjects.find((x) => x.id === id)
+                      if (!p) return null
+                      return (
+                        <div
+                          key={id}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
+                        >
+                          <StickerAvatar
+                            src={p.avatar}
+                            alt={p.name}
+                            type="projects"
+                            size={32}
+                            emoji={p.emoji}
+                            name={p.name}
+                          />
+                          <Content className="truncate max-w-[120px]">{p.name}</Content>
                           <button
-                            key={option.key}
                             type="button"
-                            onClick={() =>
-                              setProjectStatus(selected ? '' : option.key)
-                            }
-                            className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                              selected
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
+                            onClick={() => setHostProjectIds((prev) => prev.filter((x) => x !== id))}
+                            className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
+                            aria-label="Remove host project"
                             disabled={loading}
                           >
-                            {option.label}
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
                           </button>
-                        )
-                      })}
-                    </div>
-                    <UIText as="p" className="text-xs text-gray-500 mt-1">
-                      Used when no activity date is set to indicate whether the project is live or archived.
-                    </UIText>
+                        </div>
+                      )
+                    })}
+                    {hostProjectsLoading ? (
+                      <UIText className="text-gray-500">Loading...</UIText>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowHostSelector(true)}
+                        disabled={loading}
+                      >
+                        <UIText>Add host project</UIText>
+                      </Button>
+                    )}
                   </div>
-                )}
+                </div>
+
                 <div className="mt-4">
                   <UIText as="label" className="block mb-2">
                     Activity date &amp; time
@@ -545,7 +700,11 @@ export function PortfolioEditor({
                       onClick={() => setShowActivityPicker(true)}
                     />
                   </div>
+                  <UIText as="p" className="text-xs text-gray-500 mt-1">
+                    When set, the activity is Live during the scheduled period (and after start if there’s no end time). After the end time it’s no longer Live—you don’t need to switch it manually.
+                  </UIText>
                 </div>
+
                 <div className="mt-4">
                   <UIText as="label" className="block mb-2">
                     Location
@@ -557,6 +716,167 @@ export function PortfolioEditor({
                       onClick={() => setShowLocationPicker(true)}
                     />
                   </div>
+                </div>
+
+                {/* Advanced settings (activities): Category, Visibility, Live/Archive, Call to join — collapsed by default */}
+                <div className="border border-gray-200 rounded-lg overflow-hidden mt-4">
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedOpen((o) => !o)}
+                    className="w-full flex items-center justify-between gap-2 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                    aria-expanded={advancedOpen}
+                  >
+                    <UIText as="span" className="font-medium text-gray-900">
+                      Advanced settings
+                    </UIText>
+                    <svg
+                      className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {advancedOpen && (
+                    <div className="p-4 pt-2 space-y-4 border-t border-gray-200">
+                      <div>
+                        <UIText as="label" className="block mb-2">
+                          Category
+                        </UIText>
+                        <ProjectTypeSelector
+                          generalCategory={projectTypeGeneral}
+                          specificType={projectTypeSpecific}
+                          onSelect={(general, specific) => {
+                            setProjectTypeGeneral(general)
+                            setProjectTypeSpecific(specific)
+                          }}
+                          disabled={loading}
+                        />
+                      </div>
+
+                      <div>
+                        <UIText as="label" className="block mb-2">
+                          Visibility
+                        </UIText>
+                        <div className="flex flex-wrap gap-2">
+                          {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+                            <button
+                              key={v}
+                              type="button"
+                              onClick={() => setVisibility(v)}
+                              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                                visibility === v
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                              disabled={loading}
+                            >
+                              {v === 'public' && 'Public'}
+                              {v === 'private' && 'Private'}
+                            </button>
+                          ))}
+                        </div>
+                        <UIText as="p" className="text-xs text-gray-500 mt-1">
+                          Private activities are only visible to you and will not appear in search or feeds.
+                        </UIText>
+                      </div>
+
+                      {/* Live / Archive: only when no date & time — clear relationship to schedule */}
+                      <div>
+                        <UIText as="label" className="block mb-2">
+                          Status (Live / Archived)
+                        </UIText>
+                        {activityValue?.start ? (
+                          <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+                            <UIText className="text-gray-700">
+                              You’ve set a date &amp; time, so status is automatic: the activity is Live during the scheduled period and no longer Live after the end time. No need to set Live/Archived here.
+                            </UIText>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap gap-2">
+                              {[
+                                { key: 'in-progress', label: 'Live' },
+                                { key: 'archived', label: 'Archived' },
+                              ].map((option) => {
+                                const selected = projectStatus === option.key
+                                return (
+                                  <button
+                                    key={option.key}
+                                    type="button"
+                                    onClick={() =>
+                                      setProjectStatus(selected ? '' : option.key)
+                                    }
+                                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                                      selected
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                    }`}
+                                    disabled={loading}
+                                  >
+                                    {option.label}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            <UIText as="p" className="text-xs text-gray-500 mt-1">
+                              When no date &amp; time is set, use this to mark whether the activity is currently live or archived.
+                            </UIText>
+                          </>
+                        )}
+                      </div>
+
+                      {visibility !== 'private' && (
+                        <div>
+                          <UIText as="label" className="block mb-2">
+                            Call to join
+                          </UIText>
+                          <UIText as="p" className="text-xs text-gray-500 mb-2">
+                            Public activities show a call-to-join card so visitors can apply.
+                          </UIText>
+                          <div className="mt-2">
+                            <Card variant="subtle" padding="sm">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <UIText as="h3" className="mb-1">
+                                    Call to join preview
+                                  </UIText>
+                                  <Content className="mb-1">
+                                    {callToJoinConfig?.description || 'Join this activity.'}
+                                  </Content>
+                                  <UIText className="text-gray-600 text-xs">
+                                    {callToJoinConfig?.join_by
+                                      ? `Join by: ${new Date(
+                                          callToJoinConfig.join_by
+                                        ).toLocaleString()}`
+                                      : 'No join-by date: applications close when the activity ends or is archived.'}
+                                  </UIText>
+                                  <UIText className="text-gray-600 text-xs mt-1">
+                                    {callToJoinConfig?.require_approval ?? true
+                                      ? 'Requires approval'
+                                      : 'Auto-join'}
+                                  </UIText>
+                                </div>
+                                <div className="flex-shrink-0">
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setShowCallToJoinModal(true)}
+                                    disabled={loading}
+                                  >
+                                    <UIText>Edit</UIText>
+                                  </Button>
+                                </div>
+                              </div>
+                            </Card>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -591,7 +911,7 @@ export function PortfolioEditor({
         </div>
       </div>
     </div>
-    {isProjectPortfolio(portfolio) && showActivityPicker && (
+    {portfolio.type === 'activities' && showActivityPicker && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
           <Card>
@@ -636,7 +956,7 @@ export function PortfolioEditor({
         </div>
       </div>
     )}
-    {isProjectPortfolio(portfolio) && showLocationPicker && (
+    {portfolio.type === 'activities' && showLocationPicker && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
           <Card>
@@ -673,6 +993,221 @@ export function PortfolioEditor({
                   onClick={() => setShowLocationPicker(false)}
                 >
                   <UIText>Done</UIText>
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )}
+
+    {/* Host project selector for activities */}
+    {portfolio.type === 'activities' && showHostSelector && (
+      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <Card variant="default" padding="sm">
+            <div className="mb-4">
+              <UIText as="h2">Add host project</UIText>
+            </div>
+            {hostProjectsLoading ? (
+              <UIText className="text-gray-500">Loading projects...</UIText>
+            ) : hostProjects.filter((p) => !hostProjectIds.includes(p.id)).length === 0 ? (
+              <UIText className="text-gray-500 mb-4">No more projects to add, or you are not owner/manager of any.</UIText>
+            ) : (
+              <div className="grid grid-cols-3 gap-x-4 gap-y-6 mb-4">
+                {hostProjects
+                  .filter((p) => !hostProjectIds.includes(p.id))
+                  .map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      className="flex flex-col items-center gap-2 py-4 px-3 hover:opacity-80 transition-opacity"
+                      onClick={() => {
+                        setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
+                        setShowHostSelector(false)
+                      }}
+                    >
+                      <StickerAvatar
+                        src={project.avatar}
+                        alt={project.name}
+                        type="projects"
+                        size={56}
+                        emoji={project.emoji}
+                        name={project.name}
+                      />
+                      <UIText className="text-center max-w-[96px] truncate" title={project.name}>
+                        {project.name}
+                      </UIText>
+                    </button>
+                  ))}
+              </div>
+            )}
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={() => setShowHostSelector(false)}>
+                <UIText>Close</UIText>
+              </Button>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )}
+
+    {/* Call-to-join details popup for activities */}
+    {portfolio.type === 'activities' && showCallToJoinModal && (
+      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
+        <div
+          className="bg-white rounded-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Card variant="default" padding="sm">
+            <div className="mb-4">
+              <UIText as="h2">Configure call to join</UIText>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <UIText as="label" className="block mb-1">
+                  Description
+                </UIText>
+                <textarea
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                  rows={3}
+                  value={callToJoinConfig?.description || ''}
+                  onChange={(e) =>
+                    setCallToJoinConfig((prev) => ({
+                      ...(prev || {
+                        enabled: (visibility !== 'private'),
+                        description: '',
+                        join_by: null,
+                        require_approval: true,
+                        prompt: 'Why do you want to join this activity?',
+                        roles: [
+                          {
+                            id: 'default-member',
+                            label: 'Member',
+                            activityRole: 'member',
+                          },
+                        ],
+                        join_by_auto_managed: true,
+                      }),
+                      description: e.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <UIText as="label" className="block mb-1">
+                  Join by (optional)
+                </UIText>
+                <input
+                  type="datetime-local"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                  value={
+                    callToJoinConfig?.join_by
+                      ? new Date(callToJoinConfig.join_by).toISOString().slice(0, 16)
+                      : ''
+                  }
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setCallToJoinConfig((prev) => ({
+                      ...(prev || {
+                        enabled: (visibility !== 'private'),
+                        description: 'Join us!',
+                        join_by: null,
+                        require_approval: true,
+                        prompt: 'Why do you want to join this activity?',
+                        roles: [
+                          {
+                            id: 'default-member',
+                            label: 'Member',
+                            activityRole: 'member',
+                          },
+                        ],
+                        join_by_auto_managed: true,
+                      }),
+                      join_by: value ? new Date(value).toISOString() : null,
+                      join_by_auto_managed: value ? false : prev?.join_by_auto_managed ?? true,
+                    }))
+                  }}
+                />
+                <UIText as="p" className="text-xs text-gray-500 mt-1">
+                  If left empty, applications close when the activity ends or is archived.
+                </UIText>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  id="edit-activity-require-approval"
+                  type="checkbox"
+                  checked={callToJoinConfig?.require_approval ?? true}
+                  onChange={(e) =>
+                    setCallToJoinConfig((prev) => ({
+                      ...(prev || {
+                        enabled: (visibility !== 'private'),
+                        description: 'Join us!',
+                        join_by: null,
+                        require_approval: true,
+                        prompt: 'Why do you want to join this activity?',
+                        roles: [
+                          {
+                            id: 'default-member',
+                            label: 'Member',
+                            activityRole: 'member',
+                          },
+                        ],
+                        join_by_auto_managed: true,
+                      }),
+                      require_approval: e.target.checked,
+                      // Clear prompt when turning off approval
+                      prompt: e.target.checked ? prev?.prompt ?? null : null,
+                    }))
+                  }
+                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <UIText as="label" htmlFor="edit-activity-require-approval">
+                  Require approval to join
+                </UIText>
+              </div>
+              {(callToJoinConfig?.require_approval ?? true) && (
+                <div>
+                  <UIText as="label" className="block mb-1">
+                    Prompt (optional)
+                  </UIText>
+                  <textarea
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    rows={3}
+                    value={callToJoinConfig?.prompt || ''}
+                    onChange={(e) =>
+                      setCallToJoinConfig((prev) => ({
+                        ...(prev || {
+                          enabled: (visibility !== 'private'),
+                          description: 'Join us!',
+                          join_by: null,
+                          require_approval: true,
+                          prompt: 'Why do you want to join this activity?',
+                          roles: [
+                            { id: 'default-member', label: 'Member', activityRole: 'member' },
+                          ],
+                          join_by_auto_managed: true,
+                        }),
+                        prompt: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              )}
+              <div className="flex justify-end gap-2 mt-4">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setShowCallToJoinModal(false)}
+                >
+                  <UIText>Close</UIText>
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => setShowCallToJoinModal(false)}
+                >
+                  <UIText>Save</UIText>
                 </Button>
               </div>
             </div>
