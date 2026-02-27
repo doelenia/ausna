@@ -368,6 +368,28 @@ export async function updateHumanPortfolioMetadataById(
     .eq('id', portfolioId)
   
   if (updateError) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': 'f34ff3',
+      },
+      body: JSON.stringify({
+        sessionId: 'f34ff3',
+        runId: 'name-debug',
+        hypothesisId: 'H-portfolio-update',
+        location: 'lib/portfolio/admin-helpers.ts:387',
+        message: 'Portfolio metadata update failed',
+        data: {
+          portfolioId,
+          code: (updateError as any)?.code ?? null,
+          status: (updateError as any)?.status ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion agent log
     throw new Error(`Failed to update human portfolio: ${updateError.message}`)
   }
   
