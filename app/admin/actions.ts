@@ -632,7 +632,164 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
       }
     }
 
-    // Step 6: Delete user from auth (this will cascade delete notes, subscriptions, friends, messages, etc.)
+    // Step 6: Explicitly delete user-related rows from all remaining tables
+    // Use service client to bypass RLS and ensure full cleanup.
+    const userIdFilter = `${userId}`
+
+    // 6a. Notes authored by user
+    {
+      const { error } = await serviceClient
+        .from('notes')
+        .delete()
+        .eq('owner_account_id', userIdFilter)
+      if (error) {
+        console.error('Error deleting notes for user:', error)
+      }
+    }
+
+    // 6b. Messages where user is sender or receiver
+    {
+      const { error } = await serviceClient
+        .from('messages')
+        .delete()
+        .or(`sender_id.eq.${userIdFilter},receiver_id.eq.${userIdFilter}`)
+      if (error) {
+        console.error('Error deleting messages for user:', error)
+      }
+    }
+
+    // 6c. Friends rows
+    {
+      const { error } = await serviceClient
+        .from('friends')
+        .delete()
+        .or(`user_id.eq.${userIdFilter},friend_id.eq.${userIdFilter}`)
+      if (error) {
+        console.error('Error deleting friends for user:', error)
+      }
+    }
+
+    // 6d. Conversation completions
+    {
+      const { error } = await serviceClient
+        .from('conversation_completions')
+        .delete()
+        .or(`user_id.eq.${userIdFilter},partner_id.eq.${userIdFilter}`)
+      if (error) {
+        console.error('Error deleting conversation completions for user:', error)
+      }
+    }
+
+    // 6e. Subscriptions
+    {
+      const { error } = await serviceClient
+        .from('subscriptions')
+        .delete()
+        .eq('user_id', userIdFilter)
+      if (error) {
+        console.error('Error deleting subscriptions for user:', error)
+      }
+    }
+
+    // 6f. Portfolio invitations (as inviter or invitee)
+    {
+      const { error } = await serviceClient
+        .from('portfolio_invitations')
+        .delete()
+        .or(`inviter_id.eq.${userIdFilter},invitee_id.eq.${userIdFilter}`)
+      if (error) {
+        console.error('Error deleting portfolio invitations for user:', error)
+      }
+    }
+
+    // 6g. Activity join requests
+    {
+      const { error } = await serviceClient
+        .from('activity_join_requests')
+        .delete()
+        .or(
+          `applicant_user_id.eq.${userIdFilter},approved_by.eq.${userIdFilter},rejected_by.eq.${userIdFilter}`
+        )
+      if (error) {
+        console.error('Error deleting activity join requests for user:', error)
+      }
+    }
+
+    // 6h. Feed state and interests
+    {
+      const { error: feedError } = await serviceClient
+        .from('user_feed_state')
+        .delete()
+        .eq('user_id', userIdFilter)
+      if (feedError) {
+        console.error('Error deleting user_feed_state for user:', feedError)
+      }
+
+      const { error: interestsError } = await serviceClient
+        .from('user_interests')
+        .delete()
+        .eq('user_id', userIdFilter)
+      if (interestsError) {
+        console.error('Error deleting user_interests for user:', interestsError)
+      }
+    }
+
+    // 6i. Legal agreements
+    {
+      const { error } = await serviceClient
+        .from('user_legal_agreements')
+        .delete()
+        .eq('user_id', userIdFilter)
+      if (error) {
+        console.error('Error deleting user_legal_agreements for user:', error)
+      }
+    }
+
+    // 6j. User invites sent by this user
+    {
+      const { error } = await serviceClient
+        .from('user_invites')
+        .delete()
+        .eq('inviter_user_id', userIdFilter)
+      if (error) {
+        console.error('Error deleting user_invites for user:', error)
+      }
+    }
+
+    // 6k. Admin audit references (keep history but detach user if desired)
+    {
+      const { error: waitlistError } = await serviceClient
+        .from('waitlist')
+        .update({ approved_by: null })
+        .eq('approved_by', userIdFilter)
+      if (waitlistError) {
+        console.error('Error nulling waitlist.approved_by for user:', waitlistError)
+      }
+
+      const { error: formsError } = await serviceClient
+        .from('public_upload_forms')
+        .update({ approved_by: null })
+        .eq('approved_by', userIdFilter)
+      if (formsError) {
+        console.error(
+          'Error nulling public_upload_forms.approved_by for user:',
+          formsError
+        )
+      }
+
+      const { error: formConfigError } = await serviceClient
+        .from('public_upload_form_config')
+        .update({ updated_by: null })
+        .eq('updated_by', userIdFilter)
+      if (formConfigError) {
+        console.error(
+          'Error nulling public_upload_form_config.updated_by for user:',
+          formConfigError
+        )
+      }
+    }
+
+    // Step 7: Delete user from auth (this will also cascade through remaining FKs)
     const { error: deleteUserError } = await serviceClient.auth.admin.deleteUser(userId)
 
     if (deleteUserError) {
@@ -756,6 +913,20 @@ export async function approveUser(userId: string, approve: boolean): Promise<App
         success: false,
         error: updatePortfolioError.message || 'Failed to update approval status on portfolio',
       }
+    }
+
+    // Keep owned project portfolios in sync with the human approval status.
+    // When a user becomes non-pseudo (approved), all of their owned projects
+    // should also become non-pseudo, and vice versa.
+    const { error: updateProjectsError } = await serviceClient
+      .from('portfolios')
+      .update({ is_pseudo: nextIsPseudo })
+      .eq('type', 'projects')
+      .eq('user_id', userId)
+
+    if (updateProjectsError) {
+      console.error('Error updating owned project is_pseudo for approval:', updateProjectsError)
+      // Non-fatal: human approval remains updated even if projects fail to sync.
     }
 
     // Optionally mirror approval status into portfolio metadata for client-side display

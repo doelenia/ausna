@@ -133,7 +133,7 @@ export default async function FriendsPage({ params }: FriendsPageProps) {
     friendIds.map(async (friendId: string) => {
       const { data: friendPortfolio } = await supabase
         .from('portfolios')
-        .select('user_id, metadata')
+        .select('user_id, metadata, is_pseudo')
         .eq('user_id', friendId)
         .eq('type', 'human')
         .maybeSingle()
@@ -143,6 +143,7 @@ export default async function FriendsPage({ params }: FriendsPageProps) {
         const friendBasic = friendMetadata?.basic || {}
         return {
           id: friendId,
+          isPseudo: (friendPortfolio as any).is_pseudo === true,
           username: friendMetadata?.username || null,
           name: friendBasic.name || friendMetadata?.full_name || null,
           avatar: friendBasic.avatar || friendMetadata?.avatar_url || null,
@@ -150,6 +151,7 @@ export default async function FriendsPage({ params }: FriendsPageProps) {
       }
       return {
         id: friendId,
+        isPseudo: false,
         username: null,
         name: null,
         avatar: null,
@@ -181,10 +183,33 @@ export default async function FriendsPage({ params }: FriendsPageProps) {
                 key={friend.id}
                 className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
               >
-                <Link
-                  href={`/portfolio/human/${friend.id}`}
-                  className="flex items-center gap-3 hover:opacity-80"
-                >
+                {friend.isPseudo ? (
+                  <div className="flex items-center gap-3">
+                    <UserAvatar
+                      userId={friend.id}
+                      name={friend.name}
+                      avatar={friend.avatar}
+                      size={40}
+                      showLink={false}
+                    />
+                    <div>
+                      <UIText as="div">
+                        {friend.name || friend.username || `User ${friend.id.slice(0, 8)}`}
+                        {friend.id === user?.id && ' (You)'}
+                      </UIText>
+                      {friend.username && (
+                        <UIText as="div">@{friend.username}</UIText>
+                      )}
+                      <UIText as="div" className="text-gray-600 text-xs mt-1">
+                        Contact (not yet on Ausna)
+                      </UIText>
+                    </div>
+                  </div>
+                ) : (
+                  <Link
+                    href={`/portfolio/human/${friend.id}`}
+                    className="flex items-center gap-3 hover:opacity-80"
+                  >
                   <UserAvatar
                     userId={friend.id}
                     name={friend.name}
@@ -200,8 +225,9 @@ export default async function FriendsPage({ params }: FriendsPageProps) {
                     {friend.username && (
                       <UIText as="div">@{friend.username}</UIText>
                     )}
-                  </div>
-                </Link>
+                    </div>
+                  </Link>
+                )}
               </div>
             ))}
           </div>

@@ -62,10 +62,12 @@ export async function updateSession(request: NextRequest) {
     error: authError,
   } = await supabase.auth.getUser()
 
-  // Redirect root path to /main
+  // Redirect root path:
+  // - logged-out users -> email-first login page
+  // - logged-in users  -> main feed
   if (request.nextUrl.pathname === '/') {
     const url = request.nextUrl.clone()
-    url.pathname = '/main'
+    url.pathname = user ? '/main' : '/login'
     // Create redirect response and copy all cookies from supabaseResponse
     const redirectResponse = NextResponse.redirect(url)
     // Copy all cookies that were set during session refresh

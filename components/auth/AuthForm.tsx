@@ -7,20 +7,20 @@ import Link from 'next/link'
 import { Button, Title, Content, UIText } from '@/components/ui'
 import { getAuthCallbackUrl } from '@/lib/utils/site-url'
 
+type AuthStep = 'enterEmail' | 'loginExisting' | 'registerNew'
+
 interface AuthFormProps {
   mode: 'login' | 'signup'
 }
 
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({ mode: _mode }: AuthFormProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [emailSent, setEmailSent] = useState(false)
-  const [waitlistSuccess, setWaitlistSuccess] = useState(false)
-  const [emailChecked, setEmailChecked] = useState(false)
-  const [isApproved, setIsApproved] = useState(false)
+  const [authStep, setAuthStep] = useState<AuthStep>('enterEmail')
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
   const [termsVersion, setTermsVersion] = useState<number | null>(null)
@@ -29,8 +29,6 @@ export function AuthForm({ mode }: AuthFormProps) {
   const supabase = createClient()
 
   useEffect(() => {
-    if (mode !== 'signup') return
-
     const loadActiveDocuments = async () => {
       const { data, error } = await supabase
         .from('legal_documents')
@@ -52,130 +50,10 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
 
     loadActiveDocuments()
-  }, [mode, supabase])
+  }, [supabase])
 
-  // Step 1: Check email against waitlist
-  const handleEmailCheck = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!email) return
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Check waitlist
-      const { data: waitlistEntry, error: waitlistError } = await supabase
-        .from('waitlist')
-        .select('status, id')
-        .eq('email', email.toLowerCase())
-        .single()
-
-      // If no waitlist entry exists, create one as pending
-      if (waitlistError && waitlistError.code === 'PGRST116') {
-        // No entry found, create pending entry
-        const { error: insertError } = await supabase
-          .from('waitlist')
-          .insert({
-            email: email.toLowerCase(),
-            username: null, // Username will be set later
-            status: 'pending',
-          })
-
-        if (insertError) {
-          console.error('Error creating waitlist entry:', insertError)
-          // Check if error is due to unique constraint (email already exists)
-          if (insertError.code === '23505' || insertError.message?.includes('duplicate') || insertError.message?.includes('unique')) {
-            // Email already exists in waitlist, check its status
-            const { data: existingEntry } = await supabase
-              .from('waitlist')
-              .select('status')
-              .eq('email', email.toLowerCase())
-              .single()
-            
-            if (existingEntry) {
-              if (existingEntry.status === 'approved') {
-                // Approved - allow signup to continue
-                setEmailChecked(true)
-                setIsApproved(true)
-                setLoading(false)
-                return
-              } else if (existingEntry.status === 'pending') {
-                setError('Your email is on the waitlist but has not been approved yet. Please wait for approval.')
-                setLoading(false)
-                return
-              }
-            }
-          }
-          setError('Failed to add to waitlist. Please try again.')
-          setLoading(false)
-          return
-        }
-
-        // Show success message with green checkmark
-        setWaitlistSuccess(true)
-        setLoading(false)
-        return
-      }
-
-      // If waitlist entry exists, check status
-      if (waitlistEntry) {
-        if (waitlistEntry.status === 'approved') {
-          // Approved - allow signup to continue
-          setEmailChecked(true)
-          setIsApproved(true)
-          setLoading(false)
-          return
-        } else if (waitlistEntry.status === 'pending') {
-          setError('Your email is on the waitlist but has not been approved yet. Please wait for approval.')
-          setLoading(false)
-          return
-        } else if (waitlistEntry.status === 'rejected') {
-          // If rejected, delete the old entry to allow them to try again
-          const { error: deleteError } = await supabase
-            .from('waitlist')
-            .delete()
-            .eq('id', waitlistEntry.id)
-
-          if (deleteError) {
-            console.error('Error deleting rejected entry:', deleteError)
-          }
-
-          // Create new pending entry
-          const { error: insertError } = await supabase
-            .from('waitlist')
-            .insert({
-              email: email.toLowerCase(),
-              username: null,
-              status: 'pending',
-            })
-
-          if (insertError) {
-            console.error('Error creating new waitlist entry:', insertError)
-            setError('Error creating new waitlist entry. Please try again.')
-            setLoading(false)
-            return
-          }
-
-          // Show success message for new request
-          setWaitlistSuccess(true)
-          setLoading(false)
-          return
-        } else {
-          setError('Your email is on the waitlist but has not been approved yet.')
-          setLoading(false)
-          return
-        }
-      }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred')
-      setLoading(false)
-    }
-  }
-
-  // Step 2: Complete signup (only for approved users)
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault()
-
+  // Complete signup for new users (email-first flow)
+  const handleSignup = async () => {
     if (!agreedToTerms || !agreedToPrivacy) {
       setError('You must agree to the Terms & Conditions and Privacy Policy to create an account.')
       setLoading(false)
@@ -294,19 +172,34 @@ export function AuthForm({ mode }: AuthFormProps) {
     setError(null)
 
     try {
-      if (mode === 'signup') {
-        // If email not checked yet, check it first
-        if (!emailChecked) {
-          await handleEmailCheck(e)
-          return
+      if (authStep === 'enterEmail') {
+        // Determine whether this email belongs to an existing user or a new/pseudo user
+        const response = await fetch('/api/auth/check-email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email }),
+        })
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}))
+          throw new Error(data.error || 'Failed to check email. Please try again.')
         }
-        // If approved, proceed with signup
-        if (isApproved) {
-          await handleSignup(e)
-          return
+
+        const data = (await response.json()) as { status: 'existing_user' | 'new_or_pseudo' }
+
+        if (data.status === 'existing_user') {
+          setAuthStep('loginExisting')
+        } else {
+          setAuthStep('registerNew')
         }
-      } else {
-        // Login flow
+
+        return
+      }
+
+      if (authStep === 'loginExisting') {
+        // Login flow for existing users
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
@@ -323,6 +216,13 @@ export function AuthForm({ mode }: AuthFormProps) {
           setError('Failed to establish session. Please try again.')
           setLoading(false)
         }
+
+        return
+      }
+
+      if (authStep === 'registerNew') {
+        await handleSignup()
+        return
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred')
@@ -331,37 +231,8 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   }
 
-  // Show waitlist success message
-  if (mode === 'signup' && waitlistSuccess) {
-    return (
-      <div className="w-full max-w-md mx-auto">
-        <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-          <div className="mb-4">
-            <svg
-              className="mx-auto h-12 w-12 text-green-600"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-          </div>
-          <Title as="h3" className="mb-2">You're on the waitlist!</Title>
-          <UIText className="mb-4">
-            Your email <strong>{email}</strong> has been added to the waitlist. You will be notified when your account is approved.
-          </UIText>
-        </div>
-      </div>
-    )
-  }
-
-  // Show email confirmation message after signup (for approved users)
-  if (mode === 'signup' && emailSent) {
+  // Show email confirmation message after signup
+  if (emailSent) {
     return (
       <div className="w-full max-w-md mx-auto">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
@@ -419,21 +290,21 @@ export function AuthForm({ mode }: AuthFormProps) {
             value={email}
             onChange={(e) => {
               setEmail(e.target.value)
-              // Reset email check if email changes
-              if (emailChecked) {
-                setEmailChecked(false)
-                setIsApproved(false)
-              }
+              // Reset flow if email changes
+              setAuthStep('enterEmail')
+              setPassword('')
+              setUsername('')
+              setError(null)
             }}
             required
-            disabled={emailChecked && isApproved}
+            disabled={loading}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
             placeholder="your@email.com"
           />
         </div>
 
-        {/* Show password and username only if email is checked and approved */}
-        {mode === 'signup' && emailChecked && isApproved && (
+        {/* Registration fields for new or pseudo users */}
+        {authStep === 'registerNew' && (
           <>
             <div>
               <UIText as="label" htmlFor="username" className="block mb-1">
@@ -526,8 +397,8 @@ export function AuthForm({ mode }: AuthFormProps) {
           </>
         )}
 
-        {/* Show password for login */}
-        {mode === 'login' && (
+        {/* Password for existing users logging in */}
+        {authStep === 'loginExisting' && (
           <div>
             <UIText as="label" htmlFor="password" className="block mb-1">
               Password
@@ -555,35 +426,29 @@ export function AuthForm({ mode }: AuthFormProps) {
           type="submit"
           variant="primary"
           fullWidth
-          disabled={
-            loading ||
-            (mode === 'signup' &&
-              emailChecked &&
-              isApproved &&
-              (!agreedToTerms || !agreedToPrivacy))
-          }
+          disabled={loading || (authStep === 'registerNew' && (!agreedToTerms || !agreedToPrivacy))}
         >
           <UIText>
-          {loading
-            ? 'Loading...'
-            : mode === 'login'
-            ? 'Sign In'
-            : emailChecked && isApproved
-            ? 'Sign Up'
-            : 'Check Email'}
+            {loading
+              ? 'Loading...'
+              : authStep === 'enterEmail'
+              ? 'Continue'
+              : authStep === 'loginExisting'
+              ? 'Sign In'
+              : 'Create account'}
           </UIText>
         </Button>
 
-        {mode === 'signup' && emailChecked && isApproved && (
+        {authStep !== 'enterEmail' && (
           <Button
             type="button"
             variant="text"
             fullWidth
             onClick={() => {
-              setEmailChecked(false)
-              setIsApproved(false)
+              setAuthStep('enterEmail')
               setPassword('')
               setUsername('')
+              setError(null)
             }}
           >
             <UIText>Use different email</UIText>
