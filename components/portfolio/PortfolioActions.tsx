@@ -8,9 +8,10 @@ import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Button, UIText, Dropdown, DropdownItem, Card } from '@/components/ui'
 import { FriendButton } from './FriendButton'
 import { useFriendStatus } from './useFriendStatus'
-import { Edit, User, Share2, MessageCircle, UserMinus, Bell, BellOff, Trash2, Pen } from 'lucide-react'
+import { Edit, User, Share2, MessageCircle, UserMinus, Bell, BellOff, Trash2, Pen, UserPlus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { StickerAvatar } from './StickerAvatar'
+import { AddContactDialog } from '@/components/contacts/AddContactDialog'
 
 interface PortfolioActionsProps {
   portfolio: Portfolio
@@ -44,6 +45,7 @@ export function PortfolioActions({
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [userProjects, setUserProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [userProjectsLoading, setUserProjectsLoading] = useState(false)
+  const [showAddContactDialog, setShowAddContactDialog] = useState(false)
   
   // Get friend status for human portfolios (always call hook, but only use result when needed).
   // IMPORTANT: when we pass an id into friend-related APIs/components it is always the
@@ -229,6 +231,12 @@ export function PortfolioActions({
       icon: User,
     })
 
+    dropdownItems.push({
+      label: 'Share profile',
+      onClick: handleShare,
+      icon: Share2,
+    })
+
     return (
       <>
         <div className="flex flex-wrap items-center gap-2">
@@ -236,12 +244,20 @@ export function PortfolioActions({
             <Pen className="w-4 h-4 mr-2" strokeWidth={1.5} />
             <UIText>Create Note</UIText>
           </Button>
-          <Button variant="secondary" onClick={handleShare}>
-            <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
-            <UIText>Share</UIText>
+          <Button variant="secondary" onClick={() => setShowAddContactDialog(true)}>
+            <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <UIText>Add contact</UIText>
           </Button>
           {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
         </div>
+
+        {showAddContactDialog && (
+          <AddContactDialog
+            isOpen={showAddContactDialog}
+            onClose={() => setShowAddContactDialog(false)}
+            ownerUserId={portfolio.user_id}
+          />
+        )}
 
         {/* Project Selector Popup */}
         {showProjectSelector && (

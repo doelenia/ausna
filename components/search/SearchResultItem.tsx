@@ -18,6 +18,7 @@ interface SearchResult {
   username?: string | null
   projectType?: string | null
   user_id: string
+  is_pseudo?: boolean
   // Derived verification flag from server (is_pseudo-based, with legacy fallback)
   is_approved?: boolean
 }
@@ -125,13 +126,28 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
   }
 
   const secondLine = getSecondLine()
-  const portfolioUrl = `/portfolio/${result.type}/${result.id}`
+  const portfolioUrl =
+    result.type === 'human' && result.is_pseudo
+      ? undefined
+      : `/portfolio/${result.type}/${result.id}`
+
+  const Wrapper: React.ComponentType<{ children: React.ReactNode }> = portfolioUrl
+    ? (({ children }) => (
+        <Link
+          href={portfolioUrl}
+          className="flex items-start gap-4 p-4 hover:bg-gray-100 transition-colors rounded-lg"
+        >
+          {children}
+        </Link>
+      ))
+    : (({ children }) => (
+        <div className="flex items-start gap-4 p-4 rounded-lg bg-transparent">
+          {children}
+        </div>
+      ))
 
   return (
-    <Link
-      href={portfolioUrl}
-      className="flex items-start gap-4 p-4 hover:bg-gray-100 transition-colors rounded-lg"
-    >
+    <Wrapper>
       {/* Avatar */}
       <div className="flex-shrink-0">
         {result.type === 'human' ? (
@@ -191,7 +207,7 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
           </div>
         )}
       </div>
-    </Link>
+    </Wrapper>
   )
 }
 

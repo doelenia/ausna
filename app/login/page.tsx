@@ -17,13 +17,10 @@ export default function LoginPage({ searchParams }: LoginPageProps) {
       <div className="max-w-md w-full space-y-8 px-4 md:px-0">
         <div>
           <Title as="h1" className="mt-6 text-center">
-            Sign in to your account
+            Continue with your email
           </Title>
           <UIText as="p" className="mt-2 text-center">
-            Or{' '}
-            <Link href="/signup" className="text-blue-600 hover:text-blue-500">
-              create a new account
-            </Link>
+            Enter your email to sign in to an existing account or create a new one with email verification.
           </UIText>
         </div>
         {passwordResetSuccess && (
