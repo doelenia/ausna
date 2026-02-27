@@ -103,9 +103,30 @@ export async function POST(request: NextRequest) {
 
       // Resend path: reuse existing token and just send another email
       try {
+        // Derive inviter display name
+        let inviterName = 'Someone'
+        const { data: inviterPortfolio } = await supabase
+          .from('portfolios')
+          .select('metadata')
+          .eq('type', 'human')
+          .eq('user_id', inviterUserId)
+          .maybeSingle()
+
+        if (inviterPortfolio) {
+          const meta = inviterPortfolio.metadata as any
+          const basic = meta?.basic || {}
+          inviterName =
+            (basic.name as string | undefined) ||
+            (meta?.full_name as string | undefined) ||
+            inviterName
+        }
+
         const { data: emailResult, error: emailError } =
           await serviceClient.auth.admin.inviteUserByEmail(normalizedEmail, {
             redirectTo: inviteLink,
+            data: {
+              invited_by_name: inviterName,
+            },
           } as any)
 
         if (emailError) {
@@ -302,11 +323,36 @@ export async function POST(request: NextRequest) {
     const siteUrl = getSiteUrl()
     const inviteLink = `${siteUrl}/invite/${token}`
 
+    // Derive inviter display name for email metadata
+    let inviterName = 'Someone'
+    try {
+      const { data: inviterPortfolio } = await supabase
+        .from('portfolios')
+        .select('metadata')
+        .eq('type', 'human')
+        .eq('user_id', inviterUserId)
+        .maybeSingle()
+
+      if (inviterPortfolio) {
+        const meta = inviterPortfolio.metadata as any
+        const basic = meta?.basic || {}
+        inviterName =
+          (basic.name as string | undefined) ||
+          (meta?.full_name as string | undefined) ||
+          inviterName
+      }
+    } catch (e) {
+      console.error('Error resolving inviter name for invite email:', e)
+    }
+
     // 6. Send invitation email via Supabase Auth Admin API
     try {
       const { data: emailResult, error: emailError } =
         await serviceClient.auth.admin.inviteUserByEmail(normalizedEmail, {
           redirectTo: inviteLink,
+          data: {
+            invited_by_name: inviterName,
+          },
         } as any)
 
       if (emailError) {

@@ -24,8 +24,9 @@ export async function GET(
   { params }: { params: { token: string } }
 ) {
   try {
-    const supabase = await createClient()
     const token = params.token
+    const supabase = await createClient()
+    const serviceClient = createServiceClient()
 
     if (!token) {
       return NextResponse.json(
@@ -34,7 +35,7 @@ export async function GET(
       )
     }
 
-    const { data: invite, error } = await supabase
+    const { data: invite, error } = await serviceClient
       .from('user_invites')
       .select('*')
       .eq('token', token)
@@ -117,7 +118,7 @@ export async function POST(
       )
     }
 
-    const { data: invite, error } = await supabase
+    const { data: invite, error } = await serviceClient
       .from('user_invites')
       .select('*')
       .eq('token', token)
@@ -174,7 +175,7 @@ export async function POST(
           u.email.toLowerCase() === normalizedEmail
       ) ?? null
 
-    if (existingUser) {
+      if (existingUser) {
       authUserId = existingUser.id as string
       // Update password and confirm email
       await serviceClient.auth.admin.updateUserById(authUserId, {
@@ -215,7 +216,7 @@ export async function POST(
       )
     }
 
-    // Convert pseudo portfolio to non-pseudo (if exists)
+    // Convert pseudo portfolio to non-pseudo and update name/email if possible
     let convertedPortfolioId: string | null = null
 
     if (invite.pseudo_portfolio_id) {
@@ -293,6 +294,46 @@ export async function POST(
         }
       } catch (err) {
         console.error('Error updating pseudo portfolio on invite completion:', err)
+      }
+    }
+
+    // Fallback: if this invite doesn't have a pseudo_portfolio_id (older invites),
+    // or conversion by id failed to set convertedPortfolioId, try resolving by email.
+    if (!convertedPortfolioId && !invite.pseudo_portfolio_id) {
+      try {
+        const byEmail = await findHumanPortfolioByEmail(normalizedEmail)
+        if (byEmail) {
+          const { error: updateError } = await serviceClient
+            .from('portfolios')
+            .update({
+              user_id: authUserId,
+              is_pseudo: false,
+            })
+            .eq('id', byEmail.id)
+
+          if (!updateError) {
+            const metadata = byEmail.metadata as any
+            const existingBasic = metadata?.basic || {}
+            const updatedMetadata = {
+              ...metadata,
+              basic: {
+                ...existingBasic,
+                name: trimmedName || existingBasic.name,
+              },
+              email: normalizedEmail,
+            }
+            await updateHumanPortfolioMetadataById(
+              byEmail.id as string,
+              updatedMetadata
+            )
+            convertedPortfolioId = byEmail.id as string
+          }
+        }
+      } catch (err) {
+        console.error(
+          'Error updating portfolio by email on invite completion:',
+          err
+        )
       }
     }
 

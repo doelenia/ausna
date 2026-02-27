@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
 import { Button, Title, Content, UIText, UserAvatar } from '@/components/ui'
+import { InviteContactDialog } from '@/components/contacts/InviteContactDialog'
 
 interface FoundUser {
   id: string
@@ -39,7 +39,8 @@ export function AddContactDialog({
   const [foundUser, setFoundUser] = useState<FoundUser | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const router = useRouter()
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [showInviteDialog, setShowInviteDialog] = useState(false)
   const trimmedEmail = email.trim()
   const isEmailValid = isValidEmail(trimmedEmail)
 
@@ -51,6 +52,8 @@ export function AddContactDialog({
       setFoundUser(null)
       setActionError(null)
       setIsSubmitting(false)
+      setSuccessMessage(null)
+      setShowInviteDialog(false)
     }
   }, [isOpen])
 
@@ -60,6 +63,7 @@ export function AddContactDialog({
 
   // Automatically search as user types a valid email (debounced)
   useEffect(() => {
+    if (successMessage) return
     setActionError(null)
 
     const trimmed = email.trim()
@@ -157,7 +161,8 @@ export function AddContactDialog({
           setActionError(data?.error || 'Failed to send friend request.')
           return
         }
-        onClose()
+        const displayName = foundUser.name || foundUser.username || 'this user'
+        setSuccessMessage(`Friend request sent to ${displayName}.`)
       } catch (err) {
         console.error('Error sending friend request from AddContactDialog:', err)
         setActionError('Failed to send friend request. Please try again.')
@@ -167,73 +172,11 @@ export function AddContactDialog({
       return
     }
 
-    // Path 2: invite to Ausna → go to invite flow
-    setIsSubmitting(true)
-    try {
-      const payload = {
-        email: trimmed,
-        name: '', // name will be collected on the invite page
-        fromUserId: ownerUserId,
-      }
-
-      const sendInvite = async (forceResend: boolean) => {
-        const response = await fetch('/api/contacts/invite', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(
-            forceResend ? { ...payload, forceResend: true } : payload
-          ),
-        })
-
-        if (!response.ok) {
-          const data = await response.json().catch(() => null)
-
-          if (
-            response.status === 409 &&
-            data?.code === 'invite_already_pending'
-          ) {
-            const confirmResend = window.confirm(
-              'You have already invited this email. Resend the invite email?'
-            )
-            if (confirmResend) {
-              return await sendInvite(true)
-            }
-            throw new Error('Invite already pending and resend was cancelled.')
-          }
-
-          throw new Error(data?.error || 'Failed to send invitation.')
-        }
-
-        return await response.json().catch(() => ({}))
-      }
-
-      const result = await sendInvite(false)
-
-      // After creating or resending the invite, send user to step-two page
-      const searchParams = new URLSearchParams({
-        email: trimmed,
-        fromUserId: ownerUserId,
-      })
-      router.push(`/contacts/invite?${searchParams.toString()}`)
-      onClose()
-    } catch (err) {
-      console.error('Error sending invite from AddContactDialog:', err)
-      setActionError(
-        err instanceof Error
-          ? err.message
-          : 'Failed to send invitation. Please try again.'
-      )
-    } finally {
-      setIsSubmitting(false)
-    }
+    // Path 2: invite to Ausna → step 2 popup (name + confirm email)
+    setShowInviteDialog(true)
   }
 
-  const primaryLabel =
-    foundUser
-      ? 'Send friend request'
-      : 'Invite to Ausna'
+  const primaryLabel = foundUser ? 'Send friend request' : 'Invite to Ausna'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -253,6 +196,12 @@ export function AddContactDialog({
         <Content className="mb-4">
           Enter an email to connect with someone on Ausna or invite them to join.
         </Content>
+
+        {successMessage && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+            <UIText className="text-green-700 text-sm">{successMessage}</UIText>
+          </div>
+        )}
 
         <div className="space-y-2 mb-4">
           <div>
@@ -341,18 +290,32 @@ export function AddContactDialog({
             onClick={onClose}
             disabled={isSubmitting}
           >
-            <UIText>Cancel</UIText>
+            <UIText>{successMessage ? 'Close' : 'Cancel'}</UIText>
           </Button>
           <Button
             variant="primary"
             type="button"
             onClick={handlePrimaryAction}
-            disabled={isSubmitting || (!foundUser && !isEmailValid)}
+            disabled={
+              isSubmitting ||
+              !!successMessage ||
+              (foundUser ? false : !isEmailValid)
+            }
           >
             <UIText>{isSubmitting ? 'Processing...' : primaryLabel}</UIText>
           </Button>
         </div>
       </div>
+
+      <InviteContactDialog
+        isOpen={showInviteDialog}
+        onClose={() => setShowInviteDialog(false)}
+        ownerUserId={ownerUserId}
+        initialEmail={trimmedEmail}
+        onSuccess={(message) => {
+          setSuccessMessage(message)
+        }}
+      />
     </div>
   )
 }

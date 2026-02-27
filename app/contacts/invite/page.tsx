@@ -64,30 +64,55 @@ export default function InviteContactPage() {
 
     setIsSubmitting(true)
     try {
-      const response = await fetch('/api/contacts/invite', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: trimmedEmail,
-          name: trimmedName,
-          fromUserId,
-        }),
-      })
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => null)
-        setSubmitError(data?.error || 'Failed to send invitation. Please try again.')
-        setIsSubmitting(false)
-        return
+      const payload = {
+        email: trimmedEmail,
+        name: trimmedName,
+        fromUserId,
       }
 
-      // On success, redirect back to main or stay on page with success message
+      const sendInvite = async (forceResend: boolean) => {
+        const response = await fetch('/api/contacts/invite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            forceResend ? { ...payload, forceResend: true } : payload
+          ),
+        })
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => null)
+
+          if (
+            response.status === 409 &&
+            data?.code === 'invite_already_pending'
+          ) {
+            const confirmResend = window.confirm(
+              'You have already invited this email. Resend the invite email?'
+            )
+            if (confirmResend) {
+              return await sendInvite(true)
+            }
+            throw new Error('Invite already pending and resend was cancelled.')
+          }
+
+          throw new Error(data?.error || 'Failed to send invitation. Please try again.')
+        }
+
+        return await response.json().catch(() => ({}))
+      }
+
+      await sendInvite(false)
+
       router.push('/main')
     } catch (err) {
       console.error('Error sending contact invite:', err)
-      setSubmitError('Failed to send invitation. Please try again.')
+      setSubmitError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to send invitation. Please try again.'
+      )
       setIsSubmitting(false)
     }
   }
