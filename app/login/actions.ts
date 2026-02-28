@@ -8,6 +8,7 @@ export type CheckEmailStatusResult =
 
 export async function checkEmailStatus(email: string): Promise<CheckEmailStatusResult> {
   const normalizedEmail = email.trim().toLowerCase()
+
   if (!normalizedEmail) {
     return { status: 'new_or_pseudo' }
   }
@@ -26,12 +27,10 @@ export async function checkEmailStatus(email: string): Promise<CheckEmailStatusR
     return { status: 'new_or_pseudo' }
   }
 
-  const existingUser =
-    (listResult as any)?.users?.find(
-      (u: any) => typeof u.email === 'string' && u.email.toLowerCase() === normalizedEmail
-    ) ?? null
+  const users = (listResult as any)?.users
+  const hasExistingUser = Array.isArray(users) && users.length > 0
 
-  if (existingUser) {
+  if (hasExistingUser) {
     return { status: 'existing_user' }
   }
 

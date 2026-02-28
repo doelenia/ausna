@@ -24,6 +24,8 @@ interface PortfolioActionsProps {
   onEdit: () => void
   onDelete: () => void
   isDeleting: boolean
+  /** When provided and portfolio is community, visitor can open the request-to-join modal */
+  onOpenCommunityJoin?: () => void
 }
 
 export function PortfolioActions({
@@ -37,6 +39,7 @@ export function PortfolioActions({
   onEdit,
   onDelete,
   isDeleting,
+  onOpenCommunityJoin,
 }: PortfolioActionsProps) {
   const router = useRouter()
   const supabase = createClient()
@@ -484,6 +487,12 @@ export function PortfolioActions({
   if (isCommunityPortfolio(portfolio) && !isOwner && !isMember) {
     return (
       <div className="flex flex-wrap items-center gap-2">
+        {onOpenCommunityJoin && (
+          <Button variant="primary" onClick={onOpenCommunityJoin}>
+            <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <UIText>Join</UIText>
+          </Button>
+        )}
         <Button variant="primary" onClick={handleShare}>
           <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
           <UIText>Share</UIText>

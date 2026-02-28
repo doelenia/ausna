@@ -9,6 +9,7 @@ import {
   isHumanPortfolio,
   PinnedItem,
   ActivityCallToJoinConfig,
+  HumanAvailabilitySchedule,
 } from '@/types/portfolio'
 import { normalizeActivityDateTime } from '@/lib/datetime'
 import {
@@ -117,6 +118,60 @@ interface GetEligibleItemsResult {
   notes?: EligibleItem[]
   portfolios?: EligibleItem[]
   error?: string
+}
+
+const HUMAN_AVAILABILITY_DAYS: Array<keyof HumanAvailabilitySchedule> = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+]
+
+function normalizeHumanAvailabilitySchedule(
+  raw: unknown
+): HumanAvailabilitySchedule | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined
+  }
+
+  const source = raw as Record<string, any>
+  const normalized: HumanAvailabilitySchedule = {}
+
+  const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/
+
+  for (const day of HUMAN_AVAILABILITY_DAYS) {
+    const value = source[day as string]
+    if (!value || typeof value !== 'object') continue
+
+    const enabled = Boolean(value.enabled)
+    let startTime: string | undefined =
+      typeof value.startTime === 'string' && timeRegex.test(value.startTime)
+        ? value.startTime
+        : undefined
+    let endTime: string | undefined =
+      typeof value.endTime === 'string' && timeRegex.test(value.endTime)
+        ? value.endTime
+        : undefined
+
+    // If both times are present but invalid order, drop endTime
+    if (startTime && endTime && endTime <= startTime) {
+      endTime = undefined
+    }
+
+    const hasAnyField = enabled || !!startTime || !!endTime
+    if (!hasAnyField) continue
+
+    normalized[day] = {
+      enabled,
+      ...(startTime ? { startTime } : {}),
+      ...(endTime ? { endTime } : {}),
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined
 }
 
 /**
@@ -322,6 +377,12 @@ export async function updatePortfolio(
     const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
+    const humanAutoCityLocationEnabledRaw = formData.get(
+      'human_auto_city_location_enabled'
+    ) as string | null
+    const humanAvailabilityScheduleRaw = formData.get(
+      'human_availability_schedule'
+    ) as string | null
 
     if (!portfolioId) {
       return {
@@ -536,6 +597,42 @@ export async function updatePortfolio(
           host_project_ids: resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds : undefined,
         }
       }
+    }
+
+    // For human portfolios, persist availability-related settings inside metadata.properties
+    if (portfolio.type === 'human') {
+      const baseProperties = (updatedMetadata.properties ||
+        currentMetadata.properties ||
+        {}) as Record<string, any>
+      let nextProperties: Record<string, any> = { ...baseProperties }
+
+      if (humanAutoCityLocationEnabledRaw !== null) {
+        const enabled = humanAutoCityLocationEnabledRaw === 'true'
+        nextProperties.auto_city_location_enabled = enabled
+      }
+
+      if (humanAvailabilityScheduleRaw !== null) {
+        try {
+          const parsed = humanAvailabilityScheduleRaw
+            ? JSON.parse(humanAvailabilityScheduleRaw)
+            : null
+          const normalized = normalizeHumanAvailabilitySchedule(parsed)
+
+          if (normalized) {
+            nextProperties.availability_schedule = normalized
+          } else if (
+            Object.prototype.hasOwnProperty.call(nextProperties, 'availability_schedule')
+          ) {
+            const { availability_schedule, ...rest } = nextProperties
+            nextProperties = rest
+          }
+        } catch {
+          // Ignore invalid JSON and keep existing schedule, if any
+        }
+      }
+
+      updatedMetadata.properties =
+        Object.keys(nextProperties).length > 0 ? nextProperties : undefined
     }
 
     // Check if description changed (compare trimmed versions)
@@ -955,9 +1052,9 @@ export async function getPendingJoinRequestsCount(
       return { success: false, error: 'Forbidden' }
     }
     let query = supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .select('id', { count: 'exact', head: true })
-      .eq('activity_portfolio_id', portfolioId)
+      .eq('portfolio_id', portfolioId)
       .eq('status', 'pending')
     const { count, error } = await query.is('responded_at', null)
     if (error) return { success: false, error: error.message }
@@ -985,9 +1082,9 @@ export async function getCurrentUserPendingActivityRequest(
       return { success: false, error: 'Not found' }
     }
     const { data: request, error } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .select('id')
-      .eq('activity_portfolio_id', portfolioId)
+      .eq('portfolio_id', portfolioId)
       .eq('applicant_user_id', user.id)
       .eq('status', 'pending')
       .maybeSingle()
@@ -1011,7 +1108,7 @@ export async function respondToActivityJoinRequest(
     const supabase = await createClient()
 
     const { data: request, error: requestError } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .select('*')
       .eq('id', requestId)
       .single()
@@ -1024,7 +1121,7 @@ export async function respondToActivityJoinRequest(
       return { success: false, error: 'Join request is not pending' }
     }
 
-    const activityId: string = request.activity_portfolio_id
+    const activityId: string = request.portfolio_id
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
@@ -1049,7 +1146,7 @@ export async function respondToActivityJoinRequest(
     }
 
     const { error: updateRequestError } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .update({
         responded_at: new Date().toISOString(),
       })
@@ -1164,9 +1261,9 @@ export async function applyToActivityCallToJoin(
     if (callToJoin.require_approval) {
       // Create or reuse a pending join request
       const { data: existingRequest } = await supabase
-        .from('activity_join_requests')
+        .from('portfolio_join_requests')
         .select('id, status')
-        .eq('activity_portfolio_id', portfolioId)
+        .eq('portfolio_id', portfolioId)
         .eq('applicant_user_id', user.id)
         .eq('status', 'pending')
         .maybeSingle()
@@ -1178,8 +1275,8 @@ export async function applyToActivityCallToJoin(
         }
       }
 
-      const { error: insertError } = await supabase.from('activity_join_requests').insert({
-        activity_portfolio_id: portfolioId,
+      const { error: insertError } = await supabase.from('portfolio_join_requests').insert({
+        portfolio_id: portfolioId,
         applicant_user_id: user.id,
         prompt_answer: callToJoin.prompt ? promptAnswer || null : null,
         role_option_id: null,
@@ -1268,8 +1365,8 @@ export async function applyToActivityCallToJoin(
     }
 
     // Optionally record the auto-accepted request for history
-    await supabase.from('activity_join_requests').insert({
-      activity_portfolio_id: portfolioId,
+    await supabase.from('portfolio_join_requests').insert({
+      portfolio_id: portfolioId,
       applicant_user_id: user.id,
       prompt_answer: null,
       role_option_id: null,
@@ -1308,7 +1405,7 @@ export async function approveActivityJoinRequest(
     const supabase = await createClient()
 
     const { data: request, error: requestError } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .select('*')
       .eq('id', requestId)
       .single()
@@ -1321,7 +1418,7 @@ export async function approveActivityJoinRequest(
       return { success: false, error: 'Join request is not pending' }
     }
 
-    const activityId: string = request.activity_portfolio_id
+    const activityId: string = request.portfolio_id
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
@@ -1412,7 +1509,7 @@ export async function approveActivityJoinRequest(
     }
 
     const { error: updateRequestError } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .update({
         status: 'approved',
         approved_by: user.id,
@@ -1460,7 +1557,7 @@ export async function rejectActivityJoinRequest(
     const supabase = await createClient()
 
     const { data: request, error: requestError } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .select('*')
       .eq('id', requestId)
       .single()
@@ -1473,7 +1570,7 @@ export async function rejectActivityJoinRequest(
       return { success: false, error: 'Join request is not pending' }
     }
 
-    const activityId: string = request.activity_portfolio_id
+    const activityId: string = request.portfolio_id
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
@@ -1498,7 +1595,7 @@ export async function rejectActivityJoinRequest(
     }
 
     const { error: updateRequestError } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .update({
         status: 'rejected',
         rejected_by: user.id,
@@ -1537,6 +1634,366 @@ export async function rejectActivityJoinRequest(
       success: false,
       error: error.message || 'An unexpected error occurred',
     }
+  }
+}
+
+// --- Community join requests (same table portfolio_join_requests, type = community) ---
+
+export interface ApplyCommunityJoinInput {
+  portfolioId: string
+  promptAnswer: string
+}
+
+/**
+ * Apply to join a community. Always requires approval; fixed prompt "proofs of membership".
+ */
+export async function applyToCommunityJoin(
+  input: ApplyCommunityJoinInput
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { portfolioId, promptAnswer } = input
+
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+
+    if (portfolioError || !portfolio) {
+      return { success: false, error: 'Community not found' }
+    }
+    if (portfolio.type !== 'community') {
+      return { success: false, error: 'Not a community' }
+    }
+
+    const metadata = (portfolio.metadata as any) || {}
+    const members: string[] = metadata?.members || []
+    if (members.includes(user.id)) {
+      return { success: false, error: 'You are already a member' }
+    }
+
+    const { data: existingRequest } = await supabase
+      .from('portfolio_join_requests')
+      .select('id, status')
+      .eq('portfolio_id', portfolioId)
+      .eq('applicant_user_id', user.id)
+      .eq('status', 'pending')
+      .maybeSingle()
+
+    if (existingRequest) {
+      return { success: false, error: 'You already have a pending request for this community' }
+    }
+
+    const { error: insertError } = await supabase.from('portfolio_join_requests').insert({
+      portfolio_id: portfolioId,
+      applicant_user_id: user.id,
+      prompt_answer: promptAnswer?.trim() || null,
+      status: 'pending',
+    })
+
+    if (insertError) {
+      return { success: false, error: insertError.message || 'Failed to submit join request' }
+    }
+
+    const basic = metadata?.basic || {}
+    const communityName = (basic.name as string) || 'this community'
+    const requestsUrl = `/portfolio/community/${portfolioId}/members?tab=requests`
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: portfolio.user_id,
+      text: `applied to join ${communityName} (community). Review: ${requestsUrl}`,
+    })
+
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Failed to apply' }
+  }
+}
+
+/**
+ * Get count of pending join requests for a community. Owner/manager only.
+ */
+export async function getPendingCommunityJoinRequestsCount(
+  portfolioId: string
+): Promise<{ success: boolean; count?: number; error?: string }> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+    if (!portfolio || portfolio.type !== 'community') {
+      return { success: false, error: 'Not found' }
+    }
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+    if (!isOwner && !isManager) {
+      return { success: false, error: 'Forbidden' }
+    }
+    const { count, error } = await supabase
+      .from('portfolio_join_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('portfolio_id', portfolioId)
+      .eq('status', 'pending')
+    if (error) return { success: false, error: error.message }
+    return { success: true, count: count ?? 0 }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Failed to get count' }
+  }
+}
+
+/**
+ * Check whether the current user has a pending join request for this community.
+ */
+export async function getCurrentUserPendingCommunityRequest(
+  portfolioId: string
+): Promise<{ success: boolean; hasPending?: boolean; error?: string }> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id, type')
+      .eq('id', portfolioId)
+      .single()
+    if (!portfolio || portfolio.type !== 'community') {
+      return { success: false, error: 'Not found' }
+    }
+    const { data: request, error } = await supabase
+      .from('portfolio_join_requests')
+      .select('id')
+      .eq('portfolio_id', portfolioId)
+      .eq('applicant_user_id', user.id)
+      .eq('status', 'pending')
+      .maybeSingle()
+    if (error) return { success: false, error: error.message }
+    return { success: true, hasPending: !!request }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Failed to check request' }
+  }
+}
+
+/**
+ * Respond to a community join request (message applicant, set responded_at). Owner/manager only.
+ */
+export async function respondToCommunityJoinRequest(
+  requestId: string,
+  message: string
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: request, error: requestError } = await supabase
+      .from('portfolio_join_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+    if (requestError || !request) {
+      return { success: false, error: 'Join request not found' }
+    }
+    if (request.status !== 'pending') {
+      return { success: false, error: 'Join request is not pending' }
+    }
+    const portfolioId: string = request.portfolio_id
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+    if (portfolioError || !portfolio || portfolio.type !== 'community') {
+      return { success: false, error: 'Community not found for this request' }
+    }
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+    if (!isOwner && !isManager) {
+      return { success: false, error: 'Only the community owner or managers can respond to requests' }
+    }
+    const { error: updateRequestError } = await supabase
+      .from('portfolio_join_requests')
+      .update({ responded_at: new Date().toISOString() })
+      .eq('id', requestId)
+    if (updateRequestError) {
+      return { success: false, error: updateRequestError.message || 'Failed to update join request' }
+    }
+    const basic = metadata?.basic || {}
+    const communityName = (basic.name as string) || 'this community'
+    const text =
+      message.trim().length > 0
+        ? `Regarding your request to join ${communityName} (community): ${message.trim()}`
+        : `We received your request to join ${communityName} (community). We'll get back to you soon.`
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: request.applicant_user_id,
+      text,
+    })
+    revalidatePath(`/portfolio/community/${portfolioId}`)
+    revalidatePath(`/portfolio/community/${portfolioId}/members`)
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'An unexpected error occurred' }
+  }
+}
+
+/**
+ * Approve a community join request and add the applicant as a member.
+ */
+export async function approveCommunityJoinRequest(requestId: string): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: request, error: requestError } = await supabase
+      .from('portfolio_join_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+    if (requestError || !request) {
+      return { success: false, error: 'Join request not found' }
+    }
+    if (request.status !== 'pending') {
+      return { success: false, error: 'Join request is not pending' }
+    }
+    const portfolioId: string = request.portfolio_id
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+    if (portfolioError || !portfolio || portfolio.type !== 'community') {
+      return { success: false, error: 'Community not found for this request' }
+    }
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+    if (!isOwner && !isManager) {
+      return { success: false, error: 'Only the community owner or managers can approve requests' }
+    }
+    const applicantId: string = request.applicant_user_id
+    const currentMembers: string[] = metadata?.members || []
+    const nextMembers = currentMembers.includes(applicantId)
+      ? currentMembers
+      : [...currentMembers, applicantId]
+    const updatedMetadata = { ...metadata, members: nextMembers }
+    const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
+      portfolio_id: portfolioId,
+      new_members: nextMembers,
+    })
+    if (rpcError) {
+      const { error: directError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', portfolioId)
+      if (directError) {
+        return { success: false, error: directError.message || 'Failed to update members' }
+      }
+    } else {
+      const { error: metadataError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', portfolioId)
+      if (metadataError) {
+        return { success: false, error: metadataError.message || 'Failed to update membership' }
+      }
+    }
+    const { error: updateRequestError } = await supabase
+      .from('portfolio_join_requests')
+      .update({
+        status: 'approved',
+        approved_by: user.id,
+        approved_at: new Date().toISOString(),
+      })
+      .eq('id', requestId)
+    if (updateRequestError) {
+      return { success: false, error: updateRequestError.message || 'Failed to update request' }
+    }
+    const basic = metadata?.basic || {}
+    const communityName = (basic.name as string) || 'this community'
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: applicantId,
+      text: `approved your request to join ${communityName} (community)`,
+    })
+    revalidatePath(`/portfolio/community/${portfolioId}`)
+    revalidatePath(`/portfolio/community/${portfolioId}/members`)
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'An unexpected error occurred' }
+  }
+}
+
+/**
+ * Reject a community join request and optionally send a message to the applicant.
+ */
+export async function rejectCommunityJoinRequest(
+  requestId: string,
+  rejectionMessage?: string
+): Promise<SimpleResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: request, error: requestError } = await supabase
+      .from('portfolio_join_requests')
+      .select('*')
+      .eq('id', requestId)
+      .single()
+    if (requestError || !request) {
+      return { success: false, error: 'Join request not found' }
+    }
+    if (request.status !== 'pending') {
+      return { success: false, error: 'Join request is not pending' }
+    }
+    const portfolioId: string = request.portfolio_id
+    const { data: portfolio, error: portfolioError } = await supabase
+      .from('portfolios')
+      .select('id, type, user_id, metadata')
+      .eq('id', portfolioId)
+      .single()
+    if (portfolioError || !portfolio || portfolio.type !== 'community') {
+      return { success: false, error: 'Community not found for this request' }
+    }
+    const metadata = (portfolio.metadata as any) || {}
+    const managers: string[] = metadata?.managers || []
+    const isOwner = portfolio.user_id === user.id
+    const isManager = Array.isArray(managers) && managers.includes(user.id)
+    if (!isOwner && !isManager) {
+      return { success: false, error: 'Only the community owner or managers can reject requests' }
+    }
+    const { error: updateRequestError } = await supabase
+      .from('portfolio_join_requests')
+      .update({
+        status: 'rejected',
+        rejected_by: user.id,
+        rejected_at: new Date().toISOString(),
+        rejection_reason: rejectionMessage?.trim() || null,
+      })
+      .eq('id', requestId)
+    if (updateRequestError) {
+      return { success: false, error: updateRequestError.message || 'Failed to update join request' }
+    }
+    const basic = metadata?.basic || {}
+    const communityName = (basic.name as string) || 'this community'
+    let text = `rejected your request to join ${communityName} (community)`
+    if (rejectionMessage && rejectionMessage.trim().length > 0) {
+      text += `: ${rejectionMessage.trim()}`
+    }
+    await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: request.applicant_user_id,
+      text,
+    })
+    revalidatePath(`/portfolio/community/${portfolioId}`)
+    revalidatePath(`/portfolio/community/${portfolioId}/members`)
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'An unexpected error occurred' }
   }
 }
 

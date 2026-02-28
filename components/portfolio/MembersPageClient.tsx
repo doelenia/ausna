@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
-import { approveActivityJoinRequest, respondToActivityJoinRequest } from '@/app/portfolio/[type]/[id]/actions'
+import { approveActivityJoinRequest, respondToActivityJoinRequest, approveCommunityJoinRequest, respondToCommunityJoinRequest } from '@/app/portfolio/[type]/[id]/actions'
 
 interface UserInfo {
   id: string
@@ -410,7 +410,7 @@ export function MembersPageClient({
         >
           <UIText as="span">Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
         </button>
-        {portfolioType === 'activities' && canManage && (
+        {(portfolioType === 'activities' || portfolioType === 'community') && canManage && (
           <button
             onClick={(e) => {
               e.preventDefault()
@@ -716,8 +716,8 @@ export function MembersPageClient({
         </div>
       )}
 
-      {/* Requests Tab (activities only, managers/owner) */}
-      {activeTab === 'requests' && portfolioType === 'activities' && canManage && (
+      {/* Requests Tab (activities and community, managers/owner) */}
+      {activeTab === 'requests' && (portfolioType === 'activities' || portfolioType === 'community') && canManage && (
         <div>
           <div className="mb-3 flex items-center gap-2 flex-wrap">
             <UIText as="h2">Join requests {joinRequests.length > 0 && `(${joinRequests.length})`}</UIText>
@@ -758,7 +758,10 @@ export function MembersPageClient({
                   setProcessingRequestId(req.id)
                   setRequestError(null)
                   try {
-                    const result = await approveActivityJoinRequest(req.id)
+                    const result =
+                      portfolioType === 'community'
+                        ? await approveCommunityJoinRequest(req.id)
+                        : await approveActivityJoinRequest(req.id)
                     if (!result || !result.success) {
                       setRequestError(result?.error || 'Failed to approve request')
                       return
@@ -783,7 +786,10 @@ export function MembersPageClient({
                   setProcessingRequestId(req.id)
                   setRequestError(null)
                   try {
-                    const result = await respondToActivityJoinRequest(respondingRequestId, respondMessage)
+                    const result =
+                      portfolioType === 'community'
+                        ? await respondToCommunityJoinRequest(respondingRequestId, respondMessage)
+                        : await respondToActivityJoinRequest(respondingRequestId, respondMessage)
                     if (!result || !result.success) {
                       setRequestError(result?.error || 'Failed to send message')
                       return

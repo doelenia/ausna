@@ -41,6 +41,7 @@ function calculateSimilarity(query: string, text: string | null | undefined): nu
  * Query params:
  *   - q: search query (optional - if not provided, returns initial results)
  *   - limit: number of results (default: 50)
+ *   - type: optional filter - 'community' to return only community portfolios (e.g. for onboarding)
  * 
  * Pseudo Portfolio Behavior:
  * - Portfolios with is_pseudo = true are automatically excluded from results for non-admin users
@@ -54,6 +55,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const query = searchParams.get('q')?.trim() || ''
     const limit = parseInt(searchParams.get('limit') || '50', 10)
+    const typeFilter = searchParams.get('type')?.toLowerCase() === 'community' ? 'community' : null
     
     // Try to get current user (optional - for initial results)
     const {
@@ -95,10 +97,11 @@ export async function GET(request: NextRequest) {
         
         // Get projects/communities user is a member of
         // Note: RLS automatically excludes pseudo portfolios for non-admin users
+        const memberTypes = typeFilter ? [typeFilter] : ['projects', 'community']
         const { data: allPortfolios } = await supabase
           .from('portfolios')
           .select('*')
-          .in('type', ['projects', 'community'])
+          .in('type', memberTypes)
           .limit(100)
         
         const userPortfolios = (allPortfolios || []).filter((p: any) => {
@@ -107,19 +110,24 @@ export async function GET(request: NextRequest) {
           return Array.isArray(members) && members.includes(user.id)
         })
         
-        portfolios = [
-          ...(friendPortfolios || []),
-          ...userPortfolios.slice(0, 20),
-        ]
+        portfolios = typeFilter === 'community'
+          ? userPortfolios.slice(0, 20)
+          : [
+              ...(friendPortfolios || []),
+              ...userPortfolios.slice(0, 20),
+            ]
       } else {
-        // For visitors: show recent portfolios
+        // For visitors: show recent portfolios (optionally filtered by type)
         // Note: RLS automatically excludes pseudo portfolios for non-admin users
-        const { data: recentPortfolios } = await supabase
+        let queryBuilder = supabase
           .from('portfolios')
           .select('*')
           .order('created_at', { ascending: false })
           .limit(limit)
-        
+        if (typeFilter) {
+          queryBuilder = queryBuilder.eq('type', typeFilter)
+        }
+        const { data: recentPortfolios } = await queryBuilder
         portfolios = recentPortfolios || []
       }
     } else {
@@ -130,10 +138,14 @@ export async function GET(request: NextRequest) {
       // This is necessary because Supabase doesn't support ilike on JSONB paths directly
       // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users
       // Admin users will see all portfolios including pseudo ones
-      const { data: allPortfolios, error } = await supabase
+      let fetchQuery = supabase
         .from('portfolios')
         .select('*')
         .limit(limit * 3) // Fetch more to have buffer for filtering
+      if (typeFilter) {
+        fetchQuery = fetchQuery.eq('type', typeFilter)
+      }
+      const { data: allPortfolios, error } = await fetchQuery
       
       if (error) {
         console.error('Error searching portfolios:', error)
@@ -183,8 +195,13 @@ export async function GET(request: NextRequest) {
         })
     }
     
+    // Optionally filter by type (e.g. community-only for onboarding)
+    const filteredPortfolios = typeFilter
+      ? portfolios.filter((p: any) => p.type === typeFilter)
+      : portfolios
+
     // Format results
-    const results = portfolios.map((p: any) => {
+    const results = filteredPortfolios.map((p: any) => {
       const metadata = p.metadata as any
       const basic = metadata?.basic || {}
 

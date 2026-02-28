@@ -702,16 +702,16 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
       }
     }
 
-    // 6g. Activity join requests
+    // 6g. Portfolio join requests (activities, community, projects)
     {
       const { error } = await serviceClient
-        .from('activity_join_requests')
+        .from('portfolio_join_requests')
         .delete()
         .or(
           `applicant_user_id.eq.${userIdFilter},approved_by.eq.${userIdFilter},rejected_by.eq.${userIdFilter}`
         )
       if (error) {
-        console.error('Error deleting activity join requests for user:', error)
+        console.error('Error deleting portfolio join requests for user:', error)
       }
     }
 

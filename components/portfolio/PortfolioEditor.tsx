@@ -8,6 +8,7 @@ import {
   isHumanPortfolio,
   PortfolioVisibility,
   ActivityCallToJoinConfig,
+  HumanAvailabilitySchedule,
 } from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
@@ -31,6 +32,179 @@ interface PortfolioEditorProps {
   onSave: () => void
   initialShowActivityPicker?: boolean
   initialShowLocationPicker?: boolean
+}
+
+const HUMAN_AVAILABILITY_DAYS: Array<keyof HumanAvailabilitySchedule> = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+]
+
+const HUMAN_AVAILABILITY_DAY_LABELS: Record<keyof HumanAvailabilitySchedule, string> = {
+  monday: 'Mon',
+  tuesday: 'Tue',
+  wednesday: 'Wed',
+  thursday: 'Thu',
+  friday: 'Fri',
+  saturday: 'Sat',
+  sunday: 'Sun',
+}
+
+function createDefaultAvailabilitySchedule(): HumanAvailabilitySchedule {
+  const schedule: HumanAvailabilitySchedule = {}
+  for (const day of HUMAN_AVAILABILITY_DAYS) {
+    schedule[day] = { enabled: false }
+  }
+  return schedule
+}
+
+function createSuggestedAvailabilitySchedule(): HumanAvailabilitySchedule {
+  const schedule = createDefaultAvailabilitySchedule()
+  for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as Array<
+    keyof HumanAvailabilitySchedule
+  >) {
+    schedule[day] = { enabled: true, startTime: '18:00', endTime: '21:00' }
+  }
+  for (const day of ['saturday', 'sunday'] as Array<keyof HumanAvailabilitySchedule>) {
+    schedule[day] = { enabled: true, startTime: '10:00', endTime: '21:00' }
+  }
+  return schedule
+}
+
+function cloneAvailabilitySchedule(
+  schedule: HumanAvailabilitySchedule | null | undefined
+): HumanAvailabilitySchedule {
+  if (!schedule) return createDefaultAvailabilitySchedule()
+  const next: HumanAvailabilitySchedule = {}
+  for (const day of HUMAN_AVAILABILITY_DAYS) {
+    const value = schedule[day]
+    if (value) {
+      next[day] = {
+        enabled: Boolean(value.enabled),
+        ...(value.startTime ? { startTime: value.startTime } : {}),
+        ...(value.endTime ? { endTime: value.endTime } : {}),
+      }
+    } else {
+      next[day] = { enabled: false }
+    }
+  }
+  return next
+}
+
+function hasAnyAvailability(schedule: HumanAvailabilitySchedule | null | undefined): boolean {
+  if (!schedule) return false
+  for (const day of HUMAN_AVAILABILITY_DAYS) {
+    const value = schedule[day]
+    if (value && (value.enabled || value.startTime || value.endTime)) {
+      return true
+    }
+  }
+  return false
+}
+
+function getAvailabilityValidationError(
+  schedule: HumanAvailabilitySchedule | null | undefined
+): string | null {
+  if (!schedule) return null
+  for (const day of HUMAN_AVAILABILITY_DAYS) {
+    const value = schedule[day]
+    if (!value) continue
+    const { startTime, endTime } = value
+    if (startTime && endTime && endTime <= startTime) {
+      return `End time must be after start time (${HUMAN_AVAILABILITY_DAY_LABELS[day]})`
+    }
+  }
+  return null
+}
+
+function summarizeAvailabilitySchedule(
+  schedule: HumanAvailabilitySchedule | null | undefined
+): string {
+  if (!schedule || !hasAnyAvailability(schedule)) {
+    return 'No availability set'
+  }
+
+  type DayInfo = {
+    dayKey: keyof HumanAvailabilitySchedule
+    label: string
+    enabled: boolean
+    startTime?: string
+    endTime?: string
+  }
+
+  const dayInfos: DayInfo[] = HUMAN_AVAILABILITY_DAYS.map((day) => {
+    const value = schedule[day]
+    return {
+      dayKey: day,
+      label: HUMAN_AVAILABILITY_DAY_LABELS[day],
+      enabled: !!value?.enabled,
+      startTime: value?.startTime,
+      endTime: value?.endTime,
+    }
+  })
+
+  const normalizeRange = (info: DayInfo) => {
+    if (!info.enabled && !info.startTime && !info.endTime) return 'off'
+    if (!info.startTime && !info.endTime) return 'any'
+    if (info.startTime && info.endTime) return `${info.startTime}–${info.endTime}`
+    if (info.startTime && !info.endTime) return `${info.startTime}–`
+    if (!info.startTime && info.endTime) return `–${info.endTime}`
+    return 'any'
+  }
+
+  const segments: string[] = []
+  let i = 0
+  while (i < dayInfos.length) {
+    const current = dayInfos[i]
+    const range = normalizeRange(current)
+    if (range === 'off') {
+      i += 1
+      continue
+    }
+
+    let j = i + 1
+    while (j < dayInfos.length && normalizeRange(dayInfos[j]) === range) {
+      j += 1
+    }
+
+    const groupDays = dayInfos.slice(i, j)
+    const dayLabel =
+      groupDays.length === 1
+        ? groupDays[0].label
+        : `${groupDays[0].label}–${groupDays[groupDays.length - 1].label}`
+
+    let rangeLabel: string
+    if (range === 'any') {
+      rangeLabel = 'any time'
+    } else {
+      rangeLabel = range
+    }
+
+    segments.push(`${dayLabel}: ${rangeLabel}`)
+    i = j
+  }
+
+  return segments.join(' · ')
+}
+
+function AvailabilityPreviewCard({
+  schedule,
+}: {
+  schedule: HumanAvailabilitySchedule | null | undefined
+}) {
+  const summary = summarizeAvailabilitySchedule(schedule)
+  return (
+    <Card variant="subtle" padding="sm">
+      <div className="flex flex-col gap-1">
+        <UIText as="span">Weekly availability</UIText>
+        <Content>{summary}</Content>
+      </div>
+    </Card>
+  )
 }
 
 export function PortfolioEditor({
@@ -85,6 +259,29 @@ export function PortfolioEditor({
   const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
   const [showHostSelector, setShowHostSelector] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const initialHumanAutoCityLocationEnabled: boolean =
+    isHumanPortfolio(portfolio) &&
+    !!(metadata?.properties && Object.prototype.hasOwnProperty.call(metadata.properties, 'auto_city_location_enabled'))
+      ? Boolean(metadata.properties.auto_city_location_enabled)
+      : true
+  const [humanAutoCityLocationEnabled, setHumanAutoCityLocationEnabled] = useState<boolean>(
+    initialHumanAutoCityLocationEnabled
+  )
+  const initialAvailabilitySchedule: HumanAvailabilitySchedule | null =
+    (isHumanPortfolio(portfolio) &&
+      (metadata?.properties?.availability_schedule as HumanAvailabilitySchedule | undefined)) ||
+    null
+  const [availabilitySchedule, setAvailabilitySchedule] = useState<HumanAvailabilitySchedule>(
+    () => cloneAvailabilitySchedule(initialAvailabilitySchedule)
+  )
+  const [availabilityScheduleDraft, setAvailabilityScheduleDraft] =
+    useState<HumanAvailabilitySchedule | null>(null)
+  const [showAvailabilityModal, setShowAvailabilityModal] = useState(false)
+
+  const availabilityValidationError = useMemo(
+    () => getAvailabilityValidationError(availabilityScheduleDraft || availabilitySchedule),
+    [availabilityScheduleDraft, availabilitySchedule]
+  )
 
   const isActivitySelectionValid = useMemo(
     () => !activityValue || !!activityValue.start,
@@ -346,6 +543,16 @@ export function PortfolioEditor({
           formData.append('activity_location_state_code', '')
           formData.append('activity_location_private', '')
         }
+      }
+      if (isHumanPortfolio(portfolio)) {
+        formData.append(
+          'human_auto_city_location_enabled',
+          humanAutoCityLocationEnabled ? 'true' : 'false'
+        )
+        formData.append(
+          'human_availability_schedule',
+          hasAnyAvailability(availabilitySchedule) ? JSON.stringify(availabilitySchedule) : ''
+        )
       }
       if (portfolio.type === 'activities') {
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
@@ -881,6 +1088,61 @@ export function PortfolioEditor({
               </>
             )}
 
+            {/* Human portfolio settings */}
+            {isHumanPortfolio(portfolio) && (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <UIText as="label" className="block mb-2">
+                    City location
+                  </UIText>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="human-auto-city-location-enabled"
+                      type="checkbox"
+                      checked={humanAutoCityLocationEnabled}
+                      onChange={(e) => setHumanAutoCityLocationEnabled(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      disabled={loading}
+                    />
+                    <UIText as="label" htmlFor="human-auto-city-location-enabled">
+                      Share my city (derived from my IP address) on my human portfolio
+                    </UIText>
+                  </div>
+                  <UIText as="p" className="text-xs text-gray-500 mt-1">
+                    When this is on, we periodically update a coarse city/region location based on
+                    your IP address and show it on your human portfolio. Turning this off stops
+                    future updates and hides the city badge.
+                  </UIText>
+                </div>
+
+                <div>
+                  <UIText as="label" className="block mb-2">
+                    Calendar availability
+                  </UIText>
+                  <UIText as="p" className="text-xs text-gray-500 mb-2">
+                    Set when you’re generally available during the week. This is only used inside
+                    Ausna for now.
+                  </UIText>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => {
+                        const baseSchedule = hasAnyAvailability(availabilitySchedule)
+                          ? availabilitySchedule
+                          : createSuggestedAvailabilitySchedule()
+                        setAvailabilityScheduleDraft(cloneAvailabilitySchedule(baseSchedule))
+                        setShowAvailabilityModal(true)
+                      }}
+                      disabled={loading}
+                    >
+                      <AvailabilityPreviewCard schedule={availabilitySchedule} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Error Message */}
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
@@ -950,6 +1212,179 @@ export function PortfolioEditor({
                 >
                   <UIText>Done</UIText>
                 </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )}
+    {isHumanPortfolio(portfolio) && showAvailabilityModal && (
+      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
+        <div
+          className="bg-white rounded-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Card variant="default" padding="sm">
+            <div>
+              <div className="mb-4">
+                <Title as="h3">Set your weekly availability</Title>
+                <UIText as="p" className="text-xs text-gray-500 mt-1">
+                  Choose which days you’re usually available and optional time ranges. Times use
+                  your local timezone.
+                </UIText>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  {HUMAN_AVAILABILITY_DAYS.map((dayKey) => {
+                    const draft = availabilityScheduleDraft || availabilitySchedule
+                    const value = draft[dayKey] || { enabled: false }
+                    const label = HUMAN_AVAILABILITY_DAY_LABELS[dayKey]
+                    return (
+                      <div key={dayKey} className="flex flex-col gap-1 border-b border-gray-100 pb-3 last:border-b-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              id={`availability-${dayKey}`}
+                              type="checkbox"
+                              checked={value.enabled}
+                              onChange={(e) => {
+                                const next = cloneAvailabilitySchedule(draft)
+                                next[dayKey] = {
+                                  ...(next[dayKey] || { enabled: false }),
+                                  enabled: e.target.checked,
+                                }
+                                setAvailabilityScheduleDraft(next)
+                              }}
+                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <UIText as="label" htmlFor={`availability-${dayKey}`}>
+                              {label}
+                            </UIText>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="text"
+                            size="sm"
+                            onClick={() => {
+                              alert('Per-day custom time slots coming soon!')
+                            }}
+                          >
+                            <UIText>Customize slots</UIText>
+                          </Button>
+                        </div>
+                        {value.enabled && (
+                          <div className="mt-1 flex flex-col md:flex-row md:items-center gap-2 md:gap-3">
+                            <div className="flex items-center gap-2">
+                              <UIText as="span" className="text-xs text-gray-500">
+                                From
+                              </UIText>
+                              <input
+                                type="time"
+                                value={value.startTime || ''}
+                                onChange={(e) => {
+                                  const next = cloneAvailabilitySchedule(draft)
+                                  const current = next[dayKey] || { enabled: true }
+                                  next[dayKey] = {
+                                    ...current,
+                                    startTime: e.target.value || undefined,
+                                  }
+                                  setAvailabilityScheduleDraft(next)
+                                }}
+                                className="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                              />
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <UIText as="span" className="text-xs text-gray-500">
+                                To
+                              </UIText>
+                              <input
+                                type="time"
+                                value={value.endTime || ''}
+                                onChange={(e) => {
+                                  const next = cloneAvailabilitySchedule(draft)
+                                  const current = next[dayKey] || { enabled: true }
+                                  next[dayKey] = {
+                                    ...current,
+                                    endTime: e.target.value || undefined,
+                                  }
+                                  setAvailabilityScheduleDraft(next)
+                                }}
+                                className="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <UIText as="p" className="text-xs text-gray-500">
+                    You can leave times empty for a day to indicate you’re flexible that day.
+                  </UIText>
+                  {availabilityValidationError && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md">
+                      <UIText>{availabilityValidationError}</UIText>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <AvailabilityPreviewCard schedule={availabilityScheduleDraft || availabilitySchedule} />
+                  <div className="flex justify-between items-center">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        alert('Calendar connection coming soon!')
+                      }}
+                    >
+                      <UIText>Connect calendars</UIText>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="text"
+                      size="sm"
+                      onClick={() => {
+                        const cleared = createDefaultAvailabilitySchedule()
+                        setAvailabilityScheduleDraft(cleared)
+                      }}
+                    >
+                      <UIText>Clear all</UIText>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setAvailabilityScheduleDraft(null)
+                    setShowAvailabilityModal(false)
+                  }}
+                >
+                  <UIText>Cancel</UIText>
+                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    disabled={!!availabilityValidationError}
+                    onClick={() => {
+                      if (availabilityScheduleDraft) {
+                        setAvailabilitySchedule(cloneAvailabilitySchedule(availabilityScheduleDraft))
+                      }
+                      setAvailabilityScheduleDraft(null)
+                      setShowAvailabilityModal(false)
+                    }}
+                  >
+                    <UIText>Save</UIText>
+                  </Button>
+                </div>
               </div>
             </div>
           </Card>

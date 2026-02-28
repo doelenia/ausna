@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute } from '@/lib/portfolio/routes'
 import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, isActivityPortfolio } from '@/types/portfolio'
-import { getCurrentUserPendingActivityRequest } from './actions'
+import { getCurrentUserPendingActivityRequest, getCurrentUserPendingCommunityRequest } from './actions'
 import { notFound } from 'next/navigation'
 import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { PortfolioView } from '@/components/portfolio/PortfolioView'
@@ -129,6 +129,13 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
     if (res.success && res.hasPending) hasPendingApplication = true
   }
 
+  // For community: whether current user has a pending join request
+  let hasPendingCommunityApplication = false
+  if (user && isCommunityPortfolio(portfolio)) {
+    const res = await getCurrentUserPendingCommunityRequest(portfolio.id)
+    if (res.success && res.hasPending) hasPendingCommunityApplication = true
+  }
+
   return (
     <PortfolioView
       portfolio={portfolio}
@@ -138,6 +145,7 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
       topInterests={topInterests}
       isAdmin={isAdmin}
       hasPendingApplication={hasPendingApplication}
+      hasPendingCommunityApplication={hasPendingCommunityApplication}
     />
   )
 }

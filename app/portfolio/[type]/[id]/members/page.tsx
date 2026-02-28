@@ -194,7 +194,7 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
     })
   )
 
-  // Load activity join requests for activities so managers can approve/reject
+  // Load join requests from portfolio_join_requests for activities and community
   let joinRequests: {
     id: string
     applicant: {
@@ -210,11 +210,11 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
     respondedAt: string | null
   }[] = []
 
-  if (canManage && isActivityPortfolio(portfolio)) {
+  if (canManage && (isActivityPortfolio(portfolio) || isCommunityPortfolio(portfolio))) {
     const { data: requestRows } = await supabase
-      .from('activity_join_requests')
+      .from('portfolio_join_requests')
       .select('id, applicant_user_id, status, created_at, prompt_answer, activity_role, responded_at')
-      .eq('activity_portfolio_id', portfolio.id)
+      .eq('portfolio_id', portfolio.id)
       .order('created_at', { ascending: false })
 
     const applicantIds = Array.from(

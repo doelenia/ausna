@@ -28,6 +28,34 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
   const router = useRouter()
   const supabase = createClient()
 
+  // Once we've determined whether the email belongs to an existing user or a new user,
+  // lock the email field to prevent browser autofill from silently swapping it.
+  const isEmailLocked = authStep !== 'enterEmail' || emailSent
+
+  useEffect(() => {
+    const loadActiveDocuments = async () => {
+      const { data, error } = await supabase
+        .from('legal_documents')
+        .select('type, version')
+        .eq('is_active', true)
+
+      if (error || !data) {
+        console.error('Error loading legal documents:', error)
+        return
+      }
+
+      for (const doc of data as Array<{ type: 'terms' | 'privacy'; version: number }>) {
+        if (doc.type === 'terms') {
+          setTermsVersion(doc.version)
+        } else if (doc.type === 'privacy') {
+          setPrivacyVersion(doc.version)
+        }
+      }
+    }
+
+    loadActiveDocuments()
+  }, [supabase])
+
   useEffect(() => {
     const loadActiveDocuments = async () => {
       const { data, error } = await supabase
@@ -287,13 +315,17 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
           <input
             id="email"
             type="email"
+            name="email"
+            autoComplete={authStep === 'enterEmail' ? 'email' : 'username'}
             value={email}
+            readOnly={isEmailLocked}
             onChange={(e) => {
-              setEmail(e.target.value)
-              // Reset flow if email changes
-              setAuthStep('enterEmail')
-              setPassword('')
-              setUsername('')
+              if (isEmailLocked) {
+                return
+              }
+
+              const nextEmail = e.target.value
+              setEmail(nextEmail)
               setError(null)
             }}
             required
@@ -406,6 +438,8 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
             <input
               id="password"
               type="password"
+              name="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -446,6 +480,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
             fullWidth
             onClick={() => {
               setAuthStep('enterEmail')
+              setEmail('')
               setPassword('')
               setUsername('')
               setError(null)

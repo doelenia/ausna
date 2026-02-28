@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { lookupCityLocationFromIp } from '@/lib/geoip'
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -162,6 +163,20 @@ export async function updateSession(request: NextRequest) {
     return redirectResponse
   }
 
+  // For authenticated users, opportunistically update their human-portfolio
+  // coarse city location (derived from IP) at most once per day. This runs
+  // only for primary app pages, not static assets (already returned above).
+  if (user) {
+    try {
+      await maybeUpdateHumanCityLocation(user.id, request, supabase)
+    } catch (e) {
+      // Never block the request on location update failures.
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to update human city location from IP:', e)
+      }
+    }
+  }
+
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're
   // creating a new response object with NextResponse.next() make sure to:
   // 1. Pass the request in it, like so:
@@ -177,4 +192,91 @@ export async function updateSession(request: NextRequest) {
 
   return supabaseResponse
 }
+
+function getClientIp(request: NextRequest): string | null {
+  const xff = request.headers.get('x-forwarded-for')
+  if (xff) {
+    const first = xff.split(',')[0]?.trim()
+    if (first) return first
+  }
+  if ((request as any).ip && typeof (request as any).ip === 'string') {
+    return (request as any).ip as string
+  }
+  return null
+}
+
+async function maybeUpdateHumanCityLocation(
+  userId: string,
+  request: NextRequest,
+  supabase: any
+) {
+  // Only run on primary navigational GET requests to avoid doing work on every API hit.
+  if (request.method !== 'GET') return
+  const pathname = request.nextUrl.pathname
+  const isPrimaryPage =
+    pathname === '/main' ||
+    pathname === '/' ||
+    pathname.startsWith('/portfolio') ||
+    pathname.startsWith('/notes')
+  if (!isPrimaryPage) return
+
+  const ip = getClientIp(request)
+  if (!ip) return
+
+  // Fetch the user's human portfolio (if any)
+  const { data: portfolio, error } = await supabase
+    .from('portfolios')
+    .select('id, type, metadata')
+    .eq('user_id', userId)
+    .eq('type', 'human')
+    .maybeSingle()
+
+  if (error || !portfolio) {
+    return
+  }
+
+  const metadata = (portfolio.metadata as any) || {}
+  const properties = (metadata.properties || {}) as Record<string, any>
+
+  // Opt-out flag: when explicitly set to false, we never update or show the location.
+  const autoEnabled = properties.auto_city_location_enabled !== false
+  if (!autoEnabled) return
+
+  const lastUpdatedRaw = properties.auto_city_location_last_updated_at as
+    | string
+    | undefined
+  if (lastUpdatedRaw) {
+    const last = new Date(lastUpdatedRaw)
+    if (!Number.isNaN(last.getTime())) {
+      const now = new Date()
+      const diffMs = now.getTime() - last.getTime()
+      const oneDayMs = 24 * 60 * 60 * 1000
+      if (diffMs < oneDayMs) {
+        // Updated less than a day ago – skip.
+        return
+      }
+    }
+  }
+
+  const location = await lookupCityLocationFromIp(ip)
+  if (!location) return
+
+  const nextProperties: Record<string, any> = {
+    ...properties,
+    auto_city_location: location,
+    auto_city_location_enabled: true,
+    auto_city_location_last_updated_at: new Date().toISOString(),
+  }
+
+  const updatedMetadata = {
+    ...metadata,
+    properties: nextProperties,
+  }
+
+  await supabase
+    .from('portfolios')
+    .update({ metadata: updatedMetadata })
+    .eq('id', portfolio.id)
+}
+
 
