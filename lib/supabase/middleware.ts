@@ -213,66 +213,15 @@ async function maybeUpdateHumanCityLocation(
   // Only run on primary navigational GET requests to avoid doing work on every API hit.
   if (request.method !== 'GET') return
   const pathname = request.nextUrl.pathname
-  // #region agent log
-  console.log('[geoip] maybeUpdateHumanCityLocation entry', {
-    pathname,
-    method: request.method,
-  })
-  // #endregion
   const isPrimaryPage =
     pathname === '/main' ||
     pathname === '/' ||
     pathname.startsWith('/portfolio') ||
     pathname.startsWith('/notes')
-  if (!isPrimaryPage) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H4',
-        location: 'lib/supabase/middleware.ts:221',
-        message: 'maybeUpdateHumanCityLocation skipped for non-primary page',
-        data: {
-          pathname,
-          method: request.method,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-    return
-  }
+  if (!isPrimaryPage) return
 
   const ip = getClientIp(request)
-  if (!ip) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H2',
-        location: 'lib/supabase/middleware.ts:224',
-        message: 'maybeUpdateHumanCityLocation could not determine client IP',
-        data: {
-          hasXff: !!request.headers.get('x-forwarded-for'),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-    return
-  }
+  if (!ip) return
 
   // Fetch the user's human portfolio (if any)
   const { data: portfolio, error } = await supabase
@@ -282,30 +231,7 @@ async function maybeUpdateHumanCityLocation(
     .eq('type', 'human')
     .maybeSingle()
 
-  if (error || !portfolio) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H3',
-        location: 'lib/supabase/middleware.ts:235',
-        message: 'maybeUpdateHumanCityLocation could not load human portfolio',
-        data: {
-          hasError: !!error,
-          errorCode: error?.code ?? null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-    return
-  }
+  if (error || !portfolio) return
 
   const metadata = (portfolio.metadata as any) || {}
   const properties = (metadata.properties || {}) as Record<string, any>
@@ -323,60 +249,12 @@ async function maybeUpdateHumanCityLocation(
       const now = new Date()
       const diffMs = now.getTime() - last.getTime()
       const oneDayMs = 24 * 60 * 60 * 1000
-      if (diffMs < oneDayMs) {
-        // Updated less than a day ago – skip.
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Session-Id': '63060f',
-          },
-          body: JSON.stringify({
-            sessionId: '63060f',
-            runId: 'pre-fix',
-            hypothesisId: 'H3',
-            location: 'lib/supabase/middleware.ts:255',
-            message: 'maybeUpdateHumanCityLocation skipped due to recent update',
-            data: {
-              lastUpdatedAt: lastUpdatedRaw,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {})
-        // #endregion
-        return
-      }
+      if (diffMs < oneDayMs) return
     }
   }
 
   const location = await lookupCityLocationFromIp(ip)
-  // #region agent log
-  console.log('[geoip] lookupCityLocationFromIp result inside middleware', {
-    hasLocation: !!location,
-  })
-  // #endregion
-  if (!location) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H1',
-        location: 'lib/supabase/middleware.ts:262',
-        message: 'lookupCityLocationFromIp returned null',
-        data: {},
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-    return
-  }
+  if (!location) return
 
   const nextProperties: Record<string, any> = {
     ...properties,
@@ -390,31 +268,10 @@ async function maybeUpdateHumanCityLocation(
     properties: nextProperties,
   }
 
-  const { error: updateError } = await supabase
+  await supabase
     .from('portfolios')
     .update({ metadata: updatedMetadata })
     .eq('id', portfolio.id)
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': '63060f',
-    },
-    body: JSON.stringify({
-      sessionId: '63060f',
-      runId: 'pre-fix',
-      hypothesisId: 'H3',
-      location: 'lib/supabase/middleware.ts:280',
-      message: 'maybeUpdateHumanCityLocation attempted to update portfolio metadata',
-      data: {
-        hasUpdateError: !!updateError,
-        updateErrorCode: updateError?.code ?? null,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {})
-  // #endregion
 }
 
 
