@@ -377,6 +377,7 @@ export async function updatePortfolio(
     const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
+    const hostCommunityIdsRaw = formData.get('host_community_ids') as string | null
     const humanAutoCityLocationEnabledRaw = formData.get(
       'human_auto_city_location_enabled'
     ) as string | null
@@ -595,6 +596,41 @@ export async function updatePortfolio(
         updatedMetadata.properties = {
           ...nextProperties,
           host_project_ids: resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds : undefined,
+        }
+      }
+
+      // Host communities (multiple): owner/managers can add their communities
+      if (hostCommunityIdsRaw !== null && hostCommunityIdsRaw !== undefined) {
+        let resolvedHostCommunityIds: string[] = []
+        try {
+          const parsed = typeof hostCommunityIdsRaw === 'string' ? JSON.parse(hostCommunityIdsRaw) : hostCommunityIdsRaw
+          const ids = Array.isArray(parsed) ? parsed.filter((id: unknown) => typeof id === 'string') : []
+          if (ids.length > 0) {
+            const { data: communities } = await supabase
+              .from('portfolios')
+              .select('id, user_id, metadata, type')
+              .eq('type', 'community')
+              .in('id', ids)
+            if (communities?.length) {
+              for (const comm of communities) {
+                const hostMeta = (comm.metadata as any) || {}
+                const managers: string[] = hostMeta?.managers || []
+                const isOwner = comm.user_id === user.id
+                const isManager = Array.isArray(managers) && managers.includes(user.id)
+                if (isOwner || isManager) {
+                  resolvedHostCommunityIds.push(comm.id)
+                }
+              }
+              resolvedHostCommunityIds = [...new Set(resolvedHostCommunityIds)]
+            }
+          }
+        } catch {
+          // ignore invalid JSON
+        }
+        const nextProperties = (updatedMetadata.properties || {}) as Record<string, any>
+        updatedMetadata.properties = {
+          ...nextProperties,
+          host_community_ids: resolvedHostCommunityIds.length > 0 ? resolvedHostCommunityIds : undefined,
         }
       }
     }
@@ -1220,16 +1256,20 @@ export async function applyToActivityCallToJoin(
     const metadata = (portfolio.metadata as any) || {}
     const properties: Record<string, any> = (metadata.properties || {}) as Record<string, any>
     const callToJoin: ActivityCallToJoinConfig | undefined = properties.call_to_join
+    const isExternal = properties.external === true
 
-    if (!callToJoin) {
+    // External activities: always publicly joinable, no call-to-join config needed
+    if (!isExternal && !callToJoin) {
       return { success: false, error: 'Call-to-join is not configured for this activity' }
     }
 
-    const activityDateTime = (properties.activity_datetime || null) as import('@/lib/datetime').ActivityDateTimeValue | null
-    const status = (metadata.status as string) || null
-    const { isCallToJoinWindowOpen } = await import('@/lib/callToJoin')
-    if (!isCallToJoinWindowOpen(visibility, callToJoin, activityDateTime, status)) {
-      return { success: false, error: 'The call-to-join window for this activity is closed' }
+    if (!isExternal) {
+      const activityDateTime = (properties.activity_datetime || null) as import('@/lib/datetime').ActivityDateTimeValue | null
+      const status = (metadata.status as string) || null
+      const { isCallToJoinWindowOpen } = await import('@/lib/callToJoin')
+      if (!isCallToJoinWindowOpen(visibility, callToJoin!, activityDateTime, status)) {
+        return { success: false, error: 'The call-to-join window for this activity is closed' }
+      }
     }
 
     const members: string[] = metadata?.members || []
@@ -1258,7 +1298,8 @@ export async function applyToActivityCallToJoin(
     const basic = metadata?.basic || {}
     const activityName = (basic.name as string) || 'this activity'
 
-    if (callToJoin.require_approval) {
+    // External activities: always auto-join. Non-external with approval: create pending request.
+    if (!isExternal && callToJoin?.require_approval) {
       // Create or reuse a pending join request
       const { data: existingRequest } = await supabase
         .from('portfolio_join_requests')

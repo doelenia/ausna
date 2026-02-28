@@ -39,6 +39,8 @@ interface MembersPageClientProps {
   joinRequests?: ActivityJoinRequest[]
   /** When e.g. ?tab=requests is in the URL, open directly to that tab */
   initialTab?: 'members' | 'subscribers' | 'requests'
+  /** When true, owner/manager cannot remove other members (external activities) */
+  isExternalActivity?: boolean
 }
 
 export function MembersPageClient({
@@ -52,6 +54,7 @@ export function MembersPageClient({
   currentUserId,
   joinRequests = [],
   initialTab = 'members',
+  isExternalActivity = false,
 }: MembersPageClientProps) {
   const [activeTab, setActiveTab] = useState<'members' | 'subscribers' | 'requests'>(initialTab)
   useEffect(() => {
@@ -638,7 +641,7 @@ export function MembersPageClient({
                           )}
                         </>
                       )}
-                      {canManage && member.id !== currentUserId && !memberIsCreator && (
+                      {canManage && member.id !== currentUserId && !memberIsCreator && !isExternalActivity && (
                         <Button
                           variant="danger"
                           size="sm"

@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
+import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { UIText, Button, Card, Content, UIButtonText } from '@/components/ui'
 import { EmojiPicker } from './EmojiPicker'
@@ -23,6 +26,13 @@ interface HostProjectOption {
   emoji?: string
   description?: string
   projectType?: string | null
+}
+
+interface HostCommunityOption {
+  id: string
+  name: string
+  avatar?: string
+  emoji?: string
 }
 
 export function CreateActivityForm() {
@@ -45,7 +55,11 @@ export function CreateActivityForm() {
   const [hostProjects, setHostProjects] = useState<HostProjectOption[]>([])
   const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
   const [hostProjectIds, setHostProjectIds] = useState<string[]>([])
+  const [hostCommunities, setHostCommunities] = useState<HostCommunityOption[]>([])
+  const [hostCommunitiesLoading, setHostCommunitiesLoading] = useState(false)
+  const [hostCommunityIds, setHostCommunityIds] = useState<string[]>([])
   const [showHostSelector, setShowHostSelector] = useState(false)
+  const [hostSelectorTab, setHostSelectorTab] = useState<'projects' | 'communities'>('projects')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -62,8 +76,73 @@ export function CreateActivityForm() {
   ])
   const [showCallToJoinModal, setShowCallToJoinModal] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [isExternal, setIsExternal] = useState(false)
+  const [externalLink, setExternalLink] = useState('')
+  const [extractingLink, setExtractingLink] = useState(false)
+  const [description, setDescription] = useState('')
+  const [existingActivity, setExistingActivity] = useState<{
+    id: string
+    name: string
+    avatar?: string
+    emoji?: string
+    slug?: string
+  } | null>(null)
+  const [linkVerified, setLinkVerified] = useState(false)
 
   const isActivitySelectionValid = !activityValue || !!activityValue.start
+
+  const handleContinue = async () => {
+    const url = externalLink.trim()
+    if (!url) {
+      setError('Please enter a link')
+      return
+    }
+    setExtractingLink(true)
+    setError(null)
+    setExistingActivity(null)
+    try {
+      // Check for duplicate link first
+      const checkRes = await fetch(
+        `/api/activities/find-by-external-link?url=${encodeURIComponent(url)}`
+      )
+      const checkData = await checkRes.json()
+      if (checkData.existing && checkData.activity) {
+        setExistingActivity(checkData.activity)
+        setLinkVerified(false)
+        setExtractingLink(false)
+        return
+      }
+
+      const res = await fetch('/api/activities/extract-external-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Failed to extract event information')
+        return
+      }
+      if (data.title) setName(data.title)
+      if (data.description) setDescription(data.description)
+      if (data.time?.start) {
+        setActivityValue({
+          start: data.time.start,
+          end: data.time.end || undefined,
+          allDay: false,
+          inProgress: false,
+        })
+      }
+      if (data.location) {
+        setActivityLocation({ line1: data.location })
+      }
+      setLinkVerified(true)
+    } catch (err: any) {
+      setError(err.message || 'Failed to extract event information')
+    } finally {
+      setExtractingLink(false)
+    }
+  }
 
   useEffect(() => {
     const initialHost = searchParams?.get('host') || ''
@@ -126,6 +205,58 @@ export function CreateActivityForm() {
     fetchHostProjects()
   }, [supabase])
 
+  useEffect(() => {
+    const fetchHostCommunities = async () => {
+      setHostCommunitiesLoading(true)
+      try {
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser()
+        if (authError || !user) {
+          setHostCommunities([])
+          setHostCommunitiesLoading(false)
+          return
+        }
+
+        const { data: communities } = await supabase
+          .from('portfolios')
+          .select('id, user_id, metadata')
+          .eq('type', 'community')
+          .order('created_at', { ascending: false })
+
+        const options: HostCommunityOption[] =
+          communities
+            ?.filter((c: any) => {
+              const meta = c.metadata as any
+              const managers: string[] = meta?.managers || []
+              const isOwner = c.user_id === user.id
+              const isManager = Array.isArray(managers) && managers.includes(user.id)
+              return isOwner || isManager
+            })
+            .map((c: any) => {
+              const meta = c.metadata as any
+              const basic = meta?.basic || {}
+              return {
+                id: c.id as string,
+                name: (basic.name as string) || 'Community',
+                avatar: basic.avatar as string | undefined,
+                emoji: basic.emoji as string | undefined,
+              }
+            }) ?? []
+
+        setHostCommunities(options)
+      } catch (e) {
+        console.error('Failed to load host communities for activities', e)
+        setHostCommunities([])
+      } finally {
+        setHostCommunitiesLoading(false)
+      }
+    }
+
+    fetchHostCommunities()
+  }, [supabase])
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
@@ -185,17 +316,27 @@ export function CreateActivityForm() {
       return
     }
 
-    if (!avatarFile && !selectedEmoji) {
+    if (!isExternal && !avatarFile && !selectedEmoji) {
       setError('Please upload an image or select an emoji')
       return
     }
 
-    if (creatorRole.trim()) {
+    if (!isExternal && creatorRole.trim()) {
       const words = creatorRole.trim().split(/\s+/)
       if (words.length > 2) {
         setError('Creator role must be 2 words or less')
         return
       }
+    }
+
+    if (isExternal && !externalLink.trim()) {
+      setError('Event link is required for external activities')
+      return
+    }
+
+    if (isExternal && existingActivity) {
+      setError('This event already exists. Use the link above to view it.')
+      return
     }
 
     setLoading(true)
@@ -205,8 +346,19 @@ export function CreateActivityForm() {
       const formData = new FormData()
       formData.append('type', 'activities')
       formData.append('name', name.trim())
-      if (hostProjectIds.length > 0) {
-        formData.append('host_project_ids', JSON.stringify(hostProjectIds))
+      if (description.trim()) {
+        formData.append('description', description.trim())
+      }
+      if (isExternal) {
+        formData.append('is_external', 'true')
+        formData.append('external_link', externalLink.trim())
+      } else {
+        if (hostProjectIds.length > 0) {
+          formData.append('host_project_ids', JSON.stringify(hostProjectIds))
+        }
+        if (hostCommunityIds.length > 0) {
+          formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
+        }
       }
 
       if (avatarFile) {
@@ -215,18 +367,22 @@ export function CreateActivityForm() {
       if (selectedEmoji) {
         formData.append('emoji', selectedEmoji)
       }
+      if (isExternal && externalLink.trim()) {
+        const faviconUrl = getFaviconUrl(externalLink.trim())
+        if (faviconUrl) formData.append('avatar_url', faviconUrl)
+      }
 
-      if (projectTypeGeneral && projectTypeSpecific) {
+      if (!isExternal && projectTypeGeneral && projectTypeSpecific) {
         formData.append('project_type_general', projectTypeGeneral)
         formData.append('project_type_specific', projectTypeSpecific)
       }
 
-      formData.append('creator_role', creatorRole.trim() || 'Creator')
-      formData.append('visibility', visibility)
+      formData.append('creator_role', isExternal ? 'Uploader' : (creatorRole.trim() || 'Creator'))
+      formData.append('visibility', isExternal ? 'public' : visibility)
       formData.append('project_status', projectStatus || '')
 
-      // Call-to-join: on when activity is public (no enable/disable); only send config when public
-      if (visibility !== 'private') {
+      // Call-to-join: only for non-external, when activity is public
+      if (!isExternal && visibility !== 'private') {
         if (callToJoinDescription.trim().length > 0) {
           formData.append('activity_call_to_join_description', callToJoinDescription.trim())
         }
@@ -323,9 +479,113 @@ export function CreateActivityForm() {
         />
       )}
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* External toggle */}
+        <div className="flex items-center justify-between">
+          <UIText as="label" className="block">
+            External activity
+          </UIText>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isExternal}
+            onClick={() => {
+              setIsExternal((prev) => !prev)
+              if (!isExternal) {
+                setExternalLink('')
+                setExistingActivity(null)
+                setLinkVerified(false)
+                setHostProjectIds([])
+                setHostCommunityIds([])
+                setVisibility('public')
+              }
+              setError(null)
+            }}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+              isExternal ? 'bg-blue-600' : 'bg-gray-200'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                isExternal ? 'translate-x-5' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+        <UIText as="p" className="text-xs text-gray-500 -mt-2">
+          External activities link to events on other sites. Anyone can join without approval.
+        </UIText>
+
+        {isExternal && (
+          <div className="space-y-4">
+            <div>
+              <UIText as="label" className="block mb-2">
+                Event link
+              </UIText>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={externalLink}
+                  onChange={(e) => {
+                    setExternalLink(e.target.value)
+                    setExistingActivity(null)
+                    setLinkVerified(false)
+                  }}
+                  placeholder="https://..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={loading}
+                />
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={handleContinue}
+                  disabled={extractingLink || !externalLink.trim()}
+                >
+                  <UIText>{extractingLink ? 'Extracting...' : 'Continue'}</UIText>
+                </Button>
+              </div>
+            </div>
+            {existingActivity && (
+              <Link
+                href={getPortfolioUrl('activities', existingActivity.id)}
+                className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
+              >
+                <div className="flex-shrink-0">
+                  <StickerAvatar
+                    src={existingActivity.avatar}
+                    alt={existingActivity.name}
+                    type="activities"
+                    size={48}
+                    emoji={existingActivity.emoji}
+                    name={existingActivity.name}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <UIText as="div" className="text-amber-800 font-medium mb-0.5">
+                    This event already exists
+                  </UIText>
+                  <Content className="text-amber-700 mb-1">
+                    {existingActivity.name}
+                  </Content>
+                  <UIText as="span" className="text-amber-600 text-sm">
+                    View existing activity →
+                  </UIText>
+                </div>
+              </Link>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+            <UIText>{error}</UIText>
+          </div>
+        )}
+
+        {(!isExternal || linkVerified) && (
+        <>
         <div>
           <UIText as="label" className="block mb-2">
-            Avatar <span className="text-red-500">*</span>
+            Avatar {!isExternal && <span className="text-red-500">*</span>}
           </UIText>
           <div className="flex items-center gap-4">
             <div className="flex-shrink-0">
@@ -337,6 +597,12 @@ export function CreateActivityForm() {
                 />
               ) : selectedEmoji ? (
                 <StickerAvatar alt={name || 'Preview'} type="activities" size={80} emoji={selectedEmoji} />
+              ) : isExternal && externalLink.trim() ? (
+                <img
+                  src={getFaviconUrl(externalLink.trim(), 128)}
+                  alt="Site favicon"
+                  className="h-20 w-20 rounded-full object-cover border-2 border-gray-300 bg-white"
+                />
               ) : (
                 <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
                   <svg
@@ -399,7 +665,7 @@ export function CreateActivityForm() {
                 </Button>
               )}
               <UIText as="p" className="text-xs text-gray-500">
-                Please upload an image or select an emoji
+                {isExternal ? 'Uses site favicon by default. Upload or select emoji to override.' : 'Please upload an image or select an emoji'}
               </UIText>
             </div>
           </div>
@@ -422,74 +688,117 @@ export function CreateActivityForm() {
           />
         </div>
 
+        {isExternal && (
+          <div>
+            <UIText as="label" className="block mb-2">
+              Description
+            </UIText>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="Short description of the event"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={loading}
+            />
+          </div>
+        )}
+
+        {!isExternal && (
         <div>
           <UIText as="label" className="block mb-2">
-            Host projects (optional)
+            Hosts (optional)
           </UIText>
-          {hostProjectIds.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {hostProjectIds.map((id) => {
-                const p = hostProjects.find((x) => x.id === id)
-                if (!p) return null
-                return (
-                  <div
-                    key={id}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
-                  >
-                    <StickerAvatar
-                      src={p.avatar}
-                      alt={p.name}
-                      type="projects"
-                      size={32}
-                      emoji={p.emoji}
-                      name={p.name}
-                    />
-                    <Content className="truncate max-w-[120px]">{p.name}</Content>
-                    <button
-                      type="button"
-                      onClick={() => setHostProjectIds((prev) => prev.filter((x) => x !== id))}
-                      className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
-                      aria-label="Remove host project"
-                      disabled={loading}
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                )
-              })}
-              {hostProjectsLoading ? (
-                <UIText className="text-gray-500">Loading...</UIText>
-              ) : (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowHostSelector(true)}
-                  disabled={loading}
+          <UIText as="p" className="text-xs text-gray-500 mb-2">
+            Projects and communities that host this activity. You can add projects and communities where you are owner or manager.
+          </UIText>
+          <div className="flex flex-wrap gap-2">
+            {hostProjectIds.map((id) => {
+              const p = hostProjects.find((x) => x.id === id)
+              if (!p) return null
+              return (
+                <div
+                  key={`project-${id}`}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
                 >
-                  <UIText>Add host project</UIText>
-                </Button>
-              )}
-            </div>
-          ) : hostProjectsLoading ? (
-            <UIText className="text-gray-500">Loading your projects...</UIText>
-          ) : hostProjects.length === 0 ? (
-            <UIText className="text-gray-500 text-sm">
-              You can optionally link this activity to projects where you are an owner or manager.
+                  <StickerAvatar
+                    src={p.avatar}
+                    alt={p.name}
+                    type="projects"
+                    size={32}
+                    emoji={p.emoji}
+                    name={p.name}
+                  />
+                  <Content className="truncate max-w-[120px]">{p.name}</Content>
+                  <button
+                    type="button"
+                    onClick={() => setHostProjectIds((prev) => prev.filter((x) => x !== id))}
+                    className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
+                    aria-label="Remove host project"
+                    disabled={loading}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              )
+            })}
+            {hostCommunityIds.map((id) => {
+              const c = hostCommunities.find((x) => x.id === id)
+              if (!c) return null
+              return (
+                <div
+                  key={`community-${id}`}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
+                >
+                  <StickerAvatar
+                    src={c.avatar}
+                    alt={c.name}
+                    type="community"
+                    size={32}
+                    emoji={c.emoji}
+                    name={c.name}
+                  />
+                  <Content className="truncate max-w-[120px]">{c.name}</Content>
+                  <button
+                    type="button"
+                    onClick={() => setHostCommunityIds((prev) => prev.filter((x) => x !== id))}
+                    className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
+                    aria-label="Remove host community"
+                    disabled={loading}
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              )
+            })}
+            {(hostProjectsLoading || hostCommunitiesLoading) ? (
+              <UIText className="text-gray-500">Loading...</UIText>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setHostSelectorTab('projects')
+                  setShowHostSelector(true)
+                }}
+                disabled={loading}
+              >
+                <UIText>Add host</UIText>
+              </Button>
+            )}
+          </div>
+          {!hostProjectsLoading && !hostCommunitiesLoading && hostProjects.length === 0 && hostCommunities.length === 0 && (
+            <UIText className="text-gray-500 text-sm mt-1">
+              You can optionally link this activity to projects or communities where you are an owner or manager.
             </UIText>
-          ) : (
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setShowHostSelector(true)}
-              disabled={loading}
-            >
-              <UIText>Add host project</UIText>
-            </Button>
           )}
         </div>
+        )}
 
         <div className="mt-4">
           <UIText as="label" className="block mb-2">
@@ -516,7 +825,8 @@ export function CreateActivityForm() {
           </div>
         </div>
 
-        {/* Advanced settings: category, visibility, call to join, role — collapsed by default */}
+        {/* Advanced settings: category, visibility, call to join, role — collapsed by default (hidden for external) */}
+        {!isExternal && (
         <div className="border border-gray-200 rounded-lg overflow-hidden">
           <button
             type="button"
@@ -647,11 +957,6 @@ export function CreateActivityForm() {
             </div>
           )}
         </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
-            <UIText>{error}</UIText>
-          </div>
         )}
 
         <div className="flex gap-4">
@@ -659,11 +964,15 @@ export function CreateActivityForm() {
             type="submit"
             variant="primary"
             fullWidth
-            disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji)}
+            disabled={loading || !!existingActivity || !name.trim() || (!isExternal && !avatarFile && !selectedEmoji)}
           >
-            <UIText>{loading ? 'Creating...' : 'Create Activity'}</UIText>
+            <UIText>
+              {existingActivity ? 'Event already exists' : loading ? 'Creating...' : 'Create Activity'}
+            </UIText>
           </Button>
         </div>
+        </>
+        )}
       </form>
 
       {showHostSelector && (
@@ -674,40 +983,98 @@ export function CreateActivityForm() {
           >
             <Card variant="default" padding="sm">
               <div className="mb-4">
-                <UIText>Choose a host project (optional)</UIText>
-              </div>
-              {hostProjectsLoading ? (
-                <div className="py-8 text-center">
-                  <UIText className="text-gray-500">Loading projects...</UIText>
+                <UIText as="h2">Add host</UIText>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setHostSelectorTab('projects')}
+                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                      hostSelectorTab === 'projects' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Projects
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHostSelectorTab('communities')}
+                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                      hostSelectorTab === 'communities' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Communities
+                  </button>
                 </div>
-              ) : hostProjects.length === 0 ? (
+              </div>
+              {hostSelectorTab === 'projects' ? (
+                hostProjectsLoading ? (
+                  <div className="py-8 text-center">
+                    <UIText className="text-gray-500">Loading projects...</UIText>
+                  </div>
+                ) : hostProjects.filter((p) => !hostProjectIds.includes(p.id)).length === 0 ? (
+                  <UIText className="text-gray-500 text-sm mb-4">
+                    No more projects to add, or you are not owner/manager of any.
+                  </UIText>
+                ) : (
+                  <div className="grid grid-cols-3 gap-x-4 gap-y-8 mb-4">
+                    {hostProjects
+                      .filter((p) => !hostProjectIds.includes(p.id))
+                      .map((project) => (
+                        <button
+                          key={project.id}
+                          type="button"
+                          className="flex flex-col items-center gap-4 py-6 px-4 hover:opacity-80 transition-opacity"
+                          onClick={() => {
+                            setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
+                            setShowHostSelector(false)
+                          }}
+                        >
+                          <StickerAvatar
+                            src={project.avatar}
+                            alt={project.name}
+                            type="projects"
+                            size={72}
+                            emoji={project.emoji}
+                            name={project.name}
+                          />
+                          <UIText className="text-center max-w-[96px] truncate" title={project.name}>
+                            {project.name}
+                          </UIText>
+                        </button>
+                      ))}
+                  </div>
+                )
+              ) : hostCommunitiesLoading ? (
+                <div className="py-8 text-center">
+                  <UIText className="text-gray-500">Loading communities...</UIText>
+                </div>
+              ) : hostCommunities.filter((c) => !hostCommunityIds.includes(c.id)).length === 0 ? (
                 <UIText className="text-gray-500 text-sm mb-4">
-                  You are not an owner or manager of any projects yet.
+                  No more communities to add, or you are not owner/manager of any.
                 </UIText>
               ) : (
                 <div className="grid grid-cols-3 gap-x-4 gap-y-8 mb-4">
-                  {hostProjects
-                    .filter((p) => !hostProjectIds.includes(p.id))
-                    .map((project) => (
+                  {hostCommunities
+                    .filter((c) => !hostCommunityIds.includes(c.id))
+                    .map((community) => (
                       <button
-                        key={project.id}
+                        key={community.id}
                         type="button"
                         className="flex flex-col items-center gap-4 py-6 px-4 hover:opacity-80 transition-opacity"
                         onClick={() => {
-                          setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
+                          setHostCommunityIds((prev) => (prev.includes(community.id) ? prev : [...prev, community.id]))
                           setShowHostSelector(false)
                         }}
                       >
                         <StickerAvatar
-                          src={project.avatar}
-                          alt={project.name}
-                          type="projects"
+                          src={community.avatar}
+                          alt={community.name}
+                          type="community"
                           size={72}
-                          emoji={project.emoji}
-                          name={project.name}
+                          emoji={community.emoji}
+                          name={community.name}
                         />
-                        <UIText className="text-center max-w-[96px] truncate" title={project.name}>
-                          {project.name}
+                        <UIText className="text-center max-w-[96px] truncate" title={community.name}>
+                          {community.name}
                         </UIText>
                       </button>
                     ))}

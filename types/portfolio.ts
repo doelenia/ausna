@@ -189,6 +189,8 @@ export interface ActivityCallToJoinConfig {
 export interface ActivityPortfolioProperties {
   /** Portfolio IDs of projects that host this activity (owner/managers can add their projects). */
   host_project_ids?: string[]
+  /** Portfolio IDs of communities that host this activity (owner/managers can add their communities). */
+  host_community_ids?: string[]
   goals?: string
   timelines?: string
   asks?: ProjectPortfolioAsk[]
@@ -204,6 +206,13 @@ export interface ActivityPortfolioProperties {
    * to join this activity.
    */
   call_to_join?: ActivityCallToJoinConfig
+  /**
+   * When true, this activity is an external event (link to external site).
+   * External activities are publicly joinable without approval; owner/manager cannot remove members.
+   */
+  external?: boolean
+  /** URL to the external event (when external is true). */
+  external_link?: string
 }
 
 /**

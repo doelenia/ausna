@@ -95,7 +95,7 @@ export interface AgreeToLegalResult {
 /** Get current user's human portfolio for onboarding forms (profile, availability). */
 export async function getMyHumanPortfolioForOnboarding(): Promise<{
   success: boolean
-  portfolio?: { id: string; metadata: HumanPortfolioMetadata }
+  portfolio?: { id: string; user_id: string; metadata: HumanPortfolioMetadata }
   error?: string
 }> {
   try {
@@ -104,7 +104,7 @@ export async function getMyHumanPortfolioForOnboarding(): Promise<{
     const portfolio = await ensureHumanPortfolio(auth.user.id)
     return {
       success: true,
-      portfolio: { id: portfolio.id, metadata: portfolio.metadata as HumanPortfolioMetadata },
+      portfolio: { id: portfolio.id, user_id: portfolio.user_id, metadata: portfolio.metadata as HumanPortfolioMetadata },
     }
   } catch (e: any) {
     return { success: false, error: e?.message }
