@@ -16,15 +16,53 @@ export function formatActivityLocation(
   const line1 = value.line1?.trim() || null
   const city = value.city?.trim() || ''
   const state = value.state?.trim() || ''
-  const country = value.country?.trim() || ''
+  const rawCountry = value.country?.trim() || ''
+  const countryCode = value.countryCode?.trim().toUpperCase() || ''
+
+  // Normalize country for display:
+  // - Prefer a human-readable name if we know it
+  // - Fall back to the raw country string, then the ISO code
+  let displayCountry = rawCountry
+  const normalizedCode = (countryCode || rawCountry).toUpperCase()
+
+  switch (normalizedCode) {
+    case 'US':
+    case 'USA':
+    case 'UNITED STATES':
+      displayCountry = 'United States'
+      break
+    case 'JP':
+    case 'JPN':
+    case 'JAPAN':
+      displayCountry = 'Japan'
+      break
+    default:
+      if (!displayCountry && normalizedCode) {
+        displayCountry = normalizedCode
+      }
+      break
+  }
+
+  const country = displayCountry
 
   let line2: string | null = null
 
-  // Unified rules for all countries:
-  // - If city exists (any resolution ≥ city): "city, region" (no country)
-  // - Else if only region/country: "region, country" when both, or just region/country
+  // Display rules:
+  // - US: prefer "city, state" (e.g., "New York, NY")
+  // - Non-US: prefer "city, country" (e.g., "Tokyo, Japan")
+  // - Fallbacks when pieces are missing
+  const isUS =
+    normalizedCode === 'US' ||
+    normalizedCode === 'USA' ||
+    normalizedCode === 'UNITED STATES' ||
+    rawCountry.toUpperCase() === 'UNITED STATES'
+
   if (city) {
-    line2 = state ? `${city}, ${state}` : city
+    if (isUS) {
+      line2 = state ? `${city}, ${state}` : city
+    } else {
+      line2 = country ? `${city}, ${country}` : city
+    }
   } else if (state && country) {
     line2 = `${state}, ${country}`
   } else if (state) {

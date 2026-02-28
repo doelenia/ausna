@@ -16,12 +16,6 @@ export async function lookupCityLocationFromIp(
 ): Promise<ActivityLocationValue | null> {
   if (!ip) return null
 
-  // #region agent log
-  console.log('[geoip] lookupCityLocationFromIp invoked', {
-    ipProvided: !!ip,
-  })
-  // #endregion
-
   // Skip obvious local/private IPs
   const lower = ip.toLowerCase()
   if (
@@ -46,54 +40,12 @@ export async function lookupCityLocationFromIp(
     lower.startsWith('172.30.') ||
     lower.startsWith('172.31.')
   ) {
-    // #region agent log
-    console.log('[geoip][H2] GeoIP lookup skipped for private/loopback IP')
-    // #endregion
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H2',
-        location: 'lib/geoip.ts:41',
-        message: 'GeoIP lookup skipped for private/loopback IP',
-        data: {
-          ipCategory: lower === '::1' || lower === '127.0.0.1' ? 'loopback' : 'private',
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
     return null
   }
 
   const baseUrl = process.env.GEOIP_API_URL
   if (!baseUrl) {
     // GeoIP not configured
-    // #region agent log
-    console.log('[geoip][H1] GEOIP_API_URL not configured; skipping GeoIP lookup')
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H1',
-        location: 'lib/geoip.ts:49',
-        message: 'GEOIP_API_URL not configured, skipping GeoIP lookup',
-        data: {},
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
     return null
   }
 
@@ -108,31 +60,6 @@ export async function lookupCityLocationFromIp(
     }
 
     const res = await fetch(url, { headers, cache: 'no-store' })
-    // #region agent log
-    console.log('[geoip][H5] GeoIP HTTP response received', {
-      ok: res.ok,
-      status: res.status,
-    })
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H5',
-        location: 'lib/geoip.ts:63',
-        message: 'GeoIP HTTP response received',
-        data: {
-          ok: res.ok,
-          status: res.status,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
     if (!res.ok) {
       return null
     }
@@ -146,64 +73,66 @@ export async function lookupCityLocationFromIp(
         data.town ||
         data.locality ||
         '') as string
-    const region =
-      (data.region ||
+
+    // For providers like Kamero:
+    // - `countryRegion` is the region/state (e.g., "CA" for California)
+    // - `region` is often the edge server (e.g., "hnd1"), which we should NOT treat as state
+    const regionFromCountry =
+      (data.countryRegion ||
         data.region_name ||
         data.state ||
         data.province ||
         '') as string
+
     const country =
-      (data.country ||
-        data.country_name ||
+      (data.country_name ||
         data.countryName ||
         '') as string
+
     const countryCode =
       (data.country_code ||
         data.countryCode ||
+        data.country ||
         data.country_iso ||
         '') as string
+
     const stateCode =
-      (data.region_code ||
+      (data.countryRegion ||
+        data.region_code ||
         data.state_code ||
         '') as string
 
     const cityTrimmed = city.trim()
-    const regionTrimmed = region.trim()
+    const regionTrimmed = regionFromCountry.trim()
     const countryTrimmed = country.trim()
     const countryCodeTrimmed = countryCode.trim()
     const stateCodeTrimmed = stateCode.trim()
 
     if (!cityTrimmed && !regionTrimmed && !countryTrimmed) {
-      // #region agent log
-      console.log('[geoip][H5] GeoIP response missing city/region/country fields')
-      fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '63060f',
-        },
-        body: JSON.stringify({
-          sessionId: '63060f',
-          runId: 'pre-fix',
-          hypothesisId: 'H5',
-          location: 'lib/geoip.ts:104',
-          message: 'GeoIP response missing city/region/country fields',
-          data: {},
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {})
-      // #endregion
       return null
     }
 
     const value: ActivityLocationValue = {}
 
-    // For humans we treat the city as the main "line1" so the badge headline is the city.
+    // Determine if this looks like a US location. Only in that case do we keep
+    // the region/countryRegion as a "state". For all non-US locations we ignore
+    // the countryRegion-derived region entirely to keep things simpler.
+    const normalizedCode =
+      countryCodeTrimmed || countryTrimmed
+        ? (countryCodeTrimmed || countryTrimmed).toUpperCase()
+        : ''
+    const isUS =
+      normalizedCode === 'US' ||
+      normalizedCode === 'USA' ||
+      normalizedCode === 'UNITED STATES'
+
+    // For IP-derived locations we intentionally keep this coarse:
+    // - Do NOT set line1 at all (no street/building-level detail)
+    // - Only store city/region/country + codes
     if (cityTrimmed) {
-      value.line1 = cityTrimmed
       value.city = cityTrimmed
     }
-    if (regionTrimmed) {
+    if (isUS && regionTrimmed) {
       value.state = regionTrimmed
     }
     if (countryTrimmed) {
@@ -212,65 +141,13 @@ export async function lookupCityLocationFromIp(
     if (countryCodeTrimmed) {
       value.countryCode = countryCodeTrimmed
     }
-    if (stateCodeTrimmed) {
+    if (isUS && stateCodeTrimmed) {
       value.stateCode = stateCodeTrimmed
     }
 
-    // #region agent log
-    console.log('[geoip][H5] GeoIP lookup succeeded with derived location', {
-      hasCity: !!cityTrimmed,
-      hasRegion: !!regionTrimmed,
-      hasCountry: !!countryTrimmed,
-    })
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H5',
-        location: 'lib/geoip.ts:128',
-        message: 'GeoIP lookup succeeded with derived location',
-        data: {
-          hasCity: !!cityTrimmed,
-          hasRegion: !!regionTrimmed,
-          hasCountry: !!countryTrimmed,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-
     // Never mark IP-derived city as "exact private" – it's already coarse.
     return value
-  } catch (e) {
-    // #region agent log
-    console.log('[geoip][H5] GeoIP lookup threw error', {
-      name: (e as any)?.name ?? 'Error',
-    })
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': '63060f',
-      },
-      body: JSON.stringify({
-        sessionId: '63060f',
-        runId: 'pre-fix',
-        hypothesisId: 'H5',
-        location: 'lib/geoip.ts:130',
-        message: 'GeoIP lookup threw error',
-        data: {
-          // Avoid logging full error to keep payload small and non-sensitive
-          name: (e as any)?.name ?? 'Error',
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
+  } catch {
     return null
   }
 }
