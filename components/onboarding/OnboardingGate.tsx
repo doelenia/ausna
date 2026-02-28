@@ -442,6 +442,7 @@ function OnboardingAvailabilitiesStep({ onComplete }: { onComplete: () => void }
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [profileUserId, setProfileUserId] = useState<string | null>(null)
   const availabilityValidationError = getAvailabilityValidationError(schedule)
 
   useEffect(() => {
@@ -455,6 +456,7 @@ function OnboardingAvailabilitiesStep({ onComplete }: { onComplete: () => void }
       } else {
         setSchedule(createSuggestedAvailabilitySchedule())
       }
+      setProfileUserId(res.portfolio.user_id ?? null)
       setLoaded(true)
     })
     return () => { cancelled = true }
@@ -501,7 +503,19 @@ function OnboardingAvailabilitiesStep({ onComplete }: { onComplete: () => void }
         Set your availability
       </Title>
       <Content className="mb-4">
-        Start with our suggested schedule and adjust it as needed.
+        Your availability helps us recommend better activity opportunities. Start with our suggested
+        schedule and adjust it as needed. You can edit this later in{' '}
+        {profileUserId ? (
+          <Link
+            href={`/portfolio/human/${profileUserId}`}
+            className="text-blue-600 hover:underline"
+          >
+            Edit Profile
+          </Link>
+        ) : (
+          'Edit Profile'
+        )}
+        .
       </Content>
       <form onSubmit={handleSubmit} className="space-y-3">
         {HUMAN_AVAILABILITY_DAYS.map((dayKey) => {

@@ -7,6 +7,8 @@ import { uploadAvatar } from '@/lib/storage/avatars-server'
 import { generateSlug } from '@/lib/portfolio/helpers'
 import { addProjectToOwnedList } from '@/lib/portfolio/human'
 import { normalizeActivityDateTime } from '@/lib/datetime'
+import { normalizeExternalLink } from '@/lib/portfolio/normalizeExternalLink'
+import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 
 interface CreatePortfolioResult {
   success: boolean
@@ -47,12 +49,32 @@ export async function createPortfolio(
     const activityCallToJoinRequireApprovalRaw = formData.get('activity_call_to_join_require_approval') as string | null
     const activityCallToJoinPromptRaw = formData.get('activity_call_to_join_prompt') as string | null
     const activityCallToJoinRolesRaw = formData.get('activity_call_to_join_roles') as string | null
+    const isExternalRaw = formData.get('is_external') as string | null
+    const isExternal = isExternalRaw === 'true'
+    const externalLinkRaw = formData.get('external_link') as string | null
+    const externalLink = externalLinkRaw?.trim() || ''
+    const avatarUrlRaw = formData.get('avatar_url') as string | null
+    const avatarUrl = avatarUrlRaw?.trim() || ''
+    const descriptionRaw = formData.get('description') as string | null
+    const activityDescription = descriptionRaw?.trim() || ''
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostProjectIds: string[] =
       hostProjectIdsRaw && typeof hostProjectIdsRaw === 'string'
         ? (() => {
             try {
               const parsed = JSON.parse(hostProjectIdsRaw)
+              return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+            } catch {
+              return []
+            }
+          })()
+        : []
+    const hostCommunityIdsRaw = formData.get('host_community_ids') as string | null
+    const hostCommunityIds: string[] =
+      hostCommunityIdsRaw && typeof hostCommunityIdsRaw === 'string'
+        ? (() => {
+            try {
+              const parsed = JSON.parse(hostCommunityIdsRaw)
               return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
             } catch {
               return []
@@ -87,6 +109,37 @@ export async function createPortfolio(
       }
     }
 
+    // External activities require a link
+    if (type === 'activities' && isExternal && !externalLink) {
+      return {
+        success: false,
+        error: 'Event link is required for external activities',
+      }
+    }
+
+    // External activities: check for duplicate link
+    if (type === 'activities' && isExternal && externalLink) {
+      const normalizedLink = normalizeExternalLink(externalLink)
+      const { data: activities } = await supabase
+        .from('portfolios')
+        .select('id, metadata')
+        .eq('type', 'activities')
+
+      const duplicate = (activities || []).find((p: any) => {
+        const props = p.metadata?.properties || {}
+        if (props.external !== true) return false
+        const stored = (props.external_link as string) || ''
+        return stored && normalizeExternalLink(stored) === normalizedLink
+      })
+
+      if (duplicate) {
+        return {
+          success: false,
+          error: 'An activity with this event link already exists',
+        }
+      }
+    }
+
     // Project types are optional - no validation needed
 
     // Validate creator role (max 2 words)
@@ -100,8 +153,8 @@ export async function createPortfolio(
       }
     }
 
-    // Require either avatar or emoji
-    if (!avatarFile && !emoji) {
+    // Require either avatar, emoji, or (for external) favicon from link
+    if (!avatarFile && !emoji && !(isExternal && (avatarUrl || externalLink))) {
       return {
         success: false,
         error: 'Please upload an image or select an emoji',
@@ -131,17 +184,26 @@ export async function createPortfolio(
     }
 
     // Compute visibility for projects/activities (public/private). Communities remain public for now.
+    // External activities are always public.
     const visibility: 'public' | 'private' =
-      visibilityRaw === 'private' && (type === 'projects' || type === 'activities')
-        ? 'private'
-        : 'public'
+      type === 'activities' && isExternal
+        ? 'public'
+        : visibilityRaw === 'private' && (type === 'projects' || type === 'activities')
+          ? 'private'
+          : 'public'
+
+    // For external activities, use favicon as avatar when no file/emoji provided
+    const externalAvatarUrl =
+      type === 'activities' && isExternal && !avatarFile && !emoji
+        ? avatarUrl || getFaviconUrl(externalLink)
+        : ''
 
     // Create portfolio metadata structure
     const metadata: any = {
       basic: {
         name: name.trim(),
-        description: '',
-        avatar: '',
+        description: type === 'activities' && activityDescription ? activityDescription : '',
+        avatar: externalAvatarUrl || '',
         emoji: emoji || '',
       },
       pinned: [],
@@ -222,9 +284,18 @@ export async function createPortfolio(
         }
       }
 
-      // Call-to-join: on when activity is not private (no separate enable/disable).
+      // External activities: set external flag and link; no call-to-join
+      if (isExternal && externalLink) {
+        metadata.properties = {
+          ...(metadata.properties || {}),
+          external: true,
+          external_link: externalLink,
+        }
+      }
+
+      // Call-to-join: on when activity is not private and not external.
       // No default join_by; window closes when activity end has passed or status is archived.
-      if (visibility !== 'private') {
+      if (!isExternal && visibility !== 'private') {
         const existingProperties: Record<string, any> = metadata.properties || {}
 
         let callToJoinRoles: Array<{ id: string; label: string; activityRole: string }> = [
@@ -330,6 +401,40 @@ export async function createPortfolio(
       resolvedHostProjectIds = [...new Set(resolvedHostProjectIds)]
       const activityProps = (metadata.properties || {}) as Record<string, any>
       metadata.properties = { ...activityProps, host_project_ids: resolvedHostProjectIds }
+    }
+
+    // For activities, optionally validate and resolve host communities (multiple)
+    let resolvedHostCommunityIds: string[] = []
+    if (type === 'activities' && hostCommunityIds.length > 0) {
+      const { data: communities, error: hostError } = await supabase
+        .from('portfolios')
+        .select('id, user_id, metadata, type')
+        .eq('type', 'community')
+        .in('id', hostCommunityIds)
+
+      if (hostError || !communities?.length) {
+        return {
+          success: false,
+          error: 'One or more host communities not found',
+        }
+      }
+
+      for (const comm of communities) {
+        const hostMeta = (comm.metadata as any) || {}
+        const managers: string[] = hostMeta?.managers || []
+        const isOwner = comm.user_id === user.id
+        const isManager = Array.isArray(managers) && managers.includes(user.id)
+        if (!isOwner && !isManager) {
+          return {
+            success: false,
+            error: 'You must be owner or manager of each host community',
+          }
+        }
+        resolvedHostCommunityIds.push(comm.id)
+      }
+      resolvedHostCommunityIds = [...new Set(resolvedHostCommunityIds)]
+      const activityProps = (metadata.properties || {}) as Record<string, any>
+      metadata.properties = { ...activityProps, host_community_ids: resolvedHostCommunityIds }
     }
 
     const firstHostId = type === 'activities' && resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null

@@ -23,6 +23,7 @@ import { ActivityDateTimePicker } from './ActivityDateTimePicker'
 import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationPicker } from './ActivityLocationPicker'
 import { ActivityLocationBadge } from './ActivityLocationBadge'
+import { ActivityLinkBadge } from './ActivityLinkBadge'
 import type { ActivityLocationValue } from '@/lib/location'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 
@@ -255,9 +256,15 @@ export function PortfolioEditor({
     (metadata?.properties?.host_project_ids as string[] | undefined) ||
     ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
   const [hostProjectIds, setHostProjectIds] = useState<string[]>(initialHostProjectIds)
+  const initialHostCommunityIds: string[] =
+    (metadata?.properties?.host_community_ids as string[] | undefined) || []
+  const [hostCommunityIds, setHostCommunityIds] = useState<string[]>(initialHostCommunityIds)
   const [hostProjects, setHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
+  const [hostCommunities, setHostCommunities] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [hostCommunitiesLoading, setHostCommunitiesLoading] = useState(false)
   const [showHostSelector, setShowHostSelector] = useState(false)
+  const [hostSelectorTab, setHostSelectorTab] = useState<'projects' | 'communities'>('projects')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const initialHumanAutoCityLocationEnabled: boolean =
     isHumanPortfolio(portfolio) &&
@@ -320,6 +327,44 @@ export function PortfolioEditor({
         console.error('Failed to load host projects', e)
       } finally {
         if (!cancelled) setHostProjectsLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [portfolio.type])
+
+  useEffect(() => {
+    if (portfolio.type !== 'activities') return
+    let cancelled = false
+    const load = async () => {
+      setHostCommunitiesLoading(true)
+      try {
+        const { data: { user: u } } = await supabase.auth.getUser()
+        if (!u || cancelled) return
+        const { data: communities } = await supabase
+          .from('portfolios')
+          .select('id, user_id, metadata')
+          .eq('type', 'community')
+          .order('created_at', { ascending: false })
+        const list = (communities || []).filter((c: any) => {
+          const meta = c.metadata as any
+          const managers: string[] = meta?.managers || []
+          return c.user_id === u.id || managers.includes(u.id)
+        }).map((c: any) => {
+          const meta = c.metadata as any
+          const basic = meta?.basic || {}
+          return {
+            id: c.id,
+            name: (basic.name as string) || 'Community',
+            avatar: basic.avatar as string | undefined,
+            emoji: basic.emoji as string | undefined,
+          }
+        })
+        if (!cancelled) setHostCommunities(list)
+      } catch (e) {
+        console.error('Failed to load host communities', e)
+      } finally {
+        if (!cancelled) setHostCommunitiesLoading(false)
       }
     }
     load()
@@ -464,6 +509,8 @@ export function PortfolioEditor({
       }
 
       const formData = new FormData()
+      const actProps = (portfolio.metadata as any)?.properties || {}
+      const isExternalAct = portfolio.type === 'activities' && actProps.external === true
       formData.append('portfolioId', portfolio.id)
       formData.append('name', name.trim())
       formData.append('description', description.trim())
@@ -484,7 +531,7 @@ export function PortfolioEditor({
         formData.append('project_type_specific', projectTypeSpecific)
       }
       if (isProjectPortfolio(portfolio) || portfolio.type === 'activities') {
-        formData.append('visibility', visibility)
+        formData.append('visibility', isExternalAct ? 'public' : visibility)
         formData.append('project_status', projectStatus || '')
         if (activityValue?.start) {
           formData.append('activity_datetime_start', activityValue.start)
@@ -554,8 +601,9 @@ export function PortfolioEditor({
           hasAnyAvailability(availabilitySchedule) ? JSON.stringify(availabilitySchedule) : ''
         )
       }
-      if (portfolio.type === 'activities') {
+      if (portfolio.type === 'activities' && !isExternalAct) {
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
+        formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
       }
 
       const result = await updatePortfolio(formData)
@@ -566,8 +614,8 @@ export function PortfolioEditor({
         return
       }
 
-      // Update activity call-to-join configuration from editor
-      if (portfolio.type === 'activities') {
+      // Update activity call-to-join configuration from editor (skip for external)
+      if (portfolio.type === 'activities' && !isExternalAct) {
         const cfg: ActivityCallToJoinConfig =
           callToJoinConfig ||
           initialCallToJoin || {
@@ -839,15 +887,20 @@ export function PortfolioEditor({
               </>
             )}
 
-            {/* Activity edit: same order as create — Host projects, Date & time, Location, then Advanced */}
-            {portfolio.type === 'activities' && (
+            {/* Activity edit: same order as create — Host projects (or link for external), Date & time, Location, then Advanced */}
+            {portfolio.type === 'activities' && (() => {
+              const activityProps = (portfolio.metadata as any)?.properties || {}
+              const isExternalActivity = activityProps.external === true
+              const externalLink = (activityProps.external_link as string) || ''
+              return (
               <>
+                {!isExternalActivity && (
                 <div>
                   <UIText as="label" className="block mb-2">
-                    Host projects
+                    Hosts
                   </UIText>
                   <UIText as="p" className="text-xs text-gray-500 mb-2">
-                    Projects that host this activity. You can add projects where you are owner or manager.
+                    Projects and communities that host this activity. You can add projects and communities where you are owner or manager.
                   </UIText>
                   <div className="flex flex-wrap gap-2">
                     {hostProjectIds.map((id) => {
@@ -855,7 +908,7 @@ export function PortfolioEditor({
                       if (!p) return null
                       return (
                         <div
-                          key={id}
+                          key={`project-${id}`}
                           className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
                         >
                           <StickerAvatar
@@ -881,21 +934,65 @@ export function PortfolioEditor({
                         </div>
                       )
                     })}
-                    {hostProjectsLoading ? (
+                    {hostCommunityIds.map((id) => {
+                      const c = hostCommunities.find((x) => x.id === id)
+                      if (!c) return null
+                      return (
+                        <div
+                          key={`community-${id}`}
+                          className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
+                        >
+                          <StickerAvatar
+                            src={c.avatar}
+                            alt={c.name}
+                            type="community"
+                            size={32}
+                            emoji={c.emoji}
+                            name={c.name}
+                          />
+                          <Content className="truncate max-w-[120px]">{c.name}</Content>
+                          <button
+                            type="button"
+                            onClick={() => setHostCommunityIds((prev) => prev.filter((x) => x !== id))}
+                            className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
+                            aria-label="Remove host community"
+                            disabled={loading}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      )
+                    })}
+                    {(hostProjectsLoading || hostCommunitiesLoading) ? (
                       <UIText className="text-gray-500">Loading...</UIText>
                     ) : (
                       <Button
                         type="button"
                         variant="secondary"
                         size="sm"
-                        onClick={() => setShowHostSelector(true)}
+                        onClick={() => {
+                          setHostSelectorTab('projects')
+                          setShowHostSelector(true)
+                        }}
                         disabled={loading}
                       >
-                        <UIText>Add host project</UIText>
+                        <UIText>Add host</UIText>
                       </Button>
                     )}
                   </div>
                 </div>
+                )}
+
+                {isExternalActivity && externalLink && (
+                  <div>
+                    <UIText as="label" className="block mb-2">
+                      Event link
+                    </UIText>
+                    <ActivityLinkBadge url={externalLink} />
+                  </div>
+                )}
 
                 <div className="mt-4">
                   <UIText as="label" className="block mb-2">
@@ -925,7 +1022,8 @@ export function PortfolioEditor({
                   </div>
                 </div>
 
-                {/* Advanced settings (activities): Category, Visibility, Live/Archive, Call to join — collapsed by default */}
+                {/* Advanced settings (activities): Category, Visibility, Live/Archive, Call to join — hidden for external */}
+                {!isExternalActivity && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden mt-4">
                   <button
                     type="button"
@@ -1085,8 +1183,10 @@ export function PortfolioEditor({
                     </div>
                   )}
                 </div>
+                )}
               </>
-            )}
+            )
+            })()}
 
             {/* Human portfolio settings */}
             {isHumanPortfolio(portfolio) && (
@@ -1120,8 +1220,8 @@ export function PortfolioEditor({
                     Calendar availability
                   </UIText>
                   <UIText as="p" className="text-xs text-gray-500 mb-2">
-                    Set when you’re generally available during the week. This is only used inside
-                    Ausna for now.
+                    Set when you’re generally available during the week. This helps us recommend
+                    better activity opportunities.
                   </UIText>
                   <div className="space-y-2">
                     <button
@@ -1230,7 +1330,7 @@ export function PortfolioEditor({
                 <Title as="h3">Set your weekly availability</Title>
                 <UIText as="p" className="text-xs text-gray-500 mt-1">
                   Choose which days you’re usually available and optional time ranges. Times use
-                  your local timezone.
+                  your local timezone. This helps us recommend better activity opportunities.
                 </UIText>
               </div>
 
@@ -1436,42 +1536,96 @@ export function PortfolioEditor({
       </div>
     )}
 
-    {/* Host project selector for activities */}
+    {/* Host selector for activities (projects and communities) */}
     {portfolio.type === 'activities' && showHostSelector && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <Card variant="default" padding="sm">
             <div className="mb-4">
-              <UIText as="h2">Add host project</UIText>
+              <UIText as="h2">Add host</UIText>
+              <div className="flex gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={() => setHostSelectorTab('projects')}
+                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                    hostSelectorTab === 'projects' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Projects
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHostSelectorTab('communities')}
+                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                    hostSelectorTab === 'communities' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Communities
+                </button>
+              </div>
             </div>
-            {hostProjectsLoading ? (
-              <UIText className="text-gray-500">Loading projects...</UIText>
-            ) : hostProjects.filter((p) => !hostProjectIds.includes(p.id)).length === 0 ? (
-              <UIText className="text-gray-500 mb-4">No more projects to add, or you are not owner/manager of any.</UIText>
+            {hostSelectorTab === 'projects' ? (
+              hostProjectsLoading ? (
+                <UIText className="text-gray-500">Loading projects...</UIText>
+              ) : hostProjects.filter((p) => !hostProjectIds.includes(p.id)).length === 0 ? (
+                <UIText className="text-gray-500 mb-4">No more projects to add, or you are not owner/manager of any.</UIText>
+              ) : (
+                <div className="grid grid-cols-3 gap-x-4 gap-y-6 mb-4">
+                  {hostProjects
+                    .filter((p) => !hostProjectIds.includes(p.id))
+                    .map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        className="flex flex-col items-center gap-2 py-4 px-3 hover:opacity-80 transition-opacity"
+                        onClick={() => {
+                          setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
+                          setShowHostSelector(false)
+                        }}
+                      >
+                        <StickerAvatar
+                          src={project.avatar}
+                          alt={project.name}
+                          type="projects"
+                          size={56}
+                          emoji={project.emoji}
+                          name={project.name}
+                        />
+                        <UIText className="text-center max-w-[96px] truncate" title={project.name}>
+                          {project.name}
+                        </UIText>
+                      </button>
+                    ))}
+                </div>
+              )
+            ) : hostCommunitiesLoading ? (
+              <UIText className="text-gray-500">Loading communities...</UIText>
+            ) : hostCommunities.filter((c) => !hostCommunityIds.includes(c.id)).length === 0 ? (
+              <UIText className="text-gray-500 mb-4">No more communities to add, or you are not owner/manager of any.</UIText>
             ) : (
               <div className="grid grid-cols-3 gap-x-4 gap-y-6 mb-4">
-                {hostProjects
-                  .filter((p) => !hostProjectIds.includes(p.id))
-                  .map((project) => (
+                {hostCommunities
+                  .filter((c) => !hostCommunityIds.includes(c.id))
+                  .map((community) => (
                     <button
-                      key={project.id}
+                      key={community.id}
                       type="button"
                       className="flex flex-col items-center gap-2 py-4 px-3 hover:opacity-80 transition-opacity"
                       onClick={() => {
-                        setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
+                        setHostCommunityIds((prev) => (prev.includes(community.id) ? prev : [...prev, community.id]))
                         setShowHostSelector(false)
                       }}
                     >
                       <StickerAvatar
-                        src={project.avatar}
-                        alt={project.name}
-                        type="projects"
+                        src={community.avatar}
+                        alt={community.name}
+                        type="community"
                         size={56}
-                        emoji={project.emoji}
-                        name={project.name}
+                        emoji={community.emoji}
+                        name={community.name}
                       />
-                      <UIText className="text-center max-w-[96px] truncate" title={project.name}>
-                        {project.name}
+                      <UIText className="text-center max-w-[96px] truncate" title={community.name}>
+                        {community.name}
                       </UIText>
                     </button>
                   ))}

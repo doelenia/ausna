@@ -294,6 +294,7 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
         currentUserId={user?.id}
         joinRequests={joinRequests}
         initialTab={initialTab}
+        isExternalActivity={isActivityPortfolio(portfolio) && (portfolio.metadata as any)?.properties?.external === true}
       />
     </div>
   )

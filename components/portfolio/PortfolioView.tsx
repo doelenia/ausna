@@ -24,6 +24,7 @@ import { isActivityLive } from '@/lib/activityLive'
 import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
 import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationBadge } from './ActivityLocationBadge'
+import { ActivityLinkBadge } from './ActivityLinkBadge'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -67,6 +68,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   >([])
   const [activitiesLoading, setActivitiesLoading] = useState(false)
   const [activityHostProjects, setActivityHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [activityHostCommunities, setActivityHostCommunities] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState<number | null>(null)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -337,6 +339,44 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
         }
       })
       if (!cancelled) setActivityHostProjects(list)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [portfolio, supabase])
+
+  // Fetch host community details for activity view (for host community pills)
+  useEffect(() => {
+    if (!isActivityPortfolio(portfolio)) {
+      setActivityHostCommunities([])
+      return
+    }
+    const props = (portfolio.metadata as any)?.properties
+    const ids = (props?.host_community_ids as string[] | undefined) || []
+    if (ids.length === 0) {
+      setActivityHostCommunities([])
+      return
+    }
+    let cancelled = false
+    const load = async () => {
+      const { data: communities } = await supabase
+        .from('portfolios')
+        .select('id, metadata')
+        .eq('type', 'community')
+        .in('id', ids)
+      if (cancelled || !communities?.length) {
+        if (!cancelled) setActivityHostCommunities([])
+        return
+      }
+      const list = communities.map((c: any) => {
+        const basic = (c.metadata as any)?.basic || {}
+        return {
+          id: c.id,
+          name: (basic.name as string) || 'Community',
+          avatar: basic.avatar as string | undefined,
+          emoji: basic.emoji as string | undefined,
+        }
+      })
+      if (!cancelled) setActivityHostCommunities(list)
     }
     load()
     return () => { cancelled = true }
@@ -705,6 +745,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const activityProperties: Record<string, any> | undefined = (metadata as any)?.properties
   const activityCallToJoin: ActivityCallToJoinConfig | null =
     activityProperties?.call_to_join || null
+  const isExternalActivity = activityProperties?.external === true
+  const externalLink = (activityProperties?.external_link as string) || ''
   const activityHostProjectIds: string[] =
     (activityProperties?.host_project_ids as string[] | undefined) ||
     ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
@@ -896,11 +938,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               const props = (portfolio.metadata as any)?.properties
               const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
               const location = props?.location as ActivityLocationValue | undefined
+              const link = (props?.external_link as string) || ''
 
               const hasActivity = !!activity && !!activity.start
               const hasLocation = !!location
+              const hasLink = !!link
 
-              if (!hasActivity && !hasLocation) return null
+              if (!hasActivity && !hasLocation && !hasLink) return null
 
               const canEditActivity = isOwner || isManager
               const canEditLocation = isOwner || isManager
@@ -933,6 +977,11 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
               return (
                 <div className="mb-4 max-w-full flex flex-wrap gap-2">
+                  {hasLink && (
+                    <div>
+                      <ActivityLinkBadge url={link} />
+                    </div>
+                  )}
                   {hasActivity && (
                     <div>
                       <ActivityDateTimeBadge
@@ -1017,6 +1066,54 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                   </div>
                 )
               })()}
+
+            {/* External activity Join card (simple Join button, no approval) */}
+            {isActivityPortfolio(portfolio) && isExternalActivity && !isOwner && !isManager && !isMember && (() => {
+              const handleJoinClick = async () => {
+                if (!isAuthenticated) {
+                  setIsLoginRequiredModalOpen(true)
+                  return
+                }
+                setApplyFeedback('Joining...')
+                try {
+                  const result = await applyToActivityCallToJoin({
+                    portfolioId: portfolio.id,
+                    promptAnswer: undefined,
+                  })
+                  if (result?.success) {
+                    setApplyFeedback('You have joined this event.')
+                    router.refresh()
+                  } else {
+                    setApplyFeedback(result?.error || 'Failed to join.')
+                  }
+                } catch (err: any) {
+                  setApplyFeedback(err.message || 'Failed to join.')
+                }
+              }
+              return (
+                <Card variant="subtle" padding="sm" className="mb-4 self-start">
+                  <div className="flex flex-col gap-1.5 text-left">
+                    <div className="flex items-center gap-1.5">
+                      <Megaphone className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden />
+                      <UIText as="span" className="text-gray-600">
+                        Going?
+                      </UIText>
+                    </div>
+                    <Content className="my-1.5">
+                      Join this event to show you&apos;re going.
+                    </Content>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <Button variant="primary" size="sm" onClick={handleJoinClick}>
+                        <UIText>Join</UIText>
+                      </Button>
+                      {applyFeedback && (
+                        <UIText className="text-gray-600">{applyFeedback}</UIText>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )
+            })()}
 
             {/* Activity Call-to-Join Card (activities only; on when not private) */}
             {isActivityPortfolio(portfolio) && activityCallToJoin && (portfolio as any).visibility !== 'private' && (() => {
@@ -1271,9 +1368,10 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               })
               const totalMembers = allMemberIds.length
               const hasMembers = totalMembers > 0
-              const hasHostProjects = isActivityPortfolio(portfolio) && activityHostProjects.length > 0
+              const hasHosts = isActivityPortfolio(portfolio) && !isExternalActivity && (activityHostProjects.length > 0 || activityHostCommunities.length > 0)
+              const hasUploader = isActivityPortfolio(portfolio) && isExternalActivity
 
-              if (!hasMembers && !hasHostProjects) return null
+              if (!hasMembers && !hasHosts && !hasUploader) return null
 
               return (
                 <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -1309,7 +1407,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                                 ))}
                               </div>
                               <UIText className="text-gray-600">
-                                {totalMembers} {totalMembers === 1 ? 'member' : 'members'}
+                                {totalMembers} {isExternalActivity
+                                  ? (totalMembers === 1 ? 'is going' : 'are going')
+                                  : (totalMembers === 1 ? 'member' : 'members')}
                               </UIText>
                             </div>
                           )
@@ -1317,16 +1417,39 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       </Link>
                     )
                   )}
-                  {/* Host projects pill (activities only) — same look as community pill */}
-                  {hasHostProjects && (
+                  {/* Uploader pill (external activities only - shows owner where host would be) */}
+                  {hasUploader && (
+                    <Link
+                      href={`/portfolio/human/${portfolio.user_id}`}
+                      className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+                      title="Uploaded by"
+                    >
+                      <UserAvatar
+                        userId={portfolio.user_id}
+                        name={memberAvatars.find(m => m.id === portfolio.user_id)?.name}
+                        avatar={memberAvatars.find(m => m.id === portfolio.user_id)?.avatar}
+                        size={32}
+                        showLink={false}
+                      />
+                      <UIText className="text-gray-600 whitespace-nowrap">
+                        uploaded by {memberAvatars.find(m => m.id === portfolio.user_id)?.name || 'creator'}
+                      </UIText>
+                    </Link>
+                  )}
+                  {/* Host projects and communities pill (activities only, non-external) */}
+                  {hasHosts && (
                     <div
                       className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
-                      title={activityHostProjects.length === 1 ? activityHostProjects[0].name : `Hosted by ${activityHostProjects.length} projects`}
+                      title={
+                        activityHostProjects.length + activityHostCommunities.length === 1
+                          ? (activityHostProjects[0] || activityHostCommunities[0])?.name
+                          : `Hosted by ${activityHostProjects.length} project${activityHostProjects.length !== 1 ? 's' : ''}${activityHostProjects.length > 0 && activityHostCommunities.length > 0 ? ' and ' : ''}${activityHostCommunities.length} communit${activityHostCommunities.length !== 1 ? 'ies' : 'y'}`
+                      }
                     >
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {activityHostProjects.slice(0, 5).map((proj) => (
                           <Link
-                            key={proj.id}
+                            key={`project-${proj.id}`}
                             href={getPortfolioUrl('projects', proj.id)}
                             className="block hover:opacity-90"
                           >
@@ -1342,11 +1465,33 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                             />
                           </Link>
                         ))}
+                        {activityHostCommunities.slice(0, 5).map((comm) => (
+                          <Link
+                            key={`community-${comm.id}`}
+                            href={getPortfolioUrl('community', comm.id)}
+                            className="block hover:opacity-90"
+                          >
+                            <StickerAvatar
+                              src={comm.avatar}
+                              alt={comm.name}
+                              type="community"
+                              size={34}
+                              emoji={comm.emoji}
+                              name={comm.name}
+                              normalizeScale={1.0}
+                              variant="mini"
+                            />
+                          </Link>
+                        ))}
                       </div>
                       <UIText className="text-gray-600 whitespace-nowrap">
-                        {activityHostProjects.length === 1
-                          ? `hosted by ${activityHostProjects[0].name}`
-                          : `hosted by ${activityHostProjects.length} projects`}
+                        {activityHostProjects.length + activityHostCommunities.length === 1
+                          ? `hosted by ${(activityHostProjects[0] || activityHostCommunities[0])?.name ?? 'host'}`
+                          : activityHostProjects.length > 0 && activityHostCommunities.length > 0
+                            ? `hosted by ${activityHostProjects.length} project${activityHostProjects.length !== 1 ? 's' : ''} and ${activityHostCommunities.length} communit${activityHostCommunities.length !== 1 ? 'ies' : 'y'}`
+                            : activityHostProjects.length > 0
+                              ? `hosted by ${activityHostProjects.length} project${activityHostProjects.length !== 1 ? 's' : ''}`
+                              : `hosted by ${activityHostCommunities.length} communit${activityHostCommunities.length !== 1 ? 'ies' : 'y'}`}
                       </UIText>
                     </div>
                   )}

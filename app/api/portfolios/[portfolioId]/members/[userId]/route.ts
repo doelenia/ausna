@@ -40,15 +40,25 @@ export async function DELETE(
       )
     }
 
-    // Only projects and communities can have members
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    // Projects, communities, and activities can have members
+    if (portfolio.type !== 'projects' && portfolio.type !== 'community' && portfolio.type !== 'activities') {
       return NextResponse.json(
-        { error: 'Only projects and communities can have members' },
+        { error: 'Only projects, communities, and activities can have members' },
         { status: 400 }
       )
     }
 
     const metadata = portfolio.metadata as any
+    const properties = metadata?.properties || {}
+    const isExternalActivity = portfolio.type === 'activities' && properties.external === true
+
+    // External activities: owner/manager cannot remove other members (only self-removal/leave allowed)
+    if (!isSelfRemoval && isExternalActivity) {
+      return NextResponse.json(
+        { error: 'Cannot remove members from external activities' },
+        { status: 403 }
+      )
+    }
     const members = metadata?.members || []
     const managers = metadata?.managers || []
     const isCreator = portfolio.user_id === userId
