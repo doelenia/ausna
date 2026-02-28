@@ -10,7 +10,7 @@ import { StickerAvatar } from './StickerAvatar'
 import { CommunityMembersGrid } from './CommunityMembersGrid'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { deletePortfolio, getSubPortfolios, applyToActivityCallToJoin, updateActivityCallToJoin, getPendingJoinRequestsCount } from '@/app/portfolio/[type]/[id]/actions'
+import { deletePortfolio, getSubPortfolios, applyToActivityCallToJoin, updateActivityCallToJoin, getPendingJoinRequestsCount, applyToCommunityJoin } from '@/app/portfolio/[type]/[id]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
@@ -38,9 +38,11 @@ interface PortfolioViewProps {
   isAdmin?: boolean
   /** When true, current user has applied and request is pending; show "under review" instead of description + Apply */
   hasPendingApplication?: boolean
+  /** When true, current user has a pending community join request; show "under review" for community */
+  hasPendingCommunityApplication?: boolean
 }
 
-export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [], isAdmin = false, hasPendingApplication = false }: PortfolioViewProps) {
+export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [], isAdmin = false, hasPendingApplication = false, hasPendingCommunityApplication = false }: PortfolioViewProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
@@ -666,8 +668,14 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [applySelectedRoleId, setApplySelectedRoleId] = useState<string | undefined>(undefined)
   const [isApplying, setIsApplying] = useState(false)
   const [applyFeedback, setApplyFeedback] = useState<string | null>(null)
+  const [isLoginRequiredModalOpen, setIsLoginRequiredModalOpen] = useState(false)
   const [isEditingCallToJoin, setIsEditingCallToJoin] = useState(false)
   const [editCallToJoinDraft, setEditCallToJoinDraft] = useState<ActivityCallToJoinConfig | null>(null)
+  const [isCommunityJoinModalOpen, setIsCommunityJoinModalOpen] = useState(false)
+  const [communityJoinPromptAnswer, setCommunityJoinPromptAnswer] = useState('')
+  const [isSubmittingCommunityJoin, setIsSubmittingCommunityJoin] = useState(false)
+  const [communityJoinFeedback, setCommunityJoinFeedback] = useState<string | null>(null)
+  const [isCommunityLoginRequiredOpen, setIsCommunityLoginRequiredOpen] = useState(false)
 
   if (isEditing) {
     return (
@@ -700,6 +708,14 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const activityHostProjectIds: string[] =
     (activityProperties?.host_project_ids as string[] | undefined) ||
     ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
+
+  const humanProperties: Record<string, any> | undefined = isHumanPortfolio(portfolio)
+    ? ((metadata as any)?.properties as Record<string, any> | undefined)
+    : undefined
+  const humanAutoCityLocationEnabled =
+    humanProperties?.auto_city_location_enabled !== false
+  const humanAutoCityLocation: ActivityLocationValue | undefined =
+    (humanProperties?.auto_city_location as ActivityLocationValue | undefined) || undefined
 
   // Determine tab label based on portfolio type
   const tabLabel = isHumanPortfolio(portfolio) ? 'Projects' : 'Navigations'
@@ -893,7 +909,10 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               const handleLocationClick = () => {
                 if (!location) return
                 const queryParts: string[] = []
-                if (location.line1 && canSeeFullLocation && !location.isExactLocationPrivate) {
+                // Include street address in the map query whenever the viewer
+                // is allowed to see the full location. This keeps the Google Maps
+                // search aligned with what’s shown in the badge UI.
+                if (location.line1 && canSeeFullLocation) {
                   queryParts.push(location.line1)
                 }
                 const cityStateCountry = [location.city, location.state, location.country]
@@ -956,6 +975,49 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )
             })()}
 
+            {/* Human auto city location badge (derived from IP, when enabled) */}
+            {isHumanPortfolio(portfolio) &&
+              humanAutoCityLocationEnabled &&
+              humanAutoCityLocation && (() => {
+                const location = humanAutoCityLocation
+
+                const handleHumanLocationClick = () => {
+                  const queryParts: string[] = []
+                  if (location.line1) {
+                    queryParts.push(location.line1)
+                  }
+                  const cityStateCountry = [
+                    location.city,
+                    location.state,
+                    location.country,
+                  ]
+                    .filter(Boolean)
+                    .join(', ')
+                  if (cityStateCountry) {
+                    queryParts.push(cityStateCountry)
+                  }
+                  if (queryParts.length === 0) return
+                  const query = encodeURIComponent(queryParts.join(', '))
+                  const url = `https://www.google.com/maps/search/?api=1&query=${query}`
+                  window.open(url, '_blank', 'noopener,noreferrer')
+                }
+
+                return (
+                  <div className="mb-4 max-w-full">
+                    <ActivityLocationBadge
+                      value={{
+                        // Suppress line1 so the badge only renders the
+                        // "city, region" style second line for humans.
+                        ...location,
+                        line1: undefined,
+                      }}
+                      canSeeFullLocation
+                      onClick={handleHumanLocationClick}
+                    />
+                  </div>
+                )
+              })()}
+
             {/* Activity Call-to-Join Card (activities only; on when not private) */}
             {isActivityPortfolio(portfolio) && activityCallToJoin && (portfolio as any).visibility !== 'private' && (() => {
               const config = activityCallToJoin
@@ -969,24 +1031,28 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 !isOwner &&
                 !isManager &&
                 !isMember &&
-                isAuthenticated &&
                 joinWindowOpen
+              const canSeeVisitorCard = canApplyAsVisitor || (!canSeeOwnerManagerCard && !joinWindowOpen)
 
-              if (!canSeeOwnerManagerCard && !canApplyAsVisitor) {
+              if (!canSeeOwnerManagerCard && !canSeeVisitorCard) {
                 return null
               }
 
               const roles = config.roles || []
 
               const handleOpenApply = () => {
-                if (!isAuthenticated) {
-                  router.push('/login')
-                  return
-                }
                 setApplyFeedback(null)
                 setApplyPromptAnswer('')
                 setApplySelectedRoleId(roles[0]?.id)
                 setIsApplyModalOpen(true)
+              }
+
+              const handleApplyClick = () => {
+                if (!isAuthenticated) {
+                  setIsLoginRequiredModalOpen(true)
+                  return
+                }
+                handleOpenApply()
               }
 
               const handleOpenEdit = () => {
@@ -1049,7 +1115,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                                 <Button
                                   variant="primary"
                                   size="sm"
-                                  onClick={handleOpenApply}
+                                  onClick={handleApplyClick}
                                   disabled={!joinWindowOpen}
                                 >
                                   <UIText>Apply to join</UIText>
@@ -1290,6 +1356,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
             {/* Buttons */}
             <div className="mb-12">
+              {isCommunityPortfolio(portfolio) && !isOwner && !isMember && hasPendingCommunityApplication && (
+                <Content className="mb-2 text-gray-600">Your application is received and under review.</Content>
+              )}
               <PortfolioActions
                 portfolio={portfolio}
                 isOwner={isOwner}
@@ -1301,6 +1370,18 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 onEdit={() => setIsEditing(true)}
                 onDelete={handleDelete}
                 isDeleting={isDeleting}
+                onOpenCommunityJoin={
+                  isCommunityPortfolio(portfolio) && !isOwner && !isMember && !hasPendingCommunityApplication
+                    ? () => {
+                        if (!isAuthenticated) setIsCommunityLoginRequiredOpen(true)
+                        else {
+                          setCommunityJoinFeedback(null)
+                          setCommunityJoinPromptAnswer('')
+                          setIsCommunityJoinModalOpen(true)
+                        }
+                      }
+                    : undefined
+                }
               />
             </div>
           </div>
@@ -1649,6 +1730,141 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
           )
         })()}
+
+        {/* Login Required Modal for Apply (activities only, unauthenticated visitors) */}
+        {isActivityPortfolio(portfolio) && isLoginRequiredModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl w-full max-w-md mx-4 p-6">
+              <Title as="h2" className="mb-3">
+                Log in to join this activity
+              </Title>
+              <Content className="mb-4">
+                Please log in to join this activity. After logging in, refresh this page to continue.
+              </Content>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setIsLoginRequiredModalOpen(false)}
+                >
+                  <UIText>Close</UIText>
+                </Button>
+                <Button
+                  variant="primary"
+                  type="button"
+                  onClick={() => {
+                    window.open('/login', '_blank', 'noopener,noreferrer')
+                  }}
+                >
+                  <UIText>Log in</UIText>
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Login Required Modal for Community Join (unauthenticated visitors) */}
+        {isCommunityPortfolio(portfolio) && isCommunityLoginRequiredOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl w-full max-w-md mx-4 p-6">
+              <Title as="h2" className="mb-3">
+                Log in to join this community
+              </Title>
+              <Content className="mb-4">
+                Please log in to join this community. After logging in, refresh this page to continue.
+              </Content>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button
+                  variant="secondary"
+                  type="button"
+                  onClick={() => setIsCommunityLoginRequiredOpen(false)}
+                >
+                  <UIText>Close</UIText>
+                </Button>
+                <Button
+                  variant="primary"
+                  type="button"
+                  onClick={() => {
+                    window.open('/login', '_blank', 'noopener,noreferrer')
+                  }}
+                >
+                  <UIText>Log in</UIText>
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Community Request to Join Modal */}
+        {isCommunityPortfolio(portfolio) && isCommunityJoinModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl w-full max-w-md mx-4 p-6">
+              <Title as="h2" className="mb-3">
+                Request to join
+              </Title>
+              <Content className="mb-2">
+                Please provide proofs of your membership.
+              </Content>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  if (!communityJoinPromptAnswer.trim()) {
+                    setCommunityJoinFeedback('Please answer the prompt.')
+                    return
+                  }
+                  setIsSubmittingCommunityJoin(true)
+                  setCommunityJoinFeedback(null)
+                  try {
+                    const result = await applyToCommunityJoin({
+                      portfolioId: portfolio.id,
+                      promptAnswer: communityJoinPromptAnswer.trim(),
+                    })
+                    if (!result || !result.success) {
+                      setCommunityJoinFeedback(result?.error || 'Failed to submit.')
+                      return
+                    }
+                    setCommunityJoinFeedback('Application submitted. Waiting for approval.')
+                    setIsCommunityJoinModalOpen(false)
+                  } catch (err) {
+                    console.error('Failed to apply to community:', err)
+                    setCommunityJoinFeedback('An unexpected error occurred.')
+                  } finally {
+                    setIsSubmittingCommunityJoin(false)
+                  }
+                }}
+                className="space-y-4"
+              >
+                <div>
+                  <UIText as="label" className="block mb-1">
+                    Your answer
+                  </UIText>
+                  <textarea
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    rows={4}
+                    value={communityJoinPromptAnswer}
+                    onChange={(e) => setCommunityJoinPromptAnswer(e.target.value)}
+                  />
+                </div>
+                {communityJoinFeedback && (
+                  <UIText className="text-gray-600">{communityJoinFeedback}</UIText>
+                )}
+                <div className="flex justify-end gap-2 mt-4">
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => setIsCommunityJoinModalOpen(false)}
+                    disabled={isSubmittingCommunityJoin}
+                  >
+                    <UIText>Cancel</UIText>
+                  </Button>
+                  <Button variant="primary" type="submit" disabled={isSubmittingCommunityJoin}>
+                    <UIText>{isSubmittingCommunityJoin ? 'Submitting...' : 'Submit'}</UIText>
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Edit Call-to-Join Modal (activities only, owner/manager) */}
         {isActivityPortfolio(portfolio) && isEditingCallToJoin && editCallToJoinDraft && (() => {

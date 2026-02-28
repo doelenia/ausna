@@ -36,6 +36,26 @@ export interface PortfolioMetadata {
 }
 
 /**
+ * Structured weekly availability for human portfolios
+ * Times are simple local-time strings in HH:MM format (e.g. "09:00").
+ */
+export interface HumanAvailabilityDay {
+  enabled: boolean
+  startTime?: string
+  endTime?: string
+}
+
+export interface HumanAvailabilitySchedule {
+  monday?: HumanAvailabilityDay
+  tuesday?: HumanAvailabilityDay
+  wednesday?: HumanAvailabilityDay
+  thursday?: HumanAvailabilityDay
+  friday?: HumanAvailabilityDay
+  saturday?: HumanAvailabilityDay
+  sunday?: HumanAvailabilityDay
+}
+
+/**
  * Human portfolio properties template
  */
 export interface HumanPortfolioProperties {
@@ -43,6 +63,35 @@ export interface HumanPortfolioProperties {
   availability?: string
   social_preferences?: string
   preferred_contact_method?: string
+  /**
+   * Structured weekly availability used by the editor UI.
+   * Kept separate from the legacy string `availability` field.
+   */
+  availability_schedule?: HumanAvailabilitySchedule
+  /**
+   * Automatically derived coarse location (typically city/region/country)
+   * based on the user's IP address. Updated at most once per day.
+   */
+  auto_city_location?: ActivityLocationValue
+  /**
+   * When false, we stop updating and showing `auto_city_location`.
+   * Defaults to true when unset.
+   */
+  auto_city_location_enabled?: boolean
+  /**
+   * ISO timestamp of the last successful auto-city-location update.
+   */
+  auto_city_location_last_updated_at?: string
+}
+
+/**
+ * Onboarding state stored in human portfolio metadata
+ */
+export interface HumanPortfolioOnboarding {
+  profile_complete?: boolean
+  availabilities_complete?: boolean
+  join_community_seen?: boolean
+  updated_at?: string
 }
 
 /**
@@ -51,6 +100,7 @@ export interface HumanPortfolioProperties {
 export interface HumanPortfolioMetadata extends PortfolioMetadata {
   username?: string // Keep for backward compatibility
   email?: string // Email address for the human portfolio
+  onboarding?: HumanPortfolioOnboarding
   skills?: string[]
   experience?: Array<{
     title: string
