@@ -47,6 +47,9 @@ export async function lookupCityLocationFromIp(
     lower.startsWith('172.31.')
   ) {
     // #region agent log
+    console.log('[geoip][H2] GeoIP lookup skipped for private/loopback IP')
+    // #endregion
+    // #region agent log
     fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
       method: 'POST',
       headers: {
@@ -73,6 +76,7 @@ export async function lookupCityLocationFromIp(
   if (!baseUrl) {
     // GeoIP not configured
     // #region agent log
+    console.log('[geoip][H1] GEOIP_API_URL not configured; skipping GeoIP lookup')
     fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
       method: 'POST',
       headers: {
@@ -105,6 +109,10 @@ export async function lookupCityLocationFromIp(
 
     const res = await fetch(url, { headers, cache: 'no-store' })
     // #region agent log
+    console.log('[geoip][H5] GeoIP HTTP response received', {
+      ok: res.ok,
+      status: res.status,
+    })
     fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
       method: 'POST',
       headers: {
@@ -167,6 +175,7 @@ export async function lookupCityLocationFromIp(
 
     if (!cityTrimmed && !regionTrimmed && !countryTrimmed) {
       // #region agent log
+      console.log('[geoip][H5] GeoIP response missing city/region/country fields')
       fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
         method: 'POST',
         headers: {
@@ -208,6 +217,11 @@ export async function lookupCityLocationFromIp(
     }
 
     // #region agent log
+    console.log('[geoip][H5] GeoIP lookup succeeded with derived location', {
+      hasCity: !!cityTrimmed,
+      hasRegion: !!regionTrimmed,
+      hasCountry: !!countryTrimmed,
+    })
     fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
       method: 'POST',
       headers: {
@@ -234,6 +248,9 @@ export async function lookupCityLocationFromIp(
     return value
   } catch (e) {
     // #region agent log
+    console.log('[geoip][H5] GeoIP lookup threw error', {
+      name: (e as any)?.name ?? 'Error',
+    })
     fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
       method: 'POST',
       headers: {
