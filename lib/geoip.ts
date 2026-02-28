@@ -16,6 +16,12 @@ export async function lookupCityLocationFromIp(
 ): Promise<ActivityLocationValue | null> {
   if (!ip) return null
 
+  // #region agent log
+  console.log('[geoip] lookupCityLocationFromIp invoked', {
+    ipProvided: !!ip,
+  })
+  // #endregion
+
   // Skip obvious local/private IPs
   const lower = ip.toLowerCase()
   if (
@@ -40,12 +46,50 @@ export async function lookupCityLocationFromIp(
     lower.startsWith('172.30.') ||
     lower.startsWith('172.31.')
   ) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '63060f',
+      },
+      body: JSON.stringify({
+        sessionId: '63060f',
+        runId: 'pre-fix',
+        hypothesisId: 'H2',
+        location: 'lib/geoip.ts:41',
+        message: 'GeoIP lookup skipped for private/loopback IP',
+        data: {
+          ipCategory: lower === '::1' || lower === '127.0.0.1' ? 'loopback' : 'private',
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
     return null
   }
 
   const baseUrl = process.env.GEOIP_API_URL
   if (!baseUrl) {
     // GeoIP not configured
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '63060f',
+      },
+      body: JSON.stringify({
+        sessionId: '63060f',
+        runId: 'pre-fix',
+        hypothesisId: 'H1',
+        location: 'lib/geoip.ts:49',
+        message: 'GEOIP_API_URL not configured, skipping GeoIP lookup',
+        data: {},
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
     return null
   }
 
@@ -60,6 +104,27 @@ export async function lookupCityLocationFromIp(
     }
 
     const res = await fetch(url, { headers, cache: 'no-store' })
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '63060f',
+      },
+      body: JSON.stringify({
+        sessionId: '63060f',
+        runId: 'pre-fix',
+        hypothesisId: 'H5',
+        location: 'lib/geoip.ts:63',
+        message: 'GeoIP HTTP response received',
+        data: {
+          ok: res.ok,
+          status: res.status,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
     if (!res.ok) {
       return null
     }
@@ -101,6 +166,24 @@ export async function lookupCityLocationFromIp(
     const stateCodeTrimmed = stateCode.trim()
 
     if (!cityTrimmed && !regionTrimmed && !countryTrimmed) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '63060f',
+        },
+        body: JSON.stringify({
+          sessionId: '63060f',
+          runId: 'pre-fix',
+          hypothesisId: 'H5',
+          location: 'lib/geoip.ts:104',
+          message: 'GeoIP response missing city/region/country fields',
+          data: {},
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {})
+      // #endregion
       return null
     }
 
@@ -124,9 +207,53 @@ export async function lookupCityLocationFromIp(
       value.stateCode = stateCodeTrimmed
     }
 
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '63060f',
+      },
+      body: JSON.stringify({
+        sessionId: '63060f',
+        runId: 'pre-fix',
+        hypothesisId: 'H5',
+        location: 'lib/geoip.ts:128',
+        message: 'GeoIP lookup succeeded with derived location',
+        data: {
+          hasCity: !!cityTrimmed,
+          hasRegion: !!regionTrimmed,
+          hasCountry: !!countryTrimmed,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
+
     // Never mark IP-derived city as "exact private" – it's already coarse.
     return value
-  } catch {
+  } catch (e) {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '63060f',
+      },
+      body: JSON.stringify({
+        sessionId: '63060f',
+        runId: 'pre-fix',
+        hypothesisId: 'H5',
+        location: 'lib/geoip.ts:130',
+        message: 'GeoIP lookup threw error',
+        data: {
+          // Avoid logging full error to keep payload small and non-sensitive
+          name: (e as any)?.name ?? 'Error',
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
     return null
   }
 }
