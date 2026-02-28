@@ -16,6 +16,12 @@ export async function lookupCityLocationFromIp(
 ): Promise<ActivityLocationValue | null> {
   if (!ip) return null
 
+  // #region agent log
+  console.log('[geoip] lookupCityLocationFromIp invoked', {
+    ipProvided: !!ip,
+  })
+  // #endregion
+
   // Skip obvious local/private IPs
   const lower = ip.toLowerCase()
   if (

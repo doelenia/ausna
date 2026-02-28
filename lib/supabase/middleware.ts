@@ -213,6 +213,12 @@ async function maybeUpdateHumanCityLocation(
   // Only run on primary navigational GET requests to avoid doing work on every API hit.
   if (request.method !== 'GET') return
   const pathname = request.nextUrl.pathname
+  // #region agent log
+  console.log('[geoip] maybeUpdateHumanCityLocation entry', {
+    pathname,
+    method: request.method,
+  })
+  // #endregion
   const isPrimaryPage =
     pathname === '/main' ||
     pathname === '/' ||
@@ -345,6 +351,11 @@ async function maybeUpdateHumanCityLocation(
   }
 
   const location = await lookupCityLocationFromIp(ip)
+  // #region agent log
+  console.log('[geoip] lookupCityLocationFromIp result inside middleware', {
+    hasLocation: !!location,
+  })
+  // #endregion
   if (!location) {
     // #region agent log
     fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
