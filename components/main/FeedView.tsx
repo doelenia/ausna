@@ -178,7 +178,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
 
   return (
     <>
-      <div>
+      <div className="md:px-10">
           {error ? (
             <div className="text-center py-12">
               <UIText className="text-red-500">{error}</UIText>
@@ -202,7 +202,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
                     <LazyLoad
                       rootMargin="200px"
                       fallback={
-                        <div className="w-full md:max-w-xl md:mx-auto">
+                        <div className="w-full">
                           <SkeletonCard showAvatar={true} showBanner={true} />
                         </div>
                       }

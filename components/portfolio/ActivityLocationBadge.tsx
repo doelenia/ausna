@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Card, UIText } from '@/components/ui'
-import { MapPin, Pencil } from 'lucide-react'
+import { MapPin, Pencil, Globe } from 'lucide-react'
 import type { ActivityLocationValue } from '@/lib/location'
 import { formatActivityLocation } from '@/lib/formatActivityLocation'
 
@@ -32,51 +32,64 @@ export function ActivityLocationBadge({
   }, [])
 
   const hasLocation = !!value
-  const { line1, line2, googleMapsQuery } = formatActivityLocation(value || null)
+  const formatted = formatActivityLocation(value || null)
+  const { line1, line2, googleMapsQuery, onlineUrl } = formatted
+  const isOnline = !!value?.online
   const isExactPrivate = !!value?.isExactLocationPrivate
 
-  const showFirstLine = hasLocation && !!line1 && (canSeeFullLocation || !isExactPrivate)
-  const showSecondLine = hasLocation && !!line2
+  const showFirstLine = hasLocation && !!line1 && (canSeeFullLocation || !isExactPrivate || isOnline)
+  const showSecondLine = hasLocation && !!line2 && !isOnline
 
   const displayFirstLine = showFirstLine ? line1 : null
   const displaySecondLine = showSecondLine ? line2 : null
 
+  const isOnlineWithUrl = isOnline && !!onlineUrl
   const Wrapper: React.ElementType =
-    (onClick && !disableRootClick) || onUnauthorizedClick ? 'button' : 'div'
+    isOnlineWithUrl
+      ? 'a'
+      : (onClick && !disableRootClick) || onUnauthorizedClick
+        ? 'button'
+        : 'div'
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
+    if (isOnlineWithUrl) return
     if (disableRootClick) return
+    e?.preventDefault?.()
 
-    // In create/edit flows we still want the badge to open the picker
-    // even before a location is set.
     if (!hasLocation) {
       if (onClick) onClick()
       return
     }
 
-    // Allow opening maps for any public address (non-private), and for private addresses
-    // only when the viewer can see the full location.
     if (googleMapsQuery && onClick && (!isExactPrivate || canSeeFullLocation)) {
       onClick()
       return
     }
-    // For private addresses where the viewer cannot see full details, show an
-    // unauthorized notification instead of opening maps.
     if (isExactPrivate && !canSeeFullLocation && onUnauthorizedClick) {
       onUnauthorizedClick()
     }
   }
 
+  const wrapperProps =
+    isOnlineWithUrl
+      ? { href: onlineUrl!, target: '_blank', rel: 'noopener noreferrer' }
+      : (onClick && !disableRootClick) || onUnauthorizedClick
+        ? { type: 'button' as const, onClick: handleClick }
+        : {}
+
   return (
     <Wrapper
-      type={(onClick && !disableRootClick) || onUnauthorizedClick ? 'button' : undefined}
-      onClick={handleClick}
-      className={`${onClick || onUnauthorizedClick || showEditIcon ? 'inline-block text-left focus:outline-none' : 'inline-block'} group relative`}
+      {...wrapperProps}
+      className={`${onClick || onUnauthorizedClick || showEditIcon || isOnlineWithUrl ? 'inline-block text-left focus:outline-none' : 'inline-block'} group relative`}
     >
       <Card variant="subtle" padding="none">
         <div className="flex items-center gap-2 max-w-full px-2 py-2">
           <div className="w-10 h-10 rounded-lg border flex items-center justify-center flex-shrink-0 border-gray-200 bg-white">
-            <MapPin className="w-5 h-5 text-gray-700" />
+            {value?.online ? (
+              <Globe className="w-5 h-5 text-gray-700" />
+            ) : (
+              <MapPin className="w-5 h-5 text-gray-700" />
+            )}
           </div>
           <div className="min-w-0 pr-6">
             {ready ? (

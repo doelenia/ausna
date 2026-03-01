@@ -12,10 +12,7 @@ import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { UIText, Button, Card, Content, UIButtonText } from '@/components/ui'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
-import { ActivityDateTimePicker } from './ActivityDateTimePicker'
-import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
-import { ActivityLocationPicker } from './ActivityLocationPicker'
-import { ActivityLocationBadge } from './ActivityLocationBadge'
+import { ActivityDateTimeField, ActivityLocationField } from './activity-fields'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
 
@@ -48,9 +45,7 @@ export function CreateActivityForm() {
   const [creatorRole, setCreatorRole] = useState<string>('Creator')
   const [visibility, setVisibility] = useState<'public' | 'private'>('public')
   const [activityValue, setActivityValue] = useState<ActivityDateTimeValue | null>(null)
-  const [showActivityPicker, setShowActivityPicker] = useState(false)
   const [activityLocation, setActivityLocation] = useState<ActivityLocationValue | null>(null)
-  const [showLocationPicker, setShowLocationPicker] = useState(false)
   const [projectStatus, setProjectStatus] = useState<string>('in-progress')
   const [hostProjects, setHostProjects] = useState<HostProjectOption[]>([])
   const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
@@ -88,8 +83,7 @@ export function CreateActivityForm() {
     slug?: string
   } | null>(null)
   const [linkVerified, setLinkVerified] = useState(false)
-
-  const isActivitySelectionValid = !activityValue || !!activityValue.start
+  const [iAmGoing, setIAmGoing] = useState(true)
 
   const handleContinue = async () => {
     const url = externalLink.trim()
@@ -370,6 +364,7 @@ export function CreateActivityForm() {
       if (isExternal && externalLink.trim()) {
         const faviconUrl = getFaviconUrl(externalLink.trim())
         if (faviconUrl) formData.append('avatar_url', faviconUrl)
+        formData.append('i_am_going', iAmGoing ? 'true' : 'false')
       }
 
       if (!isExternal && projectTypeGeneral && projectTypeSpecific) {
@@ -420,28 +415,35 @@ export function CreateActivityForm() {
       }
 
       if (activityLocation) {
-        if (activityLocation.line1) {
-          formData.append('activity_location_line1', activityLocation.line1)
+        if (activityLocation.online) {
+          formData.append('activity_location_online', 'true')
+          if (activityLocation.onlineUrl) {
+            formData.append('activity_location_online_url', activityLocation.onlineUrl)
+          }
+        } else {
+          if (activityLocation.line1) {
+            formData.append('activity_location_line1', activityLocation.line1)
+          }
+          if (activityLocation.city) {
+            formData.append('activity_location_city', activityLocation.city)
+          }
+          if (activityLocation.state) {
+            formData.append('activity_location_state', activityLocation.state)
+          }
+          if (activityLocation.country) {
+            formData.append('activity_location_country', activityLocation.country)
+          }
+          if (activityLocation.countryCode) {
+            formData.append('activity_location_country_code', activityLocation.countryCode)
+          }
+          if (activityLocation.stateCode) {
+            formData.append('activity_location_state_code', activityLocation.stateCode)
+          }
+          formData.append(
+            'activity_location_private',
+            activityLocation.isExactLocationPrivate ? 'true' : 'false'
+          )
         }
-        if (activityLocation.city) {
-          formData.append('activity_location_city', activityLocation.city)
-        }
-        if (activityLocation.state) {
-          formData.append('activity_location_state', activityLocation.state)
-        }
-        if (activityLocation.country) {
-          formData.append('activity_location_country', activityLocation.country)
-        }
-        if (activityLocation.countryCode) {
-          formData.append('activity_location_country_code', activityLocation.countryCode)
-        }
-        if (activityLocation.stateCode) {
-          formData.append('activity_location_state_code', activityLocation.stateCode)
-        }
-        formData.append(
-          'activity_location_private',
-          activityLocation.isExactLocationPrivate ? 'true' : 'false'
-        )
       }
 
       const result = await createPortfolio(formData)
@@ -494,6 +496,7 @@ export function CreateActivityForm() {
                 setExternalLink('')
                 setExistingActivity(null)
                 setLinkVerified(false)
+                setIAmGoing(true)
                 setHostProjectIds([])
                 setHostCommunityIds([])
                 setVisibility('public')
@@ -704,6 +707,22 @@ export function CreateActivityForm() {
           </div>
         )}
 
+        {isExternal && (
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="i_am_going"
+              checked={iAmGoing}
+              onChange={(e) => setIAmGoing(e.target.checked)}
+              disabled={loading}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <UIText as="label" htmlFor="i_am_going" className="cursor-pointer">
+              I&apos;m going to this event
+            </UIText>
+          </div>
+        )}
+
         {!isExternal && (
         <div>
           <UIText as="label" className="block mb-2">
@@ -805,9 +824,11 @@ export function CreateActivityForm() {
             Activity date &amp; time
           </UIText>
           <div className="max-w-full">
-            <ActivityDateTimeBadge
-              value={activityValue || undefined}
-              onClick={() => setShowActivityPicker(true)}
+            <ActivityDateTimeField
+              value={activityValue}
+              onChange={setActivityValue}
+              portfolioTitle={name || 'Activity'}
+              requireValidSelection
             />
           </div>
         </div>
@@ -817,10 +838,11 @@ export function CreateActivityForm() {
             Location
           </UIText>
           <div className="max-w-full">
-            <ActivityLocationBadge
-              value={activityLocation || undefined}
+            <ActivityLocationField
+              value={activityLocation}
+              onChange={setActivityLocation}
+              portfolioTitle={name || 'Activity'}
               canSeeFullLocation
-              onClick={() => setShowLocationPicker(true)}
             />
           </div>
         </div>
@@ -1174,96 +1196,6 @@ export function CreateActivityForm() {
         </div>
       )}
 
-      {showActivityPicker && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
-          <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
-            <Card>
-              <ActivityDateTimePicker
-                portfolioTitle={name || 'Activity'}
-                initialValue={activityValue}
-                onChange={setActivityValue}
-              />
-              <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
-                <Button
-                  type="button"
-                  variant="text"
-                  size="sm"
-                  onClick={() => {
-                    setActivityValue(null)
-                    setShowActivityPicker(false)
-                  }}
-                >
-                  <UIText>Clear</UIText>
-                </Button>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setShowActivityPicker(false)}
-                  >
-                    <UIText>Cancel</UIText>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    disabled={!isActivitySelectionValid}
-                    onClick={() => setShowActivityPicker(false)}
-                  >
-                    <UIText>Done</UIText>
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      )}
-
-      {showLocationPicker && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
-          <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
-            <Card>
-              <ActivityLocationPicker
-                portfolioTitle={name || 'Activity'}
-                initialValue={activityLocation}
-                onChange={setActivityLocation}
-              />
-              <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
-                <Button
-                  type="button"
-                  variant="text"
-                  size="sm"
-                  onClick={() => {
-                    setActivityLocation(null)
-                    setShowLocationPicker(false)
-                  }}
-                >
-                  <UIText>Clear</UIText>
-                </Button>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setShowLocationPicker(false)}
-                  >
-                    <UIText>Cancel</UIText>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    size="sm"
-                    onClick={() => setShowLocationPicker(false)}
-                  >
-                    <UIText>Done</UIText>
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      )}
     </>
   )
 }

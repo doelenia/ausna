@@ -85,31 +85,26 @@ export function MembersPageClient({
   const creatorInMembers = creator ? members.find(m => m.id === creator.id) : null
   const managers = members.filter((m) => m.isManager && !m.isCreator)
   const regularMembers = members.filter((m) => !m.isManager && !m.isCreator)
-  
-  // Combine all members into a single sorted list: creator first, then managers, then regular members
+
+  // Combine all members: for non-external, creator first then managers then regular. For external, show only "going" and exclude creator (they appear in Uploader section).
   const allMembers: (UserInfo & { isCreator?: boolean })[] = []
-  
-  // Add creator first (if they exist and aren't already in members, or if they are, use the member version with isCreator flag)
-  if (creator) {
-    if (creatorInMembers) {
-      // Creator is already in members array, use that entry and ensure isCreator is set
-      allMembers.push({ ...creatorInMembers, isCreator: true })
-    } else {
-      // Creator is not in members array, add them separately
-      allMembers.push({ ...creator, isCreator: true })
+  if (isExternalActivity) {
+    const creatorId = creator?.id
+    allMembers.push(...members.filter(m => m.id !== creatorId))
+  } else {
+    if (creator) {
+      if (creatorInMembers) {
+        allMembers.push({ ...creatorInMembers, isCreator: true })
+      } else {
+        allMembers.push({ ...creator, isCreator: true })
+      }
     }
+    const creatorId = creator?.id
+    managers.forEach(manager => {
+      if (manager.id !== creatorId) allMembers.push(manager)
+    })
+    allMembers.push(...regularMembers)
   }
-  
-  // Add managers (excluding creator if they were already added above)
-  const creatorId = creator?.id
-  managers.forEach(manager => {
-    if (manager.id !== creatorId) {
-      allMembers.push(manager)
-    }
-  })
-  
-  // Add regular members
-  allMembers.push(...regularMembers)
   
   const isCreator = creator?.id === currentUserId
   const isManager = managers.some(m => m.id === currentUserId) || isCreator
@@ -398,7 +393,7 @@ export function MembersPageClient({
               : 'border-transparent text-gray-600 hover:text-gray-900'
           }`}
         >
-          <UIText as="span">Members {allMembers.length > 0 && `(${allMembers.length})`}</UIText>
+          <UIText as="span">{isExternalActivity ? 'Going' : 'Members'} {allMembers.length > 0 && `(${allMembers.length})`}</UIText>
         </button>
         <button
           onClick={(e) => {
@@ -517,11 +512,39 @@ export function MembersPageClient({
           </div>
         )}
 
-        {/* Members Section - Combined List */}
+        {/* External activities: show Uploader separately, then Going list */}
+        {isExternalActivity && creator && (
+          <div className="mb-6">
+            <UIText as="h2" className="mb-3">Uploader</UIText>
+            <div className="flex items-center justify-between p-3 bg-amber-50 rounded-md">
+              <Link
+                href={`/portfolio/human/${creator.id}`}
+                className="flex items-center gap-3 hover:opacity-80"
+              >
+                <img
+                  src={getAvatarUrl(creator)}
+                  alt={getDisplayName(creator)}
+                  className="h-10 w-10 rounded-full"
+                />
+                <div>
+                  <UIText as="div">{getDisplayName(creator)}</UIText>
+                  {creator.username && (
+                    <UIText as="div">@{creator.username}</UIText>
+                  )}
+                </div>
+              </Link>
+              <UIText as="span" className="px-2 py-1 text-amber-700 bg-amber-100 rounded uppercase">
+                Uploader
+              </UIText>
+            </div>
+          </div>
+        )}
+
+        {/* Members / Going Section */}
         <div>
           <div className="flex items-center justify-between mb-3">
             <UIText as="h2">
-              Members {allMembers.length > 0 && `(${allMembers.length})`}
+              {isExternalActivity ? 'Going' : 'Members'} {allMembers.length > 0 && `(${allMembers.length})`}
             </UIText>
             {(isMember || isManager || isCreator) && currentUserId && (
               <Button
@@ -535,7 +558,7 @@ export function MembersPageClient({
             )}
           </div>
           {allMembers.length === 0 ? (
-            <div><UIText>No members yet</UIText></div>
+            <div><UIText>{isExternalActivity ? 'No one is going yet' : 'No members yet'}</UIText></div>
           ) : (
             <div className="space-y-2">
               {allMembers.map((member) => {

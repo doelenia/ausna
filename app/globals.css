@@ -8,7 +8,8 @@
   --foreground-rgb: 0, 0, 0;
   --background-start-rgb: 214, 219, 220;
   --background-end-rgb: 255, 255, 255;
-  --max-content-width: 800px;
+  /* Content width; with px-4 padding, inner content has (--max-content-width - 2rem) */
+  --max-content-width: 48rem;
 }
 
 /* Force light mode - dark mode disabled */
@@ -58,8 +59,7 @@ body {
 
 @media (min-width: 768px) {
   .app-scroll {
-    /* Desktop: top nav overlay */
-    padding-top: var(--app-topnav-height);
+    /* Desktop: nav is left sidebar, no top padding */
     padding-bottom: 0;
   }
 }

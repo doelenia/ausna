@@ -1672,7 +1672,7 @@ export function NoteCard({
   // Flat layout on mobile (no card), card layout on desktop
   if (flatOnMobile) {
     return (
-      <div ref={cardRef} className="w-full md:max-w-xl md:mx-auto">
+      <div ref={cardRef} className="w-full">
         {/* Mobile: flat layout
             - Feed: white background only, rely on internal padding
             - Note view: no extra padding (use original inner padding), background provided by page
@@ -1699,7 +1699,7 @@ export function NoteCard({
 
   // Default behavior: card on all viewports. Render lock after content so it paints on top.
   return (
-    <div ref={cardRef} className="w-full md:max-w-xl md:mx-auto">
+    <div ref={cardRef} className="w-full">
       <Card
         variant="subtle"
         className="relative overflow-hidden"

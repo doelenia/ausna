@@ -407,7 +407,7 @@ export function NoteView({
   }
 
   return (
-    <div className={`bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8 ${isMobile ? 'pb-72' : ''}`}>
+    <div className={`bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8 md:px-10 ${isMobile ? 'pb-72' : ''}`}>
       {/* Note Card */}
       <NoteCard
         note={note}
@@ -424,8 +424,8 @@ export function NoteView({
         }}
       />
 
-      {/* Comment bar + comments section (scroll target for #comments from feed); same width as note card on desktop */}
-      <div id="comments" className="w-full md:max-w-xl md:mx-auto">
+      {/* Comment bar + comments section (scroll target for #comments from feed) */}
+      <div id="comments" className="w-full">
         {/* Annotation Composer - Desktop (inline); same Card as comments section */}
         {!isMobile && (
           <Card variant="subtle" className="p-6">

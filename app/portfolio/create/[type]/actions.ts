@@ -44,6 +44,8 @@ export async function createPortfolio(
     const activityLocationCountryCodeRaw = formData.get('activity_location_country_code') as string | null
     const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
+    const activityLocationOnlineRaw = formData.get('activity_location_online') as string | null
+    const activityLocationOnlineUrlRaw = formData.get('activity_location_online_url') as string | null
     const activityCallToJoinDescriptionRaw = formData.get('activity_call_to_join_description') as string | null
     const activityCallToJoinJoinByRaw = formData.get('activity_call_to_join_join_by') as string | null
     const activityCallToJoinRequireApprovalRaw = formData.get('activity_call_to_join_require_approval') as string | null
@@ -55,6 +57,8 @@ export async function createPortfolio(
     const externalLink = externalLinkRaw?.trim() || ''
     const avatarUrlRaw = formData.get('avatar_url') as string | null
     const avatarUrl = avatarUrlRaw?.trim() || ''
+    const iAmGoingRaw = formData.get('i_am_going') as string | null
+    const iAmGoing = iAmGoingRaw !== 'false'
     const descriptionRaw = formData.get('description') as string | null
     const activityDescription = descriptionRaw?.trim() || ''
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
@@ -198,6 +202,16 @@ export async function createPortfolio(
         ? avatarUrl || getFaviconUrl(externalLink)
         : ''
 
+    // For external activities, creator is only in members if they chose "I'm going"
+    const initialMembers =
+      type === 'activities' && isExternal ? (iAmGoing ? [user.id] : []) : [user.id]
+    const initialMemberRoles: Record<string, string> =
+      type === 'activities' && isExternal
+        ? iAmGoing
+          ? { [user.id]: creatorRole.trim() || 'Uploader' }
+          : {}
+        : { [user.id]: creatorRole.trim() || 'Creator' }
+
     // Create portfolio metadata structure
     const metadata: any = {
       basic: {
@@ -208,17 +222,15 @@ export async function createPortfolio(
       },
       pinned: [],
       settings: {},
-      members: [user.id], // Creator is automatically a member
-      managers: [user.id], // Creator is automatically a manager
+      members: initialMembers,
+      managers: [user.id], // Creator is always a manager (can edit)
       ...(projectTypeGeneral && projectTypeSpecific
         ? {
             project_type_general: projectTypeGeneral,
             project_type_specific: projectTypeSpecific,
           }
         : {}),
-      memberRoles: {
-        [user.id]: creatorRole.trim() || 'Creator',
-      },
+      memberRoles: initialMemberRoles,
     }
 
     // Attach initial activity_datetime, location, and call-to-join for activities when provided
@@ -259,22 +271,31 @@ export async function createPortfolio(
       const locationStateCode = activityLocationStateCodeRaw?.trim() || ''
       const locationPrivate = activityLocationPrivateRaw === 'true'
 
+      const isLocationOnline = activityLocationOnlineRaw === 'true'
+      const locationOnlineUrl = (activityLocationOnlineUrlRaw || '').trim() || undefined
+
       const hasAnyLocationField =
         locationLine1.length > 0 ||
         locationCity.length > 0 ||
         locationState.length > 0 ||
         locationCountry.length > 0 ||
-        locationPrivate
+        locationPrivate ||
+        isLocationOnline
 
       if (hasAnyLocationField) {
         const location: Record<string, any> = {}
-        if (locationLine1) location.line1 = locationLine1
-        if (locationCity) location.city = locationCity
-        if (locationState) location.state = locationState
-        if (locationCountry) location.country = locationCountry
-        if (locationCountryCode) location.countryCode = locationCountryCode
-        if (locationStateCode) location.stateCode = locationStateCode
-        if (locationPrivate) location.isExactLocationPrivate = true
+        if (isLocationOnline) {
+          location.online = true
+          if (locationOnlineUrl) location.onlineUrl = locationOnlineUrl
+        } else {
+          if (locationLine1) location.line1 = locationLine1
+          if (locationCity) location.city = locationCity
+          if (locationState) location.state = locationState
+          if (locationCountry) location.country = locationCountry
+          if (locationCountryCode) location.countryCode = locationCountryCode
+          if (locationStateCode) location.stateCode = locationStateCode
+          if (locationPrivate) location.isExactLocationPrivate = true
+        }
 
         if (Object.keys(location).length > 0) {
           metadata.properties = {

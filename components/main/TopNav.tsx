@@ -7,10 +7,12 @@ import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
-import { Home, MessageCircle, Plus, Search } from 'lucide-react'
+import { Gem, Home, MessageCircle, Plus, Search } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
-export function TopNav() {
+type TopNavVariant = 'sidebar' | 'bottom'
+
+export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
@@ -320,8 +322,26 @@ export function TopNav() {
     fetchUserProjects()
   }, [user, supabase])
 
+  const messagesBadge =
+    unreadCount > 0 ? (
+      <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
+        <UIText className="text-xs" style={{ color: 'white' }}>
+          {unreadCount > 99 ? '99+' : unreadCount}
+        </UIText>
+      </span>
+    ) : inviteUnreadCount > 0 ? (
+      <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />
+    ) : undefined
+
   return (
-    <nav ref={navRef} className="sticky bottom-0 md:sticky md:top-0 z-50 bg-gray-50">
+    <nav
+      ref={navRef}
+      className={
+        variant === 'sidebar'
+          ? 'sticky top-0 z-50 h-full w-full bg-gray-50 flex flex-col'
+          : 'sticky bottom-0 z-50 bg-gray-50'
+      }
+    >
       {safariCookieHint && (
         <div className="w-full bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between gap-2">
           <UIText className="text-blue-900">
@@ -350,126 +370,79 @@ export function TopNav() {
           </button>
         </div>
       )}
-      <div className="w-full px-0 md:px-4 lg:px-8">
-        <div className="flex justify-between md:justify-between items-center h-16 px-2 md:px-0">
-          {/* Mobile: All items spread from end to end, Desktop: Left side */}
-          <div className="flex items-center md:flex-none">
-            <IconButton 
-              icon={Home}
-              href="/main" 
-              title="Home"
-              aria-label="Home"
-            />
-          </div>
 
-          {/* Mobile: All items spread from end to end, Desktop: Right side grouped */}
+      {variant === 'sidebar' ? (
+        /* Desktop: vertical left sidebar, same order top to bottom; centered vertically; more space between buttons */
+        <div className="flex flex-1 flex-col items-center justify-center gap-6 py-4 px-2">
+          <IconButton icon={Home} href="/main" title="Home" aria-label="Home" />
+          <IconButton icon={Gem} href="/explore" title="Explore" aria-label="Explore" />
+          <IconButton icon={Search} href="/search" title="Search" aria-label="Search" />
           {loading ? (
-            <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full"></div>
+            <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full" />
           ) : user ? (
             <>
-              <IconButton
-                icon={Search}
-                href="/search"
-                title="Search"
-                aria-label="Search"
-                className="md:hidden"
-              />
               <IconButton
                 icon={Plus}
                 onClick={() => setShowCreateMenu(true)}
                 title="Create"
                 aria-label="Create"
-                className="md:hidden"
+                iconClassName="w-6 h-6"
               />
               <IconButton
                 icon={MessageCircle}
                 href="/messages"
                 title="Messages"
                 aria-label="Messages"
-                className="md:hidden"
-                badge={
-                  unreadCount > 0 ? (
-                    <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
-                      <UIText className="text-xs" style={{ color: 'white' }}>
-                        {unreadCount > 99 ? '99+' : unreadCount}
-                      </UIText>
-                    </span>
-                  ) : inviteUnreadCount > 0 ? (
-                    <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />
-                  ) : undefined
-                }
+                badge={messagesBadge}
               />
-              <div className="md:hidden">
-                <UserAvatarClient userId={user.id} />
-              </div>
-              {/* Desktop: Grouped right side */}
-              <div className="hidden md:flex items-center gap-4">
-                <IconButton
-                  icon={Search}
-                  href="/search"
-                  title="Search"
-                  aria-label="Search"
-                />
+              <UserAvatarClient userId={user.id} />
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
+            >
+              <UIText>Sign In</UIText>
+            </Link>
+          )}
+        </div>
+      ) : (
+        /* Mobile: horizontal bottom bar — even space between buttons; first and last at the sides (with padding) */
+        <div className="w-full px-4">
+          <div className="flex justify-between items-center h-16 w-full">
+            <IconButton icon={Home} href="/main" title="Home" aria-label="Home" />
+            <IconButton icon={Gem} href="/explore" title="Explore" aria-label="Explore" />
+            {loading ? (
+              <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full" />
+            ) : user ? (
+              <>
                 <IconButton
                   icon={Plus}
                   onClick={() => setShowCreateMenu(true)}
                   title="Create"
                   aria-label="Create"
+                  iconClassName="w-6 h-6"
                 />
                 <IconButton
                   icon={MessageCircle}
                   href="/messages"
                   title="Messages"
                   aria-label="Messages"
-                  badge={
-                    unreadCount > 0 ? (
-                      <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-5 w-5 flex items-center justify-center min-w-[1.25rem]">
-                        <UIText className="text-xs" style={{ color: 'white' }}>
-                          {unreadCount > 99 ? '99+' : unreadCount}
-                        </UIText>
-                      </span>
-                    ) : inviteUnreadCount > 0 ? (
-                      <span className="absolute -top-1 -right-1 bg-red-600 rounded-full h-2.5 w-2.5" aria-label="Unread invitations" />
-                    ) : undefined
-                  }
+                  badge={messagesBadge}
                 />
                 <UserAvatarClient userId={user.id} />
-              </div>
-            </>
-          ) : (
-            <>
-              <IconButton
-                icon={Search}
-                href="/search"
-                title="Search"
-                aria-label="Search"
-                className="md:hidden"
-              />
+              </>
+            ) : (
               <Link
                 href="/login"
-                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors md:hidden"
+                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
               >
                 <UIText>Sign In</UIText>
               </Link>
-              {/* Desktop: Grouped right side */}
-              <div className="hidden md:flex items-center gap-4">
-                <IconButton
-                  icon={Search}
-                  href="/search"
-                  title="Search"
-                  aria-label="Search"
-                />
-                <Link
-                  href="/login"
-                  className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
-                >
-                  <UIText>Sign In</UIText>
-                </Link>
-              </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Create menu */}
       {showCreateMenu && (

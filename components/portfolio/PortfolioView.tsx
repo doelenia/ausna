@@ -1357,9 +1357,12 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
             {/* Members Section - Projects, Activities, and Communities */}
             {(isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (() => {
-              // Combine all members: creator, managers, members
+              // Combine all members: creator (unless external and not going), managers, members
               const allMemberIds: string[] = []
-              allMemberIds.push(portfolio.user_id)
+              const creatorInMembers = members.includes(portfolio.user_id)
+              const includeCreator =
+                !isExternalActivity || creatorInMembers
+              if (includeCreator) allMemberIds.push(portfolio.user_id)
               managers.forEach((managerId: string) => {
                 if (managerId !== portfolio.user_id) allMemberIds.push(managerId)
               })
