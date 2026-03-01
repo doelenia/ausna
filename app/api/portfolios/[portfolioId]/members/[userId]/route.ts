@@ -1,6 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { isPortfolioManager, isPortfolioCreator } from '@/lib/portfolio/helpers'
+
+/** Apply member list update to portfolio (uses service client so RLS does not block e.g. member leaving). */
+async function applyMembersUpdate(
+  portfolioId: string,
+  metadata: any,
+  updatedMembers: string[],
+  updatedManagers: string[],
+  updatedMemberRoles: Record<string, string>
+) {
+  const supabase = createServiceClient()
+  const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
+    portfolio_id: portfolioId,
+    new_members: updatedMembers,
+  })
+  const nextMetadata = {
+    ...metadata,
+    members: updatedMembers,
+    managers: updatedManagers,
+    memberRoles: updatedMemberRoles,
+  }
+  if (rpcError) {
+    const { error: directError } = await supabase
+      .from('portfolios')
+      .update({ metadata: nextMetadata })
+      .eq('id', portfolioId)
+    if (directError) throw directError
+  } else {
+    const { error: metaError } = await supabase
+      .from('portfolios')
+      .update({ metadata: nextMetadata })
+      .eq('id', portfolioId)
+    if (metaError) throw metaError
+  }
+}
 
 /**
  * DELETE /api/portfolios/[portfolioId]/members/[userId] - Remove a member from a portfolio
@@ -97,8 +132,9 @@ export async function DELETE(
           ? managers.filter((id: string) => id !== userId) // Remove old creator from managers
           : [...managers.filter((id: string) => id !== userId), newCreatorId] // Remove old creator, add new creator
 
-        // Transfer creator: update portfolio.user_id and managers
-        const { error: creatorUpdateError } = await supabase
+        // Transfer creator: update portfolio.user_id and managers (use service client so RLS does not block)
+        const serviceSupabase = createServiceClient()
+        const { error: creatorUpdateError } = await serviceSupabase
           .from('portfolios')
           .update({
             user_id: newCreatorId,
@@ -118,72 +154,58 @@ export async function DELETE(
         }
 
         // After creator transfer, continue with member removal
-        // Remove from members if they're a member
         let updatedMembers = members
         if (isMember) {
           updatedMembers = members.filter((id: string) => id !== userId)
         }
+        const memberRoles = metadata?.memberRoles || {}
+        const updatedMemberRoles = { ...memberRoles }
+        delete updatedMemberRoles[userId]
 
-        // Update portfolio to remove from members
-        const { error: memberUpdateError } = await supabase
-          .from('portfolios')
-          .update({
-            metadata: {
-              ...metadata,
-              members: updatedMembers,
-              managers: updatedManagersForTransfer, // Already updated, but keep it
-            },
-          })
-          .eq('id', portfolioId)
-
-        if (memberUpdateError) {
+        try {
+          await applyMembersUpdate(
+            portfolioId,
+            metadata,
+            updatedMembers,
+            updatedManagersForTransfer,
+            updatedMemberRoles
+          )
+        } catch (memberUpdateError: any) {
           console.error('Error removing member after creator transfer:', memberUpdateError)
           return NextResponse.json(
             { error: 'Failed to remove member' },
             { status: 500 }
           )
         }
-
         return NextResponse.json({ success: true })
       }
 
       // If manager (but not creator) is removing themselves, move them to members instead of removing
       let updatedManagers = managers
       let updatedMembers = members
-      
+      const memberRoles: Record<string, string> = metadata?.memberRoles || {}
+
       if (isManager && !isCreator) {
-        // Remove from managers
         updatedManagers = managers.filter((id: string) => id !== userId)
-        // Add to members if not already a member
         if (!isMember) {
           updatedMembers = [...members, userId]
         }
-        // If already a member, keep them in members
       } else if (isMember) {
-        // Regular member leaving - remove from members
         updatedMembers = members.filter((id: string) => id !== userId)
       }
 
-      // Update portfolio
-      const { error: updateError } = await supabase
-        .from('portfolios')
-        .update({
-          metadata: {
-            ...metadata,
-            members: updatedMembers,
-            managers: updatedManagers,
-          },
-        })
-        .eq('id', portfolioId)
+      const updatedMemberRoles = { ...memberRoles }
+      if (updatedMembers.indexOf(userId) === -1) delete updatedMemberRoles[userId]
 
-      if (updateError) {
+      try {
+        await applyMembersUpdate(portfolioId, metadata, updatedMembers, updatedManagers, updatedMemberRoles)
+      } catch (updateError: any) {
         console.error('Error removing member:', updateError)
         return NextResponse.json(
           { error: 'Failed to remove member' },
           { status: 500 }
         )
       }
-
       return NextResponse.json({ success: true })
     }
 
@@ -222,34 +244,23 @@ export async function DELETE(
       )
     }
 
-    // Remove from members array
     const updatedMembers = members.filter((id: string) => id !== userId)
-    
-    // If removing a manager, also remove from managers
-    const updatedManagers = isManager 
+    const updatedManagers = isManager
       ? managers.filter((id: string) => id !== userId)
       : managers
+    const memberRoles: Record<string, string> = metadata?.memberRoles || {}
+    const updatedMemberRoles = { ...memberRoles }
+    delete updatedMemberRoles[userId]
 
-    // Update portfolio
-    const { error: updateError } = await supabase
-      .from('portfolios')
-      .update({
-        metadata: {
-          ...metadata,
-          members: updatedMembers,
-          managers: updatedManagers,
-        },
-      })
-      .eq('id', portfolioId)
-
-    if (updateError) {
+    try {
+      await applyMembersUpdate(portfolioId, metadata, updatedMembers, updatedManagers, updatedMemberRoles)
+    } catch (updateError: any) {
       console.error('Error removing member:', updateError)
       return NextResponse.json(
         { error: 'Failed to remove member' },
         { status: 500 }
       )
     }
-
     return NextResponse.json({ success: true })
   } catch (error: any) {
     console.error('API route error:', error)

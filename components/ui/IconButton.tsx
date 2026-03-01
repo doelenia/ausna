@@ -8,6 +8,8 @@ export interface IconButtonProps {
   onClick?: () => void
   title?: string
   className?: string
+  /** Optional override for the icon element (e.g. "w-6 h-6" for consistent visual weight) */
+  iconClassName?: string
   badge?: React.ReactNode
   'aria-label'?: string
 }
@@ -26,6 +28,7 @@ export function IconButton({
   onClick,
   title,
   className = '',
+  iconClassName = 'w-5 h-5',
   badge,
   'aria-label': ariaLabel,
   ...props
@@ -35,7 +38,7 @@ export function IconButton({
 
   const iconElement = (
     <Icon 
-      className="w-5 h-5" 
+      className={iconClassName} 
       strokeWidth={1.5} // Thinner weight like UI text
     />
   )

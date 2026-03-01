@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { TopNav } from '@/components/main/TopNav'
+import { ContentColumnWithScroll } from '@/components/main/ContentColumnWithScroll'
 import { InviteHandler } from '@/components/auth/InviteHandler'
 import { DataCacheProvider } from '@/lib/cache/DataCacheContext'
 import { createClient } from '@/lib/supabase/server'
@@ -44,27 +45,16 @@ export default async function RootLayout({
             <OnboardingGate initialStatus={initialOnboardingStatus} />
           )}
           <div className="h-[100dvh] bg-gray-50">
-            <div className="mx-auto h-full relative" style={{ maxWidth: 'var(--max-content-width)' }}>
-              <div className="h-full overflow-auto w-full app-scroll">
-                {/* Universal content padding so TopNav (top on desktop, bottom on mobile) never overlaps content */}
-                <div className="pt-0 md:pt-2 pb-2 md:pb-0">
-                  {children}
-                </div>
-              </div>
-            <div className="hidden md:block absolute top-0 left-0 right-0 pointer-events-none">
-              <div className="pointer-events-auto">
-                <TopNav />
-              </div>
-              {/* Gradient overlay below nav on desktop */}
-              <div className="h-8 bg-gradient-to-b from-gray-50 to-transparent pointer-events-none"></div>
-            </div>
-            <div className="block md:hidden absolute bottom-0 left-0 right-0 pointer-events-none">
-              {/* Gradient overlay above nav on mobile */}
-              <div className="h-8 bg-gradient-to-t from-gray-50 to-transparent pointer-events-none"></div>
-              <div className="pointer-events-auto">
-                <TopNav />
-              </div>
-            </div>
+            <div
+              className="mx-auto h-full flex gap-0 md:gap-4"
+              style={{ maxWidth: 'var(--max-content-width)' }}
+            >
+              {/* Desktop: left sidebar nav */}
+              <aside className="hidden md:flex md:flex-col md:w-16 md:shrink-0 bg-gray-50">
+                <TopNav variant="sidebar" />
+              </aside>
+              {/* Content area + mobile bottom nav */}
+              <ContentColumnWithScroll>{children}</ContentColumnWithScroll>
             </div>
           </div>
         </DataCacheProvider>

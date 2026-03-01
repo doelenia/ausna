@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Card, UIText } from '@/components/ui'
 import type { ActivityLocationValue } from '@/lib/location'
+import { getOnlineLocationDisplayName } from '@/lib/location'
 import { Country, State } from 'country-state-city'
 
 interface ActivityLocationPickerProps {
@@ -80,15 +81,70 @@ export function ActivityLocationPicker({
       .slice(0, 10)
   }, [states, stateInput, selectedCountryIso])
 
+  const isOnline = value?.online ?? false
+  const onlineUrl = value?.onlineUrl ?? ''
+
   return (
     <Card variant="subtle">
       <div className="space-y-4">
         <div>
           <UIText as="p" className="mb-2">
-            Set a location for this project. You can add a street/place plus city, state, and country,
-            or just a city/country.
+            Set a location for this activity. Choose online or a physical place.
           </UIText>
         </div>
+
+        {/* Online vs Physical */}
+        <div className="flex gap-4">
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="location-type"
+              checked={!isOnline}
+              onChange={() => {
+                if (isOnline) handleChange(null)
+              }}
+              className="h-4 w-4 text-blue-600 border-gray-300"
+            />
+            <UIText as="span">Physical location</UIText>
+          </label>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="location-type"
+              checked={isOnline}
+              onChange={() => {
+                if (!isOnline) handleChange({ online: true })
+              }}
+              className="h-4 w-4 text-blue-600 border-gray-300"
+            />
+            <UIText as="span">Online</UIText>
+          </label>
+        </div>
+
+        {isOnline && (
+          <div>
+            <UIText as="label" className="block mb-1">
+              Meeting URL <span className="text-gray-500">(optional)</span>
+            </UIText>
+            <input
+              type="url"
+              value={onlineUrl}
+              onChange={(e) => {
+                const url = e.target.value.trim()
+                handleChange({ online: true, onlineUrl: url || undefined })
+              }}
+              placeholder="https://zoom.us/j/... or https://meet.google.com/..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+            />
+            {onlineUrl && (
+              <UIText as="p" className="mt-1 text-gray-500 text-sm">
+                Will display as: {getOnlineLocationDisplayName(onlineUrl)}
+              </UIText>
+            )}
+          </div>
+        )}
+
+        {!isOnline && (
         <div className="space-y-3">
           {/* Country (top level, always visible) */}
           <div>
@@ -303,6 +359,7 @@ export function ActivityLocationPicker({
             </label>
           </div>
         </div>
+        )}
       </div>
     </Card>
   )

@@ -1,16 +1,30 @@
 import type { ActivityLocationValue } from './location'
+import { getOnlineLocationDisplayName } from './location'
 
-interface FormattedLocation {
+export interface FormattedActivityLocation {
   line1: string | null
   line2: string | null
   googleMapsQuery: string | null
+  /** When location is online with a URL, so the badge can open it in a new tab. */
+  onlineUrl: string | null
 }
 
 export function formatActivityLocation(
   value: ActivityLocationValue | null | undefined
-): FormattedLocation {
+): FormattedActivityLocation {
   if (!value) {
-    return { line1: null, line2: null, googleMapsQuery: null }
+    return { line1: null, line2: null, googleMapsQuery: null, onlineUrl: null }
+  }
+
+  if (value.online) {
+    const onlineUrl = value.onlineUrl?.trim() || null
+    const line1 = onlineUrl ? getOnlineLocationDisplayName(onlineUrl) : 'Online'
+    return {
+      line1,
+      line2: null,
+      googleMapsQuery: null,
+      onlineUrl,
+    }
   }
 
   const line1 = value.line1?.trim() || null
@@ -78,6 +92,7 @@ export function formatActivityLocation(
     line1,
     line2,
     googleMapsQuery,
+    onlineUrl: null,
   }
 }
 

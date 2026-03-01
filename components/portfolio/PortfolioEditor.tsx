@@ -19,10 +19,7 @@ import { StickerAvatar } from './StickerAvatar'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
 import { Title, UIText, Button, Card, Content } from '@/components/ui'
-import { ActivityDateTimePicker } from './ActivityDateTimePicker'
-import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
-import { ActivityLocationPicker } from './ActivityLocationPicker'
-import { ActivityLocationBadge } from './ActivityLocationBadge'
+import { ActivityDateTimeField, ActivityLocationField } from './activity-fields'
 import { ActivityLinkBadge } from './ActivityLinkBadge'
 import type { ActivityLocationValue } from '@/lib/location'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
@@ -236,13 +233,11 @@ export function PortfolioEditor({
   const initialActivity =
     (metadata?.properties?.activity_datetime as ActivityDateTimeValue | undefined) || null
   const [activityValue, setActivityValue] = useState<ActivityDateTimeValue | null>(initialActivity)
-  const [showActivityPicker, setShowActivityPicker] = useState(initialShowActivityPicker ?? false)
   const initialLocation =
     (metadata?.properties?.location as ActivityLocationValue | undefined) || null
   const [activityLocation, setActivityLocation] = useState<ActivityLocationValue | null>(
     initialLocation
   )
-  const [showLocationPicker, setShowLocationPicker] = useState(initialShowLocationPicker ?? false)
   const [projectStatus, setProjectStatus] = useState<string>(
     metadata?.status || (!initialActivity ? 'in-progress' : '')
   )
@@ -266,6 +261,11 @@ export function PortfolioEditor({
   const [showHostSelector, setShowHostSelector] = useState(false)
   const [hostSelectorTab, setHostSelectorTab] = useState<'projects' | 'communities'>('projects')
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const membersList: string[] = metadata?.members || []
+  const isExternalActivityInit = portfolio.type === 'activities' && (metadata?.properties as any)?.external === true
+  const [creatorGoing, setCreatorGoing] = useState<boolean>(
+    isExternalActivityInit ? membersList.includes(portfolio.user_id) : true
+  )
   const initialHumanAutoCityLocationEnabled: boolean =
     isHumanPortfolio(portfolio) &&
     !!(metadata?.properties && Object.prototype.hasOwnProperty.call(metadata.properties, 'auto_city_location_enabled'))
@@ -288,11 +288,6 @@ export function PortfolioEditor({
   const availabilityValidationError = useMemo(
     () => getAvailabilityValidationError(availabilityScheduleDraft || availabilitySchedule),
     [availabilityScheduleDraft, availabilitySchedule]
-  )
-
-  const isActivitySelectionValid = useMemo(
-    () => !activityValue || !!activityValue.start,
-    [activityValue]
   )
 
   useEffect(() => {
@@ -547,41 +542,48 @@ export function PortfolioEditor({
           formData.append('activity_datetime_all_day', '')
         }
         if (activityLocation) {
-          if (activityLocation.line1) {
-            formData.append('activity_location_line1', activityLocation.line1)
+          if (activityLocation.online) {
+            formData.append('activity_location_online', 'true')
+            formData.append('activity_location_online_url', activityLocation.onlineUrl || '')
           } else {
-            formData.append('activity_location_line1', '')
+            formData.append('activity_location_online', 'false')
+            if (activityLocation.line1) {
+              formData.append('activity_location_line1', activityLocation.line1)
+            } else {
+              formData.append('activity_location_line1', '')
+            }
+            if (activityLocation.city) {
+              formData.append('activity_location_city', activityLocation.city)
+            } else {
+              formData.append('activity_location_city', '')
+            }
+            if (activityLocation.state) {
+              formData.append('activity_location_state', activityLocation.state)
+            } else {
+              formData.append('activity_location_state', '')
+            }
+            if (activityLocation.country) {
+              formData.append('activity_location_country', activityLocation.country)
+            } else {
+              formData.append('activity_location_country', '')
+            }
+            if (activityLocation.countryCode) {
+              formData.append('activity_location_country_code', activityLocation.countryCode)
+            } else {
+              formData.append('activity_location_country_code', '')
+            }
+            if (activityLocation.stateCode) {
+              formData.append('activity_location_state_code', activityLocation.stateCode)
+            } else {
+              formData.append('activity_location_state_code', '')
+            }
+            formData.append(
+              'activity_location_private',
+              activityLocation.isExactLocationPrivate ? 'true' : 'false'
+            )
           }
-          if (activityLocation.city) {
-            formData.append('activity_location_city', activityLocation.city)
-          } else {
-            formData.append('activity_location_city', '')
-          }
-          if (activityLocation.state) {
-            formData.append('activity_location_state', activityLocation.state)
-          } else {
-            formData.append('activity_location_state', '')
-          }
-          if (activityLocation.country) {
-            formData.append('activity_location_country', activityLocation.country)
-          } else {
-            formData.append('activity_location_country', '')
-          }
-          if (activityLocation.countryCode) {
-            formData.append('activity_location_country_code', activityLocation.countryCode)
-          } else {
-            formData.append('activity_location_country_code', '')
-          }
-          if (activityLocation.stateCode) {
-            formData.append('activity_location_state_code', activityLocation.stateCode)
-          } else {
-            formData.append('activity_location_state_code', '')
-          }
-          formData.append(
-            'activity_location_private',
-            activityLocation.isExactLocationPrivate ? 'true' : 'false'
-          )
         } else {
+          formData.append('activity_location_online', '')
           formData.append('activity_location_line1', '')
           formData.append('activity_location_city', '')
           formData.append('activity_location_state', '')
@@ -604,6 +606,9 @@ export function PortfolioEditor({
       if (portfolio.type === 'activities' && !isExternalAct) {
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
         formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
+      }
+      if (portfolio.type === 'activities' && isExternalAct) {
+        formData.append('i_am_going', creatorGoing ? 'true' : 'false')
       }
 
       const result = await updatePortfolio(formData)
@@ -994,32 +999,46 @@ export function PortfolioEditor({
                   </div>
                 )}
 
+                {isExternalActivity && (
+                  <div className="flex items-center gap-2 mt-4">
+                    <input
+                      type="checkbox"
+                      id="creator_going_edit"
+                      checked={creatorGoing}
+                      onChange={(e) => setCreatorGoing(e.target.checked)}
+                      disabled={loading}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <UIText as="label" htmlFor="creator_going_edit" className="cursor-pointer">
+                      I&apos;m going to this event
+                    </UIText>
+                  </div>
+                )}
+
                 <div className="mt-4">
                   <UIText as="label" className="block mb-2">
                     Activity date &amp; time
                   </UIText>
-                  <div className="max-w-full">
-                    <ActivityDateTimeBadge
-                      value={activityValue || undefined}
-                      onClick={() => setShowActivityPicker(true)}
-                    />
-                  </div>
-                  <UIText as="p" className="text-xs text-gray-500 mt-1">
-                    When set, the activity is Live during the scheduled period (and after start if there’s no end time). After the end time it’s no longer Live—you don’t need to switch it manually.
-                  </UIText>
+                  <ActivityDateTimeField
+                    value={activityValue}
+                    onChange={setActivityValue}
+                    portfolioTitle={name || basic.name}
+                    hint="When set, the activity is Live during the scheduled period (and after start if there's no end time). After the end time it's no longer Live—you don't need to switch it manually."
+                    defaultOpen={initialShowActivityPicker}
+                  />
                 </div>
 
                 <div className="mt-4">
                   <UIText as="label" className="block mb-2">
                     Location
                   </UIText>
-                  <div className="max-w-full">
-                    <ActivityLocationBadge
-                      value={activityLocation || undefined}
-                      canSeeFullLocation
-                      onClick={() => setShowLocationPicker(true)}
-                    />
-                  </div>
+                  <ActivityLocationField
+                    value={activityLocation}
+                    onChange={setActivityLocation}
+                    portfolioTitle={name || basic.name}
+                    canSeeFullLocation
+                    defaultOpen={initialShowLocationPicker}
+                  />
                 </div>
 
                 {/* Advanced settings (activities): Category, Visibility, Live/Archive, Call to join — hidden for external */}
@@ -1273,51 +1292,6 @@ export function PortfolioEditor({
         </div>
       </div>
     </div>
-    {portfolio.type === 'activities' && showActivityPicker && (
-      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
-        <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
-          <Card>
-            <ActivityDateTimePicker
-              portfolioTitle={name || basic.name}
-              initialValue={activityValue}
-              onChange={setActivityValue}
-            />
-            <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
-              <Button
-                type="button"
-                variant="text"
-                size="sm"
-                onClick={() => {
-                  setActivityValue(null)
-                  setShowActivityPicker(false)
-                }}
-              >
-                <UIText>Clear</UIText>
-              </Button>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowActivityPicker(false)}
-                >
-                  <UIText>Cancel</UIText>
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  disabled={!isActivitySelectionValid}
-                  onClick={() => setShowActivityPicker(false)}
-                >
-                  <UIText>Done</UIText>
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-    )}
     {isHumanPortfolio(portfolio) && showAvailabilityModal && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div
@@ -1491,51 +1465,6 @@ export function PortfolioEditor({
         </div>
       </div>
     )}
-    {portfolio.type === 'activities' && showLocationPicker && (
-      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
-        <div className="w-full h-full md:h-auto md:max-w-2xl px-0 md:px-4">
-          <Card>
-            <ActivityLocationPicker
-              portfolioTitle={name || basic.name}
-              initialValue={activityLocation}
-              onChange={setActivityLocation}
-            />
-            <div className="mt-4 flex justify-between items-center gap-2 pb-[calc(var(--app-topnav-height)+env(safe-area-inset-bottom,0px)+16px)] md:pb-0">
-              <Button
-                type="button"
-                variant="text"
-                size="sm"
-                onClick={() => {
-                  setActivityLocation(null)
-                  setShowLocationPicker(false)
-                }}
-              >
-                <UIText>Clear</UIText>
-              </Button>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowLocationPicker(false)}
-                >
-                  <UIText>Cancel</UIText>
-                </Button>
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setShowLocationPicker(false)}
-                >
-                  <UIText>Done</UIText>
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-    )}
-
     {/* Host selector for activities (projects and communities) */}
     {portfolio.type === 'activities' && showHostSelector && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">

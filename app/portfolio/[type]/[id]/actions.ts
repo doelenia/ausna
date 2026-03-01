@@ -376,6 +376,8 @@ export async function updatePortfolio(
     const activityLocationCountryCodeRaw = formData.get('activity_location_country_code') as string | null
     const activityLocationStateCodeRaw = formData.get('activity_location_state_code') as string | null
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
+    const activityLocationOnlineRaw = formData.get('activity_location_online') as string | null
+    const activityLocationOnlineUrlRaw = formData.get('activity_location_online_url') as string | null
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostCommunityIdsRaw = formData.get('host_community_ids') as string | null
     const humanAutoCityLocationEnabledRaw = formData.get(
@@ -384,6 +386,7 @@ export async function updatePortfolio(
     const humanAvailabilityScheduleRaw = formData.get(
       'human_availability_schedule'
     ) as string | null
+    const iAmGoingRaw = formData.get('i_am_going') as string | null
 
     if (!portfolioId) {
       return {
@@ -511,6 +514,9 @@ export async function updatePortfolio(
       const locationStateCode = activityLocationStateCodeRaw?.trim() || ''
       const locationPrivate = activityLocationPrivateRaw === 'true'
 
+      const isLocationOnline = activityLocationOnlineRaw === 'true'
+      const locationOnlineUrl = (activityLocationOnlineUrlRaw || '').trim() || undefined
+
       const hasAnyLocationField =
         (activityLocationLine1Raw !== null && activityLocationLine1Raw !== undefined) ||
         (activityLocationCityRaw !== null && activityLocationCityRaw !== undefined) ||
@@ -518,7 +524,8 @@ export async function updatePortfolio(
         (activityLocationCountryRaw !== null && activityLocationCountryRaw !== undefined) ||
         (activityLocationCountryCodeRaw !== null && activityLocationCountryCodeRaw !== undefined) ||
         (activityLocationStateCodeRaw !== null && activityLocationStateCodeRaw !== undefined) ||
-        (activityLocationPrivateRaw !== null && activityLocationPrivateRaw !== undefined)
+        (activityLocationPrivateRaw !== null && activityLocationPrivateRaw !== undefined) ||
+        (activityLocationOnlineRaw !== null && activityLocationOnlineRaw !== undefined)
 
       if (hasAnyLocationField) {
         const nextProperties = (updatedMetadata.properties || properties || {}) as Record<string, any>
@@ -530,17 +537,23 @@ export async function updatePortfolio(
           locationCountry.length > 0 ||
           locationCountryCode.length > 0 ||
           locationStateCode.length > 0 ||
-          locationPrivate
+          locationPrivate ||
+          isLocationOnline
 
         if (hasAnyNonEmptyLocationField) {
           const location: Record<string, any> = {}
-          if (locationLine1) location.line1 = locationLine1
-          if (locationCity) location.city = locationCity
-          if (locationState) location.state = locationState
-          if (locationCountry) location.country = locationCountry
-          if (locationCountryCode) location.countryCode = locationCountryCode
-          if (locationStateCode) location.stateCode = locationStateCode
-          if (locationPrivate) location.isExactLocationPrivate = true
+          if (isLocationOnline) {
+            location.online = true
+            if (locationOnlineUrl) location.onlineUrl = locationOnlineUrl
+          } else {
+            if (locationLine1) location.line1 = locationLine1
+            if (locationCity) location.city = locationCity
+            if (locationState) location.state = locationState
+            if (locationCountry) location.country = locationCountry
+            if (locationCountryCode) location.countryCode = locationCountryCode
+            if (locationStateCode) location.stateCode = locationStateCode
+            if (locationPrivate) location.isExactLocationPrivate = true
+          }
 
           nextProperties.location = Object.keys(location).length > 0 ? location : undefined
           updatedMetadata.properties = nextProperties
@@ -631,6 +644,34 @@ export async function updatePortfolio(
         updatedMetadata.properties = {
           ...nextProperties,
           host_community_ids: resolvedHostCommunityIds.length > 0 ? resolvedHostCommunityIds : undefined,
+        }
+      }
+
+      // External activity: creator can toggle "I'm going" (add/remove self from members)
+      const isExternalActivity = (currentMetadata.properties as any)?.external === true
+      if (isExternalActivity && iAmGoingRaw !== null) {
+        const currentMembers: string[] = currentMetadata.members || []
+        const currentMemberRoles: Record<string, string> = currentMetadata.memberRoles || {}
+        const creatorId = portfolio.user_id
+        const iAmGoing = iAmGoingRaw === 'true'
+        let nextMembers: string[]
+        let nextMemberRoles: Record<string, string>
+        if (iAmGoing) {
+          nextMembers = currentMembers.includes(creatorId) ? currentMembers : [...currentMembers, creatorId]
+          nextMemberRoles = { ...currentMemberRoles, [creatorId]: currentMemberRoles[creatorId] || 'Uploader' }
+        } else {
+          nextMembers = currentMembers.filter((id) => id !== creatorId)
+          nextMemberRoles = { ...currentMemberRoles }
+          delete nextMemberRoles[creatorId]
+        }
+        updatedMetadata.members = nextMembers
+        updatedMetadata.memberRoles = nextMemberRoles
+        const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
+          portfolio_id: portfolioId,
+          new_members: nextMembers,
+        })
+        if (rpcError) {
+          return { success: false, error: rpcError.message || 'Failed to update membership' }
         }
       }
     }
