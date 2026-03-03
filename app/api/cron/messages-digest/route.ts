@@ -92,15 +92,15 @@ export async function GET(request: NextRequest) {
           continue
         }
 
+        const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000
+
         const unreadConversations = conversations.filter((conv) => conv.unread_count > 0)
 
         if (unreadConversations.length === 0) {
           continue
         }
 
-        withUnread += 1
-
-        let latestMessageAtIso: string | null = null
+        let hasRecentUnread = false
 
         const conversationsForEmail = unreadConversations.map((conv) => {
           const last = conv.last_message as any
@@ -144,8 +144,9 @@ export async function GET(request: NextRequest) {
 
           const lastMessageAt = last.created_at as string
 
-          if (!latestMessageAtIso || lastMessageAt > latestMessageAtIso) {
-            latestMessageAtIso = lastMessageAt
+          const lastMessageAtMs = Date.parse(lastMessageAt)
+          if (!Number.isNaN(lastMessageAtMs) && lastMessageAtMs >= tenMinutesAgoMs) {
+            hasRecentUnread = true
           }
 
           console.log('[messages-digest] Conversation digest payload', {
@@ -170,35 +171,14 @@ export async function GET(request: NextRequest) {
           }
         })
 
-        const lastSentAtIso = messageDigest.last_sent_at as string | undefined
-
-        if (lastSentAtIso && latestMessageAtIso) {
-          const lastSentAtMs = Date.parse(lastSentAtIso)
-          const latestMessageAtMs = Date.parse(latestMessageAtIso)
-
-          if (!Number.isNaN(lastSentAtMs) && !Number.isNaN(latestMessageAtMs)) {
-            // Skip if there have been no new messages since the last digest
-            if (latestMessageAtMs <= lastSentAtMs) {
-              console.log('[messages-digest] Skipping user; no new messages since last digest', {
-                userId,
-                lastSentAt: lastSentAtIso,
-                latestMessageAt: latestMessageAtIso,
-              })
-              continue
-            }
-
-            // Enforce a minimum 10-minute cooldown between digests
-            const minutesSinceLast = (Date.now() - lastSentAtMs) / 60000
-            if (minutesSinceLast < 10) {
-              console.log('[messages-digest] Skipping user; within 10-minute cooldown window', {
-                userId,
-                lastSentAt: lastSentAtIso,
-                minutesSinceLast: Number(minutesSinceLast.toFixed(2)),
-              })
-              continue
-            }
-          }
+        if (!hasRecentUnread) {
+          console.log('[messages-digest] Skipping user; no unread messages in last 10 minutes', {
+            userId,
+          })
+          continue
         }
+
+        withUnread += 1
 
         let authEmail: string | null = null
         try {
