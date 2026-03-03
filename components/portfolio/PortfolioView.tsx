@@ -867,6 +867,15 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       </div>
                     )
                   }
+                  if (status === 'archived') {
+                    return (
+                      <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                        <UIText as="span" className="text-[11px] text-black leading-none">
+                          Activity ended
+                        </UIText>
+                      </div>
+                    )
+                  }
                   return null
                 }
 
@@ -893,7 +902,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 let target: Date | null = null
 
                 if (status === 'archived') {
-                  label = 'past event'
+                  label = 'Activity ended'
                 } else if (validStart) {
                   // Determine upcoming vs past using start/end
                   if (now < validStart) {
@@ -912,7 +921,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     const relative = formatDistanceToNowStrict(target, { addSuffix: true })
                     label = relative
                   } else {
-                    label = 'activity ended'
+                    label = 'Activity ended'
                   }
                 }
 
@@ -1134,32 +1143,6 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
               const activityDateTime = (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null
               const joinWindowOpen = isCallToJoinWindowOpen(visibility, config, activityDateTime, projectStatus)
-              // #region agent log
-              fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-Debug-Session-Id': 'ddc618',
-                },
-                body: JSON.stringify({
-                  sessionId: 'ddc618',
-                  runId: 'initial',
-                  hypothesisId: 'H4',
-                  location: 'components/portfolio/PortfolioView.tsx:CallToJoinCard',
-                  message: 'Call-to-join card state',
-                  data: {
-                    portfolioId: portfolio.id,
-                    visibility,
-                    status: projectStatus,
-                    joinWindowOpen,
-                    callToJoinEnabled: config.enabled,
-                    callToJoinJoinBy: config.join_by,
-                    hasActivityStart: !!activityDateTime?.start,
-                  },
-                  timestamp: Date.now(),
-                }),
-              }).catch(() => {});
-              // #endregion
               const joinByDate = config.join_by ? new Date(config.join_by) : null
 
               const canSeeOwnerManagerCard = (isOwner || isManager)
