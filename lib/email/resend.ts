@@ -14,5 +14,15 @@ export function getResendFromEmail(): string {
   return from
 }
 
-export const resend = new Resend(process.env.RESEND_API_KEY)
+let _resend: Resend | null = null
+
+export function getResendClient(): Resend {
+  if (_resend) return _resend
+  const key = process.env.RESEND_API_KEY
+  if (!key) {
+    throw new Error('Missing RESEND_API_KEY (required to send emails via Resend)')
+  }
+  _resend = new Resend(key)
+  return _resend
+}
 

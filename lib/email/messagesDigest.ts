@@ -1,4 +1,4 @@
-import { resend, getResendFromEmail, getSiteUrl } from '@/lib/email/resend'
+import { getResendClient, getResendFromEmail, getSiteUrl } from '@/lib/email/resend'
 import {
   MessagesDigestConversationInput,
   renderMessagesDigestEmail,
@@ -24,7 +24,7 @@ export async function sendMessagesDigestEmail(input: {
   const subject = 'New messages from Ausna'
 
   try {
-    const result = await resend.emails.send({
+    const result = await getResendClient().emails.send({
       from: getResendFromEmail(),
       to,
       subject,

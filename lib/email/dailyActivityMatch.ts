@@ -1,4 +1,4 @@
-import { resend, getResendFromEmail, getSiteUrl } from '@/lib/email/resend'
+import { getResendClient, getResendFromEmail, getSiteUrl } from '@/lib/email/resend'
 import { renderDailyActivityMatchEmail } from '@/lib/email/templates/dailyActivityMatchEmail'
 import { DEFAULT_ACTIVITY_PATTERN_PATH } from '@/lib/explore/activityPatterns'
 
@@ -48,7 +48,7 @@ export async function sendDailyActivityMatchEmail(input: {
   }
 
   try {
-    const result = await resend.emails.send({
+    const result = await getResendClient().emails.send({
       from: getResendFromEmail(),
       to,
       subject,
