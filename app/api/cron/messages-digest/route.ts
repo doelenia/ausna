@@ -39,10 +39,6 @@ export async function GET(request: NextRequest) {
     let emailsSent = 0
     const errors: Array<{ userId?: string; error: string }> = []
 
-    const tenMinutesAgoIso = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-
-    console.log('[messages-digest] Using cutoff time', { tenMinutesAgoIso })
-
     for (let offset = 0; ; offset += pageSize) {
       const { data: humans, error } = await supabase
         .from('portfolios')
@@ -80,91 +76,6 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-      const { data: recentUnreadMessages, error: recentUnreadError } = await supabase
-        .from('messages')
-        .select('id, sender_id, text, created_at')
-        .eq('receiver_id', userId)
-        .is('read_at', null)
-        .gte('created_at', tenMinutesAgoIso)
-
-      if (recentUnreadError) {
-        console.error('[messages-digest] Failed to load recent unread messages', {
-          userId,
-          error: recentUnreadError.message,
-        })
-        errors.push({
-          userId,
-          error: recentUnreadError.message || 'Failed to load recent unread messages',
-        })
-        continue
-      }
-
-      if (!recentUnreadMessages || recentUnreadMessages.length === 0) {
-        console.log('[messages-digest] No recent unread messages for user', {
-          userId,
-        })
-        continue
-      }
-
-      console.log('[messages-digest] Recent unread messages summary', {
-        userId,
-        count: recentUnreadMessages.length,
-        sample: (recentUnreadMessages as any[])
-          .slice(0, 5)
-          .map((m) => ({
-            id: m.id,
-            sender_id: m.sender_id,
-            created_at: m.created_at,
-            text_preview:
-              typeof m.text === 'string'
-                ? m.text.slice(0, 80)
-                : m.text === null
-                ? null
-                : typeof m.text,
-          })),
-      })
-
-      const partnerIdsWithRecentUnread = new Set(
-        recentUnreadMessages.map((m: any) => m.sender_id as string)
-      )
-
-      const latestUnreadByPartner = new Map<
-        string,
-        { messageId: string; text: string; created_at: string }
-      >()
-
-      for (const msg of recentUnreadMessages as any[]) {
-        const senderId = msg.sender_id as string
-        const createdAt = msg.created_at as string
-        const existing = latestUnreadByPartner.get(senderId)
-
-        if (
-          !existing ||
-          new Date(createdAt).getTime() > new Date(existing.created_at).getTime()
-        ) {
-          latestUnreadByPartner.set(senderId, {
-            messageId: String(msg.id),
-            text: (msg.text as string) || '',
-            created_at: createdAt,
-          })
-        }
-      }
-
-      console.log('[messages-digest] Latest unread per partner', {
-        userId,
-        partners: Array.from(latestUnreadByPartner.entries()).map(
-          ([partnerId, info]) => ({
-            partnerId,
-            messageId: info.messageId,
-            created_at: info.created_at,
-            text_preview:
-              typeof info.text === 'string'
-                ? info.text.slice(0, 80)
-                : typeof info.text,
-          })
-        ),
-      })
-
         let conversations
         try {
           conversations = await getConversationsForUserWithClient(
@@ -181,9 +92,7 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        const unreadConversations = conversations.filter(
-          (conv) => conv.unread_count > 0 && partnerIdsWithRecentUnread.has(conv.partner_id)
-        )
+        const unreadConversations = conversations.filter((conv) => conv.unread_count > 0)
 
         if (unreadConversations.length === 0) {
           continue
@@ -213,39 +122,69 @@ export async function GET(request: NextRequest) {
         const siteUrl = getSiteUrl()
         const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
 
-      const conversationsForEmail = unreadConversations.map((conv) => {
-        const latestUnread = latestUnreadByPartner.get(conv.partner_id)
-        const previewSource = latestUnread ? 'latest_unread' : 'last_message'
+        const conversationsForEmail = unreadConversations.map((conv) => {
+          const last = conv.last_message as any
+          const isSentByMe = last.sender_id !== conv.partner_id
+          const baseText = (last.text || '').trim()
 
-        const lastMessagePreview = (latestUnread?.text ||
-          conv.last_message.text ||
-          '') as string
-        const lastMessageAt =
-          (latestUnread?.created_at as string | undefined) ??
-          (conv.last_message.created_at as string)
+          let previewText = baseText
 
-        console.log('[messages-digest] Conversation digest payload', {
-          userId,
-          partnerId: conv.partner_id,
-          previewSource,
-          unread_count: conv.unread_count,
-          lastMessageAt,
-          lastMessagePreview:
-            typeof lastMessagePreview === 'string'
-              ? lastMessagePreview.slice(0, 120)
-              : typeof lastMessagePreview,
-          lastConversationMessageId: conv.last_message?.id,
-          lastConversationMessageCreatedAt: conv.last_message?.created_at,
+          if (!previewText) {
+            const hasNote = !!last.note_id
+            const isCommentPreview = last.message_type === 'comment_preview'
+            const hasAnnotation = !!last.annotation_id
+
+            if (isCommentPreview) {
+              if (hasAnnotation) {
+                // Comment notification
+                previewText = isSentByMe
+                  ? 'You commented on: ...'
+                  : 'Sent you a comment on: ...'
+              } else if (hasNote) {
+                // Reaction (like) notification on a note
+                previewText = isSentByMe
+                  ? 'You reacted to a note with ❤️ ...'
+                  : 'Reacted to your note with ❤️ ...'
+              } else {
+                // Fallback comment preview
+                previewText = isSentByMe
+                  ? 'You sent an update on: ...'
+                  : 'Sent you an update on: ...'
+              }
+            } else if (hasNote) {
+              // Generic note/share preview
+              previewText = isSentByMe
+                ? 'You shared a note: ...'
+                : 'Shared a note with you: ...'
+            } else {
+              // Generic fallback so the preview is never empty
+              previewText = isSentByMe ? 'You sent a message' : 'New message'
+            }
+          }
+
+          const lastMessageAt = last.created_at as string
+
+          console.log('[messages-digest] Conversation digest payload', {
+            userId,
+            partnerId: conv.partner_id,
+            unread_count: conv.unread_count,
+            lastMessageAt,
+            lastMessagePreview:
+              typeof previewText === 'string'
+                ? previewText.slice(0, 120)
+                : typeof previewText,
+            lastConversationMessageId: last?.id,
+            lastConversationMessageCreatedAt: last?.created_at,
+          })
+
+          return {
+            partnerName: conv.partner_name,
+            partnerAvatarUrl: conv.partner_avatar_url ?? null,
+            lastMessagePreview: previewText,
+            unreadCount: conv.unread_count,
+            lastMessageAt,
+          }
         })
-
-        return {
-          partnerName: conv.partner_name,
-          partnerAvatarUrl: conv.partner_avatar_url ?? null,
-          lastMessagePreview,
-          unreadCount: conv.unread_count,
-          lastMessageAt,
-        }
-      })
 
         console.log('[messages-digest] Sending digest email', {
           userId,
