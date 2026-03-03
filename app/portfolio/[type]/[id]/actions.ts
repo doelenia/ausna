@@ -796,6 +796,24 @@ export async function updatePortfolio(
             // Log error but don't fail portfolio update
             console.error('Failed to trigger project description processing:', error)
           })
+        } else if (portfolio.type === 'activities') {
+          const activityProps = (updatedMetadata?.properties as { external?: boolean; external_link?: string } | undefined) || {}
+          const externalLink =
+            activityProps.external === true ? activityProps.external_link ?? undefined : undefined
+          fetch(`${baseUrl}/api/index-activity-description`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              portfolioId,
+              userId: user.id,
+              description: normalizedDescription,
+              externalLink,
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger activity description processing:', error)
+          })
         }
       } catch (error) {
         // Don't fail portfolio update if property processing trigger fails
@@ -1248,6 +1266,11 @@ export async function respondToActivityJoinRequest(
       receiver_id: request.applicant_user_id,
       text,
     })
+    await supabase
+      .from('conversation_completions')
+      .delete()
+      .eq('user_id', request.applicant_user_id)
+      .eq('partner_id', user.id)
 
     revalidatePath(`/portfolio/activities/${activityId}`)
     revalidatePath(`/portfolio/activities/${activityId}/members`)
@@ -1334,6 +1357,11 @@ export async function applyToActivityCallToJoin(
         receiver_id: receiverId,
         text,
       })
+      await supabase
+        .from('conversation_completions')
+        .delete()
+        .eq('user_id', receiverId)
+        .eq('partner_id', user.id)
     }
 
     const basic = metadata?.basic || {}
@@ -1463,6 +1491,13 @@ export async function applyToActivityCallToJoin(
       portfolio.user_id,
       `joined ${activityName} (activity) as ${memberRoleLabel}`
     )
+
+    try {
+      const { addPortfolioTopicsToUserInterests } = await import('@/lib/indexing/interest-tracking')
+      await addPortfolioTopicsToUserInterests(portfolioId, user.id)
+    } catch (interestError) {
+      console.error('Failed to add portfolio topics to user interests:', interestError)
+    }
 
     revalidatePath(`/portfolio/activities/${portfolioId}`)
     revalidatePath(`/portfolio/activities/${portfolioId}/members`)
@@ -1615,6 +1650,13 @@ export async function approveActivityJoinRequest(
       text: `approved your request to join ${activityName} (activity) as ${memberRoleLabel}`,
     })
 
+    try {
+      const { addPortfolioTopicsToUserInterests } = await import('@/lib/indexing/interest-tracking')
+      await addPortfolioTopicsToUserInterests(activityId, applicantId)
+    } catch (interestError) {
+      console.error('Failed to add portfolio topics to user interests:', interestError)
+    }
+
     revalidatePath(`/portfolio/activities/${activityId}`)
     revalidatePath(`/portfolio/activities/${activityId}/members`)
 
@@ -1706,6 +1748,11 @@ export async function rejectActivityJoinRequest(
       receiver_id: request.applicant_user_id,
       text,
     })
+    await supabase
+      .from('conversation_completions')
+      .delete()
+      .eq('user_id', request.applicant_user_id)
+      .eq('partner_id', user.id)
 
     revalidatePath(`/portfolio/activities/${activityId}`)
     revalidatePath(`/portfolio/activities/${activityId}/members`)
@@ -1787,6 +1834,11 @@ export async function applyToCommunityJoin(
       receiver_id: portfolio.user_id,
       text: `applied to join ${communityName} (community). Review: ${requestsUrl}`,
     })
+    await supabase
+      .from('conversation_completions')
+      .delete()
+      .eq('user_id', portfolio.user_id)
+      .eq('partner_id', user.id)
 
     return { success: true }
   } catch (e: any) {

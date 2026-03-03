@@ -119,7 +119,7 @@ export async function storeAtomicKnowledge(
     assignedProjects?: string[]
     topics?: string[] // Single array of topic IDs (same for all knowledge items from this source)
     sourceInfo?: {
-      source_type: 'note' | 'human_description' | 'project_description' | 'project_property'
+      source_type: 'note' | 'human_description' | 'project_description' | 'project_property' | 'activity_description'
       source_id: string
       property_name?: 'goals' | 'timelines' | 'asks'
     } | null
@@ -168,13 +168,17 @@ export async function createOrUpdateTopic(
 ): Promise<string> {
   const supabase = createServiceClient()
 
-  // Generate embedding for description
-  const descriptionVector = await generateEmbedding(description)
+  // Generate embeddings for both name and description so we can use name-based similarity
+  const [nameVector, descriptionVector] = await Promise.all([
+    generateEmbedding(name),
+    generateEmbedding(description),
+  ])
 
   // Use RPC function to create or update topic
   const { data, error } = await supabase.rpc('create_or_update_topic', {
     p_name: name,
     p_description: description,
+    p_name_vector: nameVector,
     p_description_vector: descriptionVector,
     p_note_id: noteId || null,
   })

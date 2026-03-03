@@ -1,0 +1,13 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/daily-activity-match",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/messages-digest",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
+

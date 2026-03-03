@@ -83,7 +83,7 @@ CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The JSO
 export async function extractFromPropertyText(
   propertyText: string,
   context: {
-    propertyType: 'human_description' | 'project_description' | 'project_property'
+    propertyType: 'human_description' | 'project_description' | 'project_property' | 'activity_description'
     propertyName?: 'goals' | 'timelines' | 'asks'
     projectDescription?: string
     humanDescription?: string
@@ -91,6 +91,9 @@ export async function extractFromPropertyText(
     humanName?: string
     projectGoals?: string
     projectAsks?: string
+    /** When set (e.g. for external activity), include in prompt so model can use web search for the URL */
+    externalLink?: string
+    activityName?: string
   }
 ): Promise<ExtractionResult> {
   try {
@@ -123,6 +126,13 @@ export async function extractFromPropertyText(
       if (context.humanName) {
         contextParts.push(`Person: ${context.humanName}`)
       }
+    } else if (context.propertyType === 'activity_description') {
+      if (context.activityName) {
+        contextParts.push(`Activity: ${context.activityName}`)
+      }
+      if (context.externalLink) {
+        contextParts.push(`External event link (use web search to enrich): ${context.externalLink}`)
+      }
     }
 
     const contextString = contextParts.length > 0 ? `\n\n[Context - For Reference Only]:\n${contextParts.join('\n')}` : ''
@@ -137,6 +147,9 @@ export async function extractFromPropertyText(
       shouldInferAsks = true
     } else if (context.propertyType === 'project_description') {
       propertyLabel = 'Project Portfolio Description'
+    } else if (context.propertyType === 'activity_description') {
+      propertyLabel = 'Activity Description'
+      shouldInferAsks = true
     } else if (context.propertyType === 'project_property') {
       if (context.propertyName === 'goals') {
         propertyLabel = 'Project Goals'
@@ -187,7 +200,7 @@ CRITICAL: You MUST respond with ONLY a valid JSON object, no other text. The JSO
         },
         {
           role: 'user',
-          content: `Extract information from the following ${propertyLabel}. ${isEmpty && shouldInferAsks ? 'NOTE: The property is empty. Use the context provided to infer what the user might want or need.' : 'Remember: ONLY extract from the ' + propertyLabel + ' text below, NOT from the context.'} Respond with ONLY a valid JSON object.${contextString}\n\n[TARGET PROPERTY - ${propertyLabel}]:\n${isEmpty ? '(empty - use context to infer)' : propertyText}`,
+          content: `Extract information from the following ${propertyLabel}. ${context.externalLink ? `Use web search to fetch and use content from the external link: ${context.externalLink}. Extract atomic knowledge, topics, and asks from both the description and the external page. ` : ''}${isEmpty && shouldInferAsks ? 'NOTE: The property is empty. Use the context provided to infer what the user might want or need.' : 'Remember: ONLY extract from the ' + propertyLabel + ' text below, NOT from the context.'} Respond with ONLY a valid JSON object.${contextString}\n\n[TARGET PROPERTY - ${propertyLabel}]:\n${isEmpty ? '(empty - use context to infer)' : propertyText}`,
         },
       ],
       max_completion_tokens: 2000,
