@@ -82,26 +82,47 @@ export async function GET(request: NextRequest) {
 
       const { data: recentUnreadMessages, error: recentUnreadError } = await supabase
         .from('messages')
-        .select('sender_id, text, created_at')
-          .eq('receiver_id', userId)
-          .is('read_at', null)
-          .gte('created_at', tenMinutesAgoIso)
+        .select('id, sender_id, text, created_at')
+        .eq('receiver_id', userId)
+        .is('read_at', null)
+        .gte('created_at', tenMinutesAgoIso)
 
-        if (recentUnreadError) {
-          console.error('[messages-digest] Failed to load recent unread messages', {
-            userId,
-            error: recentUnreadError.message,
-          })
-          errors.push({
-            userId,
-            error: recentUnreadError.message || 'Failed to load recent unread messages',
-          })
-          continue
-        }
+      if (recentUnreadError) {
+        console.error('[messages-digest] Failed to load recent unread messages', {
+          userId,
+          error: recentUnreadError.message,
+        })
+        errors.push({
+          userId,
+          error: recentUnreadError.message || 'Failed to load recent unread messages',
+        })
+        continue
+      }
 
-        if (!recentUnreadMessages || recentUnreadMessages.length === 0) {
-          continue
-        }
+      if (!recentUnreadMessages || recentUnreadMessages.length === 0) {
+        console.log('[messages-digest] No recent unread messages for user', {
+          userId,
+        })
+        continue
+      }
+
+      console.log('[messages-digest] Recent unread messages summary', {
+        userId,
+        count: recentUnreadMessages.length,
+        sample: (recentUnreadMessages as any[])
+          .slice(0, 5)
+          .map((m) => ({
+            id: m.id,
+            sender_id: m.sender_id,
+            created_at: m.created_at,
+            text_preview:
+              typeof m.text === 'string'
+                ? m.text.slice(0, 80)
+                : m.text === null
+                ? null
+                : typeof m.text,
+          })),
+      })
 
       const partnerIdsWithRecentUnread = new Set(
         recentUnreadMessages.map((m: any) => m.sender_id as string)
@@ -109,7 +130,7 @@ export async function GET(request: NextRequest) {
 
       const latestUnreadByPartner = new Map<
         string,
-        { text: string; created_at: string }
+        { messageId: string; text: string; created_at: string }
       >()
 
       for (const msg of recentUnreadMessages as any[]) {
@@ -122,11 +143,27 @@ export async function GET(request: NextRequest) {
           new Date(createdAt).getTime() > new Date(existing.created_at).getTime()
         ) {
           latestUnreadByPartner.set(senderId, {
+            messageId: String(msg.id),
             text: (msg.text as string) || '',
             created_at: createdAt,
           })
         }
       }
+
+      console.log('[messages-digest] Latest unread per partner', {
+        userId,
+        partners: Array.from(latestUnreadByPartner.entries()).map(
+          ([partnerId, info]) => ({
+            partnerId,
+            messageId: info.messageId,
+            created_at: info.created_at,
+            text_preview:
+              typeof info.text === 'string'
+                ? info.text.slice(0, 80)
+                : typeof info.text,
+          })
+        ),
+      })
 
         let conversations
         try {
@@ -178,16 +215,35 @@ export async function GET(request: NextRequest) {
 
       const conversationsForEmail = unreadConversations.map((conv) => {
         const latestUnread = latestUnreadByPartner.get(conv.partner_id)
+        const previewSource = latestUnread ? 'latest_unread' : 'last_message'
+
+        const lastMessagePreview = (latestUnread?.text ||
+          conv.last_message.text ||
+          '') as string
+        const lastMessageAt =
+          (latestUnread?.created_at as string | undefined) ??
+          (conv.last_message.created_at as string)
+
+        console.log('[messages-digest] Conversation digest payload', {
+          userId,
+          partnerId: conv.partner_id,
+          previewSource,
+          unread_count: conv.unread_count,
+          lastMessageAt,
+          lastMessagePreview:
+            typeof lastMessagePreview === 'string'
+              ? lastMessagePreview.slice(0, 120)
+              : typeof lastMessagePreview,
+          lastConversationMessageId: conv.last_message?.id,
+          lastConversationMessageCreatedAt: conv.last_message?.created_at,
+        })
 
         return {
           partnerName: conv.partner_name,
           partnerAvatarUrl: conv.partner_avatar_url ?? null,
-          // Prefer the newest unread message from partner; fall back to last_message
-          lastMessagePreview: (latestUnread?.text || conv.last_message.text || '') as string,
+          lastMessagePreview,
           unreadCount: conv.unread_count,
-          lastMessageAt:
-            (latestUnread?.created_at as string | undefined) ??
-            (conv.last_message.created_at as string),
+          lastMessageAt,
         }
       })
 
