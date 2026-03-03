@@ -3,6 +3,10 @@ import { getHumanPortfolio } from '@/lib/portfolio/human'
 
 export type MessagesTab = 'active' | 'invitations'
 
+type SupabaseLike = {
+  from: (table: string) => any
+}
+
 export interface ConversationSummary {
   partner_id: string
   last_message: any
@@ -17,9 +21,11 @@ export interface ConversationSummary {
   partner_avatar_url?: string | null
 }
 
-export async function getConversationsForUser(userId: string, tab: MessagesTab) {
-  const supabase = await createClient()
-
+export async function getConversationsForUserWithClient(
+  supabase: SupabaseLike,
+  userId: string,
+  tab: MessagesTab
+) {
   const { data: messages, error } = await supabase
     .from('messages')
     .select('*')
@@ -36,7 +42,7 @@ export async function getConversationsForUser(userId: string, tab: MessagesTab) 
     .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
 
   const friendIds = new Set<string>()
-  friendships?.forEach((friendship) => {
+  friendships?.forEach((friendship: any) => {
     if (friendship.status === 'accepted') {
       if (friendship.user_id === userId) {
         friendIds.add(friendship.friend_id)
@@ -52,13 +58,13 @@ export async function getConversationsForUser(userId: string, tab: MessagesTab) 
     .eq('user_id', userId)
 
   const myCompletionMap = new Map<string, string>()
-  myCompletions?.forEach((completion) => {
+  myCompletions?.forEach((completion: any) => {
     myCompletionMap.set(completion.partner_id, completion.completed_at)
   })
 
   const partnerIds = Array.from(
     new Set(
-      (messages || []).map((msg) =>
+      (messages || []).map((msg: any) =>
         msg.sender_id === userId ? msg.receiver_id : msg.sender_id
       )
     )
@@ -73,7 +79,7 @@ export async function getConversationsForUser(userId: string, tab: MessagesTab) 
       .in('user_id', partnerIds)
       .eq('partner_id', userId)
 
-    partnerCompletions?.forEach((completion) => {
+    partnerCompletions?.forEach((completion: any) => {
       partnerCompletionMap.set(completion.user_id, completion.completed_at)
     })
   }
@@ -250,5 +256,10 @@ export async function getConversationsForUser(userId: string, tab: MessagesTab) 
   )
 
   return conversationsWithNames as ConversationSummary[]
+}
+
+export async function getConversationsForUser(userId: string, tab: MessagesTab) {
+  const supabase = await createClient()
+  return await getConversationsForUserWithClient(supabase as any, userId, tab)
 }
 

@@ -43,7 +43,7 @@ export function renderMessagesDigestEmail(input: {
 
       const unreadBadge =
         conv.unreadCount > 0
-          ? `<span style="display:inline-block; min-width:20px; padding:2px 8px; border-radius:999px; background:#111827; color:#ffffff; font-size:11px; line-height:1.4; text-align:center;">
+          ? `<span style="display:inline-block; min-width:20px; padding:2px 8px; border-radius:999px; background:#ef4444; color:#ffffff; font-size:11px; line-height:1.4; text-align:center;">
               ${conv.unreadCount > 9 ? '9+' : String(conv.unreadCount)}
             </span>`
           : ''
@@ -66,11 +66,11 @@ export function renderMessagesDigestEmail(input: {
           href="${input.messagesUrl}"
           style="text-decoration:none; color:inherit;"
         >
-          <div style="display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#f9fafb; margin-bottom:8px;">
+          <div style="display:flex; align-items:flex-start; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#f9fafb; margin-bottom:8px;">
             <div style="flex-shrink:0;">
               ${avatar}
             </div>
-            <div style="flex:1; min-width:0;">
+            <div style="flex:1; min-width:0; margin-left:12px;">
               <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px;">
                 <div style="font-size:14px; line-height:1.4; font-weight:600; color:#111827; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
                   ${escapeHtml(conv.partnerName || 'Conversation')}
@@ -108,7 +108,7 @@ export function renderMessagesDigestEmail(input: {
         </div>
         <a
           href="${input.messagesUrl}"
-          style="display:inline-block; background:#111827; color:#ffffff; text-decoration:none; border-radius: 999px; padding: 10px 18px; font-size: 14px; line-height: 1; font-weight: 500;"
+          style="display:inline-block; background:#f3f4f6; color:#4b5563; text-decoration:none; border-radius: 10px; padding: 10px 16px; font-size: 13px; line-height: 1; font-weight: 500; border:1px solid #e5e7eb;"
         >
           ${escapeHtml(buttonText)}
         </a>

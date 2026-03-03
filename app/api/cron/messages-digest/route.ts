@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getSiteUrl } from '@/lib/email/resend'
-import { getConversationsForUser } from '@/lib/messages/conversations'
+import { getConversationsForUserWithClient } from '@/lib/messages/conversations'
 import { sendMessagesDigestEmail } from '@/lib/email/messagesDigest'
 
 export const dynamic = 'force-dynamic'
@@ -26,8 +26,9 @@ export async function GET(request: NextRequest) {
   let scanned = 0
   let withUnread = 0
   let emailsSent = 0
-  let skippedByCooldown = 0
   const errors: Array<{ userId?: string; error: string }> = []
+
+  const tenMinutesAgoIso = new Date(Date.now() - 10 * 60 * 1000).toISOString()
 
   for (let offset = 0; ; offset += pageSize) {
     const { data: humans, error } = await supabase
@@ -51,28 +52,43 @@ export async function GET(request: NextRequest) {
 
       if (messageDigest.unsubscribed === true) continue
 
-      const lastSentAtIso = messageDigest.last_sent_at as string | undefined
-      if (lastSentAtIso) {
-        const lastSent = new Date(lastSentAtIso)
-        if (!Number.isNaN(lastSent.getTime())) {
-          const diffMs = Date.now() - lastSent.getTime()
-          if (diffMs < 10 * 60 * 1000) {
-            skippedByCooldown += 1
-            continue
-          }
-        }
+      const { data: recentUnreadMessages, error: recentUnreadError } = await supabase
+        .from('messages')
+        .select('sender_id')
+        .eq('receiver_id', userId)
+        .is('read_at', null)
+        .gte('created_at', tenMinutesAgoIso)
+
+      if (recentUnreadError) {
+        errors.push({
+          userId,
+          error: recentUnreadError.message || 'Failed to load recent unread messages',
+        })
+        continue
       }
+
+      if (!recentUnreadMessages || recentUnreadMessages.length === 0) {
+        continue
+      }
+
+      const partnerIdsWithRecentUnread = new Set(
+        recentUnreadMessages.map((m: any) => m.sender_id as string)
+      )
 
       let conversations
       try {
-        conversations = await getConversationsForUser(userId, 'active')
+        conversations = await getConversationsForUserWithClient(
+          supabase as any,
+          userId,
+          'active'
+        )
       } catch (e: any) {
         errors.push({ userId, error: e?.message || 'Failed to load conversations' })
         continue
       }
 
       const unreadConversations = conversations.filter(
-        (conv) => conv.unread_count > 0
+        (conv) => conv.unread_count > 0 && partnerIdsWithRecentUnread.has(conv.partner_id)
       )
 
       if (unreadConversations.length === 0) {
@@ -119,6 +135,30 @@ export async function GET(request: NextRequest) {
 
       emailsSent += 1
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': 'e7d925',
+        },
+        body: JSON.stringify({
+          sessionId: 'e7d925',
+          runId: 'post-send',
+          hypothesisId: 'L1',
+          location: 'app/api/cron/messages-digest/route.ts:139',
+          message: 'Digest email sent successfully; preparing to update message_digest',
+          data: {
+            userId,
+            portfolioId: row.id,
+            lastSentAtIso: messageDigest.last_sent_at as string | undefined,
+            hadMessageDigest: !!messageDigest,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {})
+      // #endregion agent log
+
       const nextMetadata = {
         ...(meta || {}),
         properties: {
@@ -136,6 +176,29 @@ export async function GET(request: NextRequest) {
         .eq('id', row.id)
 
       if (updateError) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'e7d925',
+          },
+          body: JSON.stringify({
+            sessionId: 'e7d925',
+            runId: 'post-send',
+            hypothesisId: 'L2',
+            location: 'app/api/cron/messages-digest/route.ts:152',
+            message: 'Failed to update message_digest metadata after send',
+            data: {
+              userId,
+              portfolioId: row.id,
+              errorMessage: updateError.message ?? null,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {})
+        // #endregion agent log
+
         errors.push({
           userId,
           error: updateError.message || 'Failed to update message_digest metadata',
@@ -149,7 +212,6 @@ export async function GET(request: NextRequest) {
     scanned_users: scanned,
     users_with_unread_active: withUnread,
     emails_sent: emailsSent,
-    skipped_by_cooldown: skippedByCooldown,
     error_count: errors.length,
     errors: errors.slice(0, 50),
   })
