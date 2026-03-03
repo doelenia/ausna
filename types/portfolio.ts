@@ -227,7 +227,7 @@ export interface ProjectPortfolioMetadata extends PortfolioMetadata {
   technologies?: string[]
   github_url?: string
   live_url?: string
-  status?: 'idea' | 'in-progress' | 'completed' | 'archived'
+  status?: 'idea' | 'live' | 'in-progress' | 'completed' | 'archived'
   collaborators?: string[]
   start_date?: string
   end_date?: string
@@ -266,7 +266,7 @@ export interface ActivityPortfolioMetadata extends PortfolioMetadata {
   technologies?: string[]
   github_url?: string
   live_url?: string
-  status?: 'idea' | 'in-progress' | 'completed' | 'archived'
+  status?: 'idea' | 'live' | 'in-progress' | 'completed' | 'archived'
   collaborators?: string[]
   start_date?: string
   end_date?: string

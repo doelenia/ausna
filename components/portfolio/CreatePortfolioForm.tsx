@@ -338,7 +338,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
             </UIText>
             <div className="flex flex-wrap gap-2">
               {[
-                { key: 'in-progress', label: 'Live' },
+                { key: 'live', label: 'Live' },
                 { key: 'archived', label: 'Archived' },
               ].map((option) => {
                 const selected = projectStatus === option.key

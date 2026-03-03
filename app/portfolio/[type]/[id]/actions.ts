@@ -455,10 +455,13 @@ export async function updatePortfolio(
     // For project portfolios, keep status/visibility but do not manage activity datetime/location
     if (portfolio.type === 'projects') {
       if (projectStatusRaw !== null) {
+        // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
         const normalizedStatus =
-          projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
-            ? projectStatusRaw
-            : undefined
+          projectStatusRaw === 'archived'
+            ? 'archived'
+            : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
+              ? 'live'
+              : undefined
         if (normalizedStatus) {
           updatedMetadata.status = normalizedStatus
         } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
@@ -566,10 +569,13 @@ export async function updatePortfolio(
       }
 
       if (projectStatusRaw !== null) {
+        // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
         const normalizedStatus =
-          projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
-            ? projectStatusRaw
-            : undefined
+          projectStatusRaw === 'archived'
+            ? 'archived'
+            : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
+              ? 'live'
+              : undefined
         if (normalizedStatus) {
           updatedMetadata.status = normalizedStatus
         } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
