@@ -25,31 +25,6 @@ export function isCallToJoinWindowOpen(
   activityDateTime: ActivityDateTimeValue | undefined | null,
   status: string | undefined | null
 ): boolean {
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': 'ddc618',
-    },
-    body: JSON.stringify({
-      sessionId: 'ddc618',
-      runId: 'initial',
-      hypothesisId: 'H1',
-      location: 'lib/callToJoin.ts:isCallToJoinWindowOpen:entry',
-      message: 'isCallToJoinWindowOpen entry',
-      data: {
-        visibility,
-        callToJoinEnabled: callToJoin?.enabled,
-        callToJoinJoinBy: callToJoin?.join_by,
-        hasActivityStart: !!activityDateTime?.start,
-        status,
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-
   if (!isCallToJoinAvailable(visibility) || !callToJoin) {
     return false
   }
@@ -59,38 +34,11 @@ export function isCallToJoinWindowOpen(
     return false
   }
 
-  if (status === 'archived') {
-    return false
-  }
-
   const hasActivityStart = !!activityDateTime?.start
 
   // When there is no scheduled activity datetime, fall back to manual live/archive status.
   if (!hasActivityStart) {
     const isManuallyLive = status === 'live'
-
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': 'ddc618',
-      },
-      body: JSON.stringify({
-        sessionId: 'ddc618',
-        runId: 'initial',
-        hypothesisId: 'H2',
-        location: 'lib/callToJoin.ts:isCallToJoinWindowOpen:no-activity',
-        message: 'No activity start branch',
-        data: {
-          status,
-          isManuallyLive,
-          joinBy: callToJoin.join_by,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     // No join_by configured: joinable while manually marked live.
     if (!callToJoin.join_by) {
@@ -103,28 +51,6 @@ export function isCallToJoinWindowOpen(
     }
 
     const joinByDate = new Date(callToJoin.join_by)
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Debug-Session-Id': 'ddc618',
-      },
-      body: JSON.stringify({
-        sessionId: 'ddc618',
-        runId: 'initial',
-        hypothesisId: 'H3',
-        location: 'lib/callToJoin.ts:isCallToJoinWindowOpen:join-by-no-activity',
-        message: 'join_by evaluation with no activity start',
-        data: {
-          joinByRaw: callToJoin.join_by,
-          joinByTime: Number.isNaN(joinByDate.getTime()) ? null : joinByDate.getTime(),
-          nowTime: now.getTime(),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     if (Number.isNaN(joinByDate.getTime())) {
       return false
@@ -146,7 +72,8 @@ export function isCallToJoinWindowOpen(
     }
   }
 
-  const live = isActivityLive(activityDateTime, status || null)
+  // When a datetime exists, ignore manual status and rely purely on datetime
+  const live = isActivityLive(activityDateTime, null)
   const baseOpen = isBeforeStart || live
 
   if (!baseOpen) {
