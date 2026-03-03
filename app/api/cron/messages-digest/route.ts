@@ -92,35 +92,15 @@ export async function GET(request: NextRequest) {
           continue
         }
 
+        const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000
+
         const unreadConversations = conversations.filter((conv) => conv.unread_count > 0)
 
         if (unreadConversations.length === 0) {
           continue
         }
 
-        withUnread += 1
-
-        let authEmail: string | null = null
-        try {
-          const { data: userRes } = await supabase.auth.admin.getUserById(userId)
-          authEmail = (userRes as any)?.user?.email ?? null
-        } catch (e: any) {
-          console.error('[messages-digest] Failed to load auth user for email', {
-            userId,
-            error: e?.message,
-          })
-          errors.push({
-            userId,
-            error: e?.message || 'Failed to load auth user for email',
-          })
-        }
-
-        if (!authEmail) {
-          continue
-        }
-
-        const siteUrl = getSiteUrl()
-        const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
+        let hasRecentUnread = false
 
         const conversationsForEmail = unreadConversations.map((conv) => {
           const last = conv.last_message as any
@@ -164,6 +144,11 @@ export async function GET(request: NextRequest) {
 
           const lastMessageAt = last.created_at as string
 
+          const lastMessageAtMs = Date.parse(lastMessageAt)
+          if (!Number.isNaN(lastMessageAtMs) && lastMessageAtMs >= tenMinutesAgoMs) {
+            hasRecentUnread = true
+          }
+
           console.log('[messages-digest] Conversation digest payload', {
             userId,
             partnerId: conv.partner_id,
@@ -185,6 +170,37 @@ export async function GET(request: NextRequest) {
             lastMessageAt,
           }
         })
+
+        if (!hasRecentUnread) {
+          console.log('[messages-digest] Skipping user; no unread messages in last 10 minutes', {
+            userId,
+          })
+          continue
+        }
+
+        withUnread += 1
+
+        let authEmail: string | null = null
+        try {
+          const { data: userRes } = await supabase.auth.admin.getUserById(userId)
+          authEmail = (userRes as any)?.user?.email ?? null
+        } catch (e: any) {
+          console.error('[messages-digest] Failed to load auth user for email', {
+            userId,
+            error: e?.message,
+          })
+          errors.push({
+            userId,
+            error: e?.message || 'Failed to load auth user for email',
+          })
+        }
+
+        if (!authEmail) {
+          continue
+        }
+
+        const siteUrl = getSiteUrl()
+        const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
 
         console.log('[messages-digest] Sending digest email', {
           userId,
