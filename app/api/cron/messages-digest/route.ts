@@ -80,9 +80,9 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        const { data: recentUnreadMessages, error: recentUnreadError } = await supabase
-          .from('messages')
-          .select('sender_id')
+      const { data: recentUnreadMessages, error: recentUnreadError } = await supabase
+        .from('messages')
+        .select('sender_id, text, created_at')
           .eq('receiver_id', userId)
           .is('read_at', null)
           .gte('created_at', tenMinutesAgoIso)
@@ -103,9 +103,30 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        const partnerIdsWithRecentUnread = new Set(
-          recentUnreadMessages.map((m: any) => m.sender_id as string)
-        )
+      const partnerIdsWithRecentUnread = new Set(
+        recentUnreadMessages.map((m: any) => m.sender_id as string)
+      )
+
+      const latestUnreadByPartner = new Map<
+        string,
+        { text: string; created_at: string }
+      >()
+
+      for (const msg of recentUnreadMessages as any[]) {
+        const senderId = msg.sender_id as string
+        const createdAt = msg.created_at as string
+        const existing = latestUnreadByPartner.get(senderId)
+
+        if (
+          !existing ||
+          new Date(createdAt).getTime() > new Date(existing.created_at).getTime()
+        ) {
+          latestUnreadByPartner.set(senderId, {
+            text: (msg.text as string) || '',
+            created_at: createdAt,
+          })
+        }
+      }
 
         let conversations
         try {
@@ -155,13 +176,20 @@ export async function GET(request: NextRequest) {
         const siteUrl = getSiteUrl()
         const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
 
-        const conversationsForEmail = unreadConversations.map((conv) => ({
+      const conversationsForEmail = unreadConversations.map((conv) => {
+        const latestUnread = latestUnreadByPartner.get(conv.partner_id)
+
+        return {
           partnerName: conv.partner_name,
           partnerAvatarUrl: conv.partner_avatar_url ?? null,
-          lastMessagePreview: conv.last_message.text || '',
+          // Prefer the newest unread message from partner; fall back to last_message
+          lastMessagePreview: (latestUnread?.text || conv.last_message.text || '') as string,
           unreadCount: conv.unread_count,
-          lastMessageAt: conv.last_message.created_at,
-        }))
+          lastMessageAt:
+            (latestUnread?.created_at as string | undefined) ??
+            (conv.last_message.created_at as string),
+        }
+      })
 
         console.log('[messages-digest] Sending digest email', {
           userId,
