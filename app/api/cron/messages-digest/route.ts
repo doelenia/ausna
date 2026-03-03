@@ -100,27 +100,7 @@ export async function GET(request: NextRequest) {
 
         withUnread += 1
 
-        let authEmail: string | null = null
-        try {
-          const { data: userRes } = await supabase.auth.admin.getUserById(userId)
-          authEmail = (userRes as any)?.user?.email ?? null
-        } catch (e: any) {
-          console.error('[messages-digest] Failed to load auth user for email', {
-            userId,
-            error: e?.message,
-          })
-          errors.push({
-            userId,
-            error: e?.message || 'Failed to load auth user for email',
-          })
-        }
-
-        if (!authEmail) {
-          continue
-        }
-
-        const siteUrl = getSiteUrl()
-        const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
+        let latestMessageAtIso: string | null = null
 
         const conversationsForEmail = unreadConversations.map((conv) => {
           const last = conv.last_message as any
@@ -164,6 +144,10 @@ export async function GET(request: NextRequest) {
 
           const lastMessageAt = last.created_at as string
 
+          if (!latestMessageAtIso || lastMessageAt > latestMessageAtIso) {
+            latestMessageAtIso = lastMessageAt
+          }
+
           console.log('[messages-digest] Conversation digest payload', {
             userId,
             partnerId: conv.partner_id,
@@ -185,6 +169,58 @@ export async function GET(request: NextRequest) {
             lastMessageAt,
           }
         })
+
+        const lastSentAtIso = messageDigest.last_sent_at as string | undefined
+
+        if (lastSentAtIso && latestMessageAtIso) {
+          const lastSentAtMs = Date.parse(lastSentAtIso)
+          const latestMessageAtMs = Date.parse(latestMessageAtIso)
+
+          if (!Number.isNaN(lastSentAtMs) && !Number.isNaN(latestMessageAtMs)) {
+            // Skip if there have been no new messages since the last digest
+            if (latestMessageAtMs <= lastSentAtMs) {
+              console.log('[messages-digest] Skipping user; no new messages since last digest', {
+                userId,
+                lastSentAt: lastSentAtIso,
+                latestMessageAt: latestMessageAtIso,
+              })
+              continue
+            }
+
+            // Enforce a minimum 10-minute cooldown between digests
+            const minutesSinceLast = (Date.now() - lastSentAtMs) / 60000
+            if (minutesSinceLast < 10) {
+              console.log('[messages-digest] Skipping user; within 10-minute cooldown window', {
+                userId,
+                lastSentAt: lastSentAtIso,
+                minutesSinceLast: Number(minutesSinceLast.toFixed(2)),
+              })
+              continue
+            }
+          }
+        }
+
+        let authEmail: string | null = null
+        try {
+          const { data: userRes } = await supabase.auth.admin.getUserById(userId)
+          authEmail = (userRes as any)?.user?.email ?? null
+        } catch (e: any) {
+          console.error('[messages-digest] Failed to load auth user for email', {
+            userId,
+            error: e?.message,
+          })
+          errors.push({
+            userId,
+            error: e?.message || 'Failed to load auth user for email',
+          })
+        }
+
+        if (!authEmail) {
+          continue
+        }
+
+        const siteUrl = getSiteUrl()
+        const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
 
         console.log('[messages-digest] Sending digest email', {
           userId,
