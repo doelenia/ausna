@@ -374,17 +374,20 @@ export async function createPortfolio(
     // Normalize project/activity status
     if (type === 'projects' || type === 'activities') {
       if (projectStatusRaw) {
+        // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
         const normalizedStatus =
-          projectStatusRaw === 'in-progress' || projectStatusRaw === 'archived'
-            ? projectStatusRaw
-            : undefined
+          projectStatusRaw === 'archived'
+            ? 'archived'
+            : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
+              ? 'live'
+              : undefined
         if (normalizedStatus) {
           metadata.status = normalizedStatus
         }
       } else if (type === 'activities') {
         // Activities without datetime: default to live when no status set (create form has no Status field)
         if (metadata.status == null || metadata.status === '') {
-          metadata.status = 'in-progress'
+          metadata.status = 'live'
         }
       }
     }

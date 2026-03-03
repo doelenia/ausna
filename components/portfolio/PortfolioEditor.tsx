@@ -239,7 +239,7 @@ export function PortfolioEditor({
     initialLocation
   )
   const [projectStatus, setProjectStatus] = useState<string>(
-    metadata?.status || (!initialActivity ? 'in-progress' : '')
+    metadata?.status || (!initialActivity ? 'live' : '')
   )
   const initialCallToJoin: ActivityCallToJoinConfig | null =
     (metadata?.properties?.call_to_join as ActivityCallToJoinConfig | undefined) || null
@@ -862,7 +862,7 @@ export function PortfolioEditor({
                   </UIText>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { key: 'in-progress', label: 'Live' },
+                      { key: 'live', label: 'Live' },
                       { key: 'archived', label: 'Archived' },
                     ].map((option) => {
                       const selected = projectStatus === option.key

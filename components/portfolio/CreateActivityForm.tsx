@@ -46,7 +46,7 @@ export function CreateActivityForm() {
   const [visibility, setVisibility] = useState<'public' | 'private'>('public')
   const [activityValue, setActivityValue] = useState<ActivityDateTimeValue | null>(null)
   const [activityLocation, setActivityLocation] = useState<ActivityLocationValue | null>(null)
-  const [projectStatus, setProjectStatus] = useState<string>('in-progress')
+  const [projectStatus, setProjectStatus] = useState<string>('live')
   const [hostProjects, setHostProjects] = useState<HostProjectOption[]>([])
   const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
   const [hostProjectIds, setHostProjectIds] = useState<string[]>([])

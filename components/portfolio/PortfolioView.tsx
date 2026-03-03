@@ -855,7 +855,20 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 const hasActivity = !!activity && !!activity.start
                 const status = metadataAny?.status as string | undefined || null
 
-                if (!hasActivity) return null
+                // When there is no scheduled datetime, fall back to manual status
+                if (!hasActivity) {
+                  if (status === 'live') {
+                    return (
+                      <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        <UIText as="span" className="text-[11px] text-black leading-none">
+                          LIVE
+                        </UIText>
+                      </div>
+                    )
+                  }
+                  return null
+                }
 
                 const live = isActivityLive(activity, status)
                 if (live) {
@@ -1121,6 +1134,32 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
               const activityDateTime = (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null
               const joinWindowOpen = isCallToJoinWindowOpen(visibility, config, activityDateTime, projectStatus)
+              // #region agent log
+              fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Debug-Session-Id': 'ddc618',
+                },
+                body: JSON.stringify({
+                  sessionId: 'ddc618',
+                  runId: 'initial',
+                  hypothesisId: 'H4',
+                  location: 'components/portfolio/PortfolioView.tsx:CallToJoinCard',
+                  message: 'Call-to-join card state',
+                  data: {
+                    portfolioId: portfolio.id,
+                    visibility,
+                    status: projectStatus,
+                    joinWindowOpen,
+                    callToJoinEnabled: config.enabled,
+                    callToJoinJoinBy: config.join_by,
+                    hasActivityStart: !!activityDateTime?.start,
+                  },
+                  timestamp: Date.now(),
+                }),
+              }).catch(() => {});
+              // #endregion
               const joinByDate = config.join_by ? new Date(config.join_by) : null
 
               const canSeeOwnerManagerCard = (isOwner || isManager)
