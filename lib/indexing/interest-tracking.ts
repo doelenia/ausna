@@ -95,6 +95,90 @@ async function decayMemoryScores(userId: string): Promise<void> {
   }
 }
 
+const JOIN_INTEREST_WEIGHT = 0.1
+
+/** Parse source_info from DB: may be object or double-encoded JSON string. */
+function parseSourceInfo(raw: unknown): { source_type?: string; source_id?: string } | null {
+  if (raw == null) return null
+  let obj: unknown
+  if (typeof raw === 'string') {
+    try {
+      obj = JSON.parse(raw) as unknown
+      if (typeof obj === 'string') obj = JSON.parse(obj) as unknown
+    } catch {
+      return null
+    }
+  } else if (typeof raw === 'object') {
+    obj = raw
+  } else {
+    return null
+  }
+  if (obj && typeof obj === 'object' && 'source_type' in obj && 'source_id' in obj) {
+    return obj as { source_type: string; source_id: string }
+  }
+  return null
+}
+
+/**
+ * Get topic IDs associated with a portfolio (project or activity).
+ * Reads metadata.description_topics when set; otherwise derives from atomic_knowledge
+ * for source_type in ('project_description', 'activity_description', 'project_property').
+ * Parses source_info in JS to support double-encoded JSON storage.
+ */
+export async function getTopicIdsForPortfolio(portfolioId: string): Promise<string[]> {
+  const supabase = createServiceClient()
+
+  const { data: portfolio, error: portfolioError } = await supabase
+    .from('portfolios')
+    .select('metadata')
+    .eq('id', portfolioId)
+    .single()
+
+  if (portfolioError || !portfolio) {
+    return []
+  }
+
+  const metadata = (portfolio.metadata as Record<string, unknown>) || {}
+  const fromMeta = metadata.description_topics
+  if (Array.isArray(fromMeta) && fromMeta.length > 0) {
+    return fromMeta.filter((id): id is string => typeof id === 'string')
+  }
+
+  // Fallback: fetch atomic_knowledge with source_info and parse in JS (handles double-encoded JSON)
+  const { data: rows, error } = await supabase
+    .from('atomic_knowledge')
+    .select('topics, source_info')
+    .not('source_info', 'is', null)
+
+  if (error || !rows?.length) return []
+
+  const allowedTypes = new Set(['project_description', 'activity_description', 'project_property'])
+  const ids = new Set<string>()
+  for (const row of rows) {
+    const parsed = parseSourceInfo((row as { source_info?: unknown }).source_info)
+    const sourceType = parsed?.source_type
+    if (!parsed || parsed.source_id !== portfolioId || !sourceType || !allowedTypes.has(sourceType)) continue
+    const t = (row as { topics?: string[] }).topics
+    if (Array.isArray(t)) {
+      t.forEach((id) => typeof id === 'string' && ids.add(id))
+    }
+  }
+  return Array.from(ids)
+}
+
+/**
+ * Add a portfolio's topics to a user's interests with weight 0.1.
+ * Used when a user joins a project or activity.
+ */
+export async function addPortfolioTopicsToUserInterests(
+  portfolioId: string,
+  userId: string
+): Promise<void> {
+  const topicIds = await getTopicIdsForPortfolio(portfolioId)
+  if (topicIds.length === 0) return
+  await updateUserInterests(userId, topicIds, JOIN_INTEREST_WEIGHT)
+}
+
 /**
  * Process portfolio description for interests
  * - Extracts topics from portfolio description

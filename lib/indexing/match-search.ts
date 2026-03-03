@@ -219,21 +219,21 @@ export async function getUserNonAskVectors(
     )
 }
 
-type TopicSimilarity = { id: string; similarity: number; sourceSearcherTopicId?: string }
+export type TopicSimilarity = { id: string; similarity: number; sourceSearcherTopicId?: string }
 
-async function getExpandedTopicsWithSimilarity(
+export async function getExpandedTopicsWithSimilarity(
   assignedTopicIds: string[]
 ): Promise<TopicSimilarity[]> {
   if (!assignedTopicIds || assignedTopicIds.length === 0) return []
 
   const supabase = createServiceClient()
 
-  // Load assigned topics with their stored vectors
+  // Load assigned topics with their stored name vectors (we now use name-based similarity)
   const { data: topics, error } = await supabase
     .from('topics')
-    .select('id, description_vector')
+    .select('id, name_vector')
     .in('id', assignedTopicIds)
-    .not('description_vector', 'is', null)
+    .not('name_vector', 'is', null)
 
   if (error) {
     console.error('Error fetching assigned topics for expansion:', error)
@@ -243,7 +243,7 @@ async function getExpandedTopicsWithSimilarity(
   const vectors = (topics || [])
     .map((t: any) => ({
       id: t.id as string,
-      embedding: normalizeVector(t.description_vector),
+      embedding: normalizeVector(t.name_vector),
     }))
     .filter((t): t is { id: string; embedding: number[] } => Boolean(t.id) && Array.isArray(t.embedding))
 

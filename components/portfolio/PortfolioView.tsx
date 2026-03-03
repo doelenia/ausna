@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar, Card } from '@/components/ui'
-import { Apple, ChevronRight, BadgeCheck, Lock, Megaphone, Timer, History } from 'lucide-react'
+import { Apple, Balloon, ChevronRight, BadgeCheck, Lock, Megaphone, Timer, History } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -1687,7 +1687,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           {(isHumanPortfolio(portfolio) || isProjectPortfolio(portfolio)) && activities.length > 0 && (
             <div className="mt-4 mb-8 group">
               <div className="flex items-center gap-2 mb-4">
-                <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                <Balloon className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
                 <UIText>Activities</UIText>
               </div>
               <div className="relative">

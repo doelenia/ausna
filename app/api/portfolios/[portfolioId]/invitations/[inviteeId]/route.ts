@@ -344,29 +344,32 @@ export async function PUT(
         text: `accepted your invitation to join ${portfolioName} (${portfolio.type === 'projects' ? 'project' : 'community'})`,
       })
 
-      // Trigger background interest processing for joining portfolio (fire-and-forget)
-      try {
-        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-        
-        // Use fetch without await - fire and forget
-        fetch(`${baseUrl}/api/process-portfolio-interests`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            portfolioId,
-            userId: user.id,
-            isPersonalPortfolio: false, // Joining a portfolio is not personal
-            description: null, // Will be read from portfolio in the API route
-          }),
-        }).catch((error) => {
-          // Log error but don't fail invitation acceptance
-          console.error('Failed to trigger background interest processing:', error)
-        })
-      } catch (error) {
-        // Don't fail invitation acceptance if interest processing trigger fails
-        console.error('Error triggering background interest processing:', error)
+      // Add portfolio topics to joining user's interests (weight 0.1) for project/activity
+      if (portfolio.type === 'projects' || portfolio.type === 'activities') {
+        try {
+          const { addPortfolioTopicsToUserInterests } = await import('@/lib/indexing/interest-tracking')
+          await addPortfolioTopicsToUserInterests(portfolioId, user.id)
+        } catch (interestError) {
+          console.error('Failed to add portfolio topics to user interests:', interestError)
+        }
+      } else {
+        try {
+          const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+          fetch(`${baseUrl}/api/process-portfolio-interests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              portfolioId,
+              userId: user.id,
+              isPersonalPortfolio: false,
+              description: null,
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger background interest processing:', error)
+          })
+        } catch (error) {
+          console.error('Error triggering background interest processing:', error)
+        }
       }
 
     return NextResponse.json({ success: true })

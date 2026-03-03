@@ -1,3 +1,10 @@
+---
+name: ""
+overview: ""
+todos: []
+isProject: false
+---
+
 # Pseudo Portfolio Status Implementation Plan
 
 ## Overview
@@ -30,7 +37,7 @@ Add a `is_pseudo` status to portfolios that makes them hidden from customer-faci
 - Fetches all portfolios and filters in JavaScript
 - Returns portfolios matching search query
 
-2. **Admin Search** (`/app/admin/actions.ts` - `searchPortfolios()`):
+1. **Admin Search** (`/app/admin/actions.ts` - `searchPortfolios()`):
 
 - Requires admin authentication
 - Searches projects/community portfolios
@@ -218,24 +225,24 @@ GET /api/portfolios/search?q=query&mode=admin
 
 ### Database Tests
 
-- [ ] Verify `is_pseudo` column exists with default `false`
-- [ ] Verify index exists on `is_pseudo`
-- [ ] Verify RLS policy excludes pseudo portfolios for non-admins
-- [ ] Verify RLS policy includes pseudo portfolios for admins
+- Verify `is_pseudo` column exists with default `false`
+- Verify index exists on `is_pseudo`
+- Verify RLS policy excludes pseudo portfolios for non-admins
+- Verify RLS policy includes pseudo portfolios for admins
 
 ### API Tests
 
-- [ ] Customer search excludes pseudo portfolios
-- [ ] Admin search includes pseudo portfolios
-- [ ] Setting `is_pseudo = true` hides portfolio from customer search
-- [ ] Setting `is_pseudo = false` shows portfolio in customer search
+- Customer search excludes pseudo portfolios
+- Admin search includes pseudo portfolios
+- Setting `is_pseudo = true` hides portfolio from customer search
+- Setting `is_pseudo = false` shows portfolio in customer search
 
 ### Edge Cases
 
-- [ ] Unauthenticated users cannot see pseudo portfolios
-- [ ] Non-admin authenticated users cannot see pseudo portfolios
-- [ ] Admin users can see pseudo portfolios
-- [ ] Existing portfolios (is_pseudo = false) continue to work normally
+- Unauthenticated users cannot see pseudo portfolios
+- Non-admin authenticated users cannot see pseudo portfolios
+- Admin users can see pseudo portfolios
+- Existing portfolios (is_pseudo = false) continue to work normally
 
 ## Security Considerations
 
@@ -256,3 +263,4 @@ If issues arise:
 - The RLS approach is preferred over application-level filtering for security
 - Admin UI for managing pseudo status can be added in a follow-up PR
 - Future "mode" parameter can be added without breaking changes
+

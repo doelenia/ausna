@@ -3,8 +3,9 @@ export const dynamic = 'force-dynamic'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Content } from '@/components/ui'
-import { getExploreActivities } from './actions'
+import { getExploreActivities, getStoredDailyExploreMatch } from './actions'
 import { ExploreView } from '@/components/explore/ExploreView'
+import { checkAdmin } from '@/lib/auth/requireAdmin'
 
 export default async function ExplorePage() {
   const supabase = await createClient()
@@ -16,17 +17,37 @@ export default async function ExplorePage() {
     redirect('/login')
   }
 
-  const result = await getExploreActivities(user.id)
+  const [activitiesResult, dailyMatchResult, adminUser] = await Promise.all([
+    getExploreActivities(user.id),
+    getStoredDailyExploreMatch(user.id),
+    checkAdmin(),
+  ])
 
-  if (!result.success) {
+  if (!activitiesResult.success) {
     return (
       <div className="px-4 py-8">
         <Content className="text-gray-600">
-          {result.error ?? 'Failed to load activities. Please try again.'}
+          {activitiesResult.error ?? 'Failed to load activities. Please try again.'}
         </Content>
       </div>
     )
   }
 
-  return <ExploreView activities={result.activities ?? []} />
+  return (
+    <ExploreView
+      activities={activitiesResult.activities ?? []}
+      userId={user.id}
+      isAdmin={!!adminUser}
+      dailyMatch={
+        dailyMatchResult.success && dailyMatchResult.activities.length > 0
+          ? {
+              introText: dailyMatchResult.introText,
+              activities: dailyMatchResult.activities,
+              ranAt: dailyMatchResult.ranAt,
+              patternPath: dailyMatchResult.patternPath ?? null,
+            }
+          : undefined
+      }
+    />
+  )
 }

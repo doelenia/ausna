@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
-import { Gem, Home, MessageCircle, Plus, Search } from 'lucide-react'
+import { Gem, Home, MessageCircle, Plus, Search, Balloon } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
 type TopNavVariant = 'sidebar' | 'bottom'
@@ -375,7 +375,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         /* Desktop: vertical left sidebar, same order top to bottom; centered vertically; more space between buttons */
         <div className="flex flex-1 flex-col items-center justify-center gap-6 py-4 px-2">
           <IconButton icon={Home} href="/main" title="Home" aria-label="Home" />
-          <IconButton icon={Gem} href="/explore" title="Explore" aria-label="Explore" />
+          <IconButton icon={Balloon} href="/explore" title="Explore" aria-label="Explore" />
           <IconButton icon={Search} href="/search" title="Search" aria-label="Search" />
           {loading ? (
             <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full" />
@@ -411,7 +411,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         <div className="w-full px-4">
           <div className="flex justify-between items-center h-16 w-full">
             <IconButton icon={Home} href="/main" title="Home" aria-label="Home" />
-            <IconButton icon={Gem} href="/explore" title="Explore" aria-label="Explore" />
+            <IconButton icon={Balloon} href="/explore" title="Explore" aria-label="Explore" />
             {loading ? (
               <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full" />
             ) : user ? (

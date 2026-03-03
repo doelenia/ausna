@@ -127,7 +127,12 @@ export function CreateActivityForm() {
           inProgress: false,
         })
       }
-      if (data.location) {
+      if (data.locationStructured && Object.keys(data.locationStructured).length > 0) {
+        setActivityLocation({
+          ...data.locationStructured,
+          ...(data.location && { line1: data.location }),
+        })
+      } else if (data.location) {
         setActivityLocation({ line1: data.location })
       }
       setLinkVerified(true)
