@@ -116,10 +116,14 @@ export async function PUT(
       )
     }
 
-    // Only projects and communities can have members
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    // Only projects, activities, and communities can have members
+    if (
+      portfolio.type !== 'projects' &&
+      portfolio.type !== 'activities' &&
+      portfolio.type !== 'community'
+    ) {
       return NextResponse.json(
-        { error: 'Only projects and communities can have members' },
+        { error: 'Only projects, activities, and communities can have members' },
         { status: 400 }
       )
     }
@@ -216,9 +220,15 @@ export async function PUT(
         // Don't fail if invitation update fails, manager was already added
       }
 
-      // Get portfolio name for the acceptance message
+      // Get portfolio name and type label for the acceptance message
       const basic = metadata?.basic || {}
       const portfolioName = basic.name || 'this portfolio'
+      const portfolioTypeLabel =
+        portfolio.type === 'projects'
+          ? 'project'
+          : portfolio.type === 'activities'
+          ? 'activity'
+          : 'community'
 
       // Send acceptance message for manager invitation
       await supabase
@@ -226,7 +236,7 @@ export async function PUT(
         .insert({
           sender_id: user.id,
           receiver_id: invitation.inviter_id,
-          text: `accepted your invitation to become a manager of ${portfolioName} (${portfolio.type === 'projects' ? 'project' : 'community'})`,
+          text: `accepted your invitation to become a manager of ${portfolioName} (${portfolioTypeLabel})`,
         })
 
       // Trigger background interest processing for joining portfolio (fire-and-forget)
@@ -331,9 +341,15 @@ export async function PUT(
       // Don't fail if invitation update fails, member was already added
     }
 
-    // Get portfolio name for the acceptance message
+    // Get portfolio name and type label for the acceptance message
     const basic = metadata?.basic || {}
     const portfolioName = basic.name || 'this portfolio'
+    const portfolioTypeLabel =
+      portfolio.type === 'projects'
+        ? 'project'
+        : portfolio.type === 'activities'
+        ? 'activity'
+        : 'community'
 
     // Send acceptance message
     await supabase
@@ -341,7 +357,7 @@ export async function PUT(
       .insert({
         sender_id: user.id,
         receiver_id: invitation.inviter_id,
-        text: `accepted your invitation to join ${portfolioName} (${portfolio.type === 'projects' ? 'project' : 'community'})`,
+        text: `accepted your invitation to join ${portfolioName} (${portfolioTypeLabel})`,
       })
 
       // Add portfolio topics to joining user's interests (weight 0.1) for project/activity
