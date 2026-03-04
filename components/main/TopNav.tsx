@@ -7,7 +7,7 @@ import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
-import { Gem, Home, MessageCircle, Plus, Search, Balloon } from 'lucide-react'
+import { Home, MessageCircle, Plus, Search, Balloon, LogIn } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 
 type TopNavVariant = 'sidebar' | 'bottom'
@@ -398,12 +398,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
               <UserAvatarClient userId={user.id} />
             </>
           ) : (
-            <Link
-              href="/login"
-              className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
-            >
-              <UIText>Sign In</UIText>
-            </Link>
+            <IconButton icon={LogIn} href="/login" title="Sign in" aria-label="Sign in" />
           )}
         </div>
       ) : (
@@ -433,12 +428,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                 <UserAvatarClient userId={user.id} />
               </>
             ) : (
-              <Link
-                href="/login"
-                className="text-blue-600 hover:text-blue-500 px-3 py-2 rounded-md transition-colors"
-              >
-                <UIText>Sign In</UIText>
-              </Link>
+              <IconButton icon={LogIn} href="/login" title="Sign in" aria-label="Sign in" />
             )}
           </div>
         </div>

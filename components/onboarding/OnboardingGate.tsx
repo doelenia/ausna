@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { usePathname } from 'next/navigation'
 import type { OnboardingStatus } from '@/app/onboarding/actions'
 import {
   getOnboardingStatusForCurrentUser,
@@ -103,6 +104,13 @@ interface OnboardingGateProps {
 }
 
 export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
+  const pathname = usePathname()
+  const isLegalPage = pathname?.startsWith('/legal/')
+
+  if (isLegalPage) {
+    return null
+  }
+
   const [status, setStatus] = useState<OnboardingStatus>(initialStatus)
   const [dismissed, setDismissed] = useState(false)
   const [sawIncompleteOnce, setSawIncompleteOnce] = useState(

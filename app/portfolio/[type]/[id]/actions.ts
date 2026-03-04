@@ -474,6 +474,10 @@ export async function updatePortfolio(
     }
 
     // For activity portfolios, update activity_datetime, location, and status inside metadata
+    // and later notify members when time and/or location changes.
+    let activityTimeChanged = false
+    let activityLocationChanged = false
+
     if (portfolio.type === 'activities') {
       const properties = (currentMetadata.properties || {}) as Record<string, any>
       const hasAnyActivityField =
@@ -481,6 +485,10 @@ export async function updatePortfolio(
         (activityEndRaw && activityEndRaw.trim().length > 0) ||
         (activityInProgressRaw && activityInProgressRaw.trim().length > 0) ||
         (activityAllDayRaw && activityAllDayRaw.trim().length > 0)
+
+      const previousActivityDateTime = (properties.activity_datetime || null) as
+        | import('@/lib/datetime').ActivityDateTimeValue
+        | null
 
       if (hasAnyActivityField) {
         const normalized = normalizeActivityDateTime(
@@ -494,22 +502,40 @@ export async function updatePortfolio(
         )
 
         if (normalized) {
-        const nextProperties: Record<string, any> = {
-          ...properties,
-          activity_datetime: normalized,
-        }
+          const nextProperties: Record<string, any> = {
+            ...properties,
+            activity_datetime: normalized,
+          }
 
-        // Call-to-join: no auto-managed join_by. When no join_by is set, window closes
-        // when activity end has passed or status is archived (evaluated at read/apply time).
-        updatedMetadata.properties = nextProperties
+          // Call-to-join: no auto-managed join_by. When no join_by is set, window closes
+          // when activity end has passed or status is archived (evaluated at read/apply time).
+          updatedMetadata.properties = nextProperties
+
+          const nextActivityDateTime = (nextProperties.activity_datetime ||
+            null) as import('@/lib/datetime').ActivityDateTimeValue | null
+          activityTimeChanged =
+            JSON.stringify(previousActivityDateTime || null) !==
+            JSON.stringify(nextActivityDateTime || null)
         } else {
           // If normalization failed, remove the property rather than saving invalid data
           const { activity_datetime, ...rest } = properties
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+
+          const hadPrevious = previousActivityDateTime != null
+          const hasNext =
+            (updatedMetadata.properties as Record<string, any> | undefined)
+              ?.activity_datetime != null
+          activityTimeChanged = hadPrevious !== hasNext
         }
       } else if (properties && Object.prototype.hasOwnProperty.call(properties, 'activity_datetime')) {
         const { activity_datetime, ...rest } = properties
         updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+
+        const hadPrevious = previousActivityDateTime != null
+        const hasNext =
+          (updatedMetadata.properties as Record<string, any> | undefined)
+            ?.activity_datetime != null
+        activityTimeChanged = hadPrevious !== hasNext
       }
 
       const locationLine1 = activityLocationLine1Raw?.trim() || ''
@@ -533,6 +559,10 @@ export async function updatePortfolio(
         (activityLocationStateCodeRaw !== null && activityLocationStateCodeRaw !== undefined) ||
         (activityLocationPrivateRaw !== null && activityLocationPrivateRaw !== undefined) ||
         (activityLocationOnlineRaw !== null && activityLocationOnlineRaw !== undefined)
+
+      const previousLocation = (properties.location || null) as
+        | import('@/lib/location').ActivityLocationValue
+        | null
 
       if (hasAnyLocationField) {
         const nextProperties = (updatedMetadata.properties || properties || {}) as Record<string, any>
@@ -566,9 +596,21 @@ export async function updatePortfolio(
 
           nextProperties.location = Object.keys(location).length > 0 ? location : undefined
           updatedMetadata.properties = nextProperties
+
+          const nextLocation = (nextProperties.location ||
+            null) as import('@/lib/location').ActivityLocationValue | null
+          activityLocationChanged =
+            JSON.stringify(previousLocation || null) !==
+            JSON.stringify(nextLocation || null)
         } else if (Object.prototype.hasOwnProperty.call(nextProperties, 'location')) {
           const { location, ...rest } = nextProperties
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+
+          const hadPrevious = previousLocation != null
+          const hasNext =
+            (updatedMetadata.properties as Record<string, any> | undefined)
+              ?.location != null
+          activityLocationChanged = hadPrevious !== hasNext
         } else {
           updatedMetadata.properties = Object.keys(nextProperties).length > 0 ? nextProperties : undefined
         }
@@ -701,22 +743,25 @@ export async function updatePortfolio(
       }
 
       if (humanAvailabilityScheduleRaw !== null) {
-        try {
-          const parsed = humanAvailabilityScheduleRaw
-            ? JSON.parse(humanAvailabilityScheduleRaw)
-            : null
-          const normalized = normalizeHumanAvailabilitySchedule(parsed)
+        const trimmed = humanAvailabilityScheduleRaw.trim()
+        // When the client sends an empty string, treat it as "no change" so we
+        // don't accidentally wipe out an existing schedule from stale editors.
+        if (trimmed.length > 0) {
+          try {
+            const parsed = JSON.parse(trimmed)
+            const normalized = normalizeHumanAvailabilitySchedule(parsed)
 
-          if (normalized) {
-            nextProperties.availability_schedule = normalized
-          } else if (
-            Object.prototype.hasOwnProperty.call(nextProperties, 'availability_schedule')
-          ) {
-            const { availability_schedule, ...rest } = nextProperties
-            nextProperties = rest
+            if (normalized) {
+              nextProperties.availability_schedule = normalized
+            } else if (
+              Object.prototype.hasOwnProperty.call(nextProperties, 'availability_schedule')
+            ) {
+              const { availability_schedule, ...rest } = nextProperties
+              nextProperties = rest
+            }
+          } catch {
+            // Ignore invalid JSON and keep existing schedule, if any
           }
-        } catch {
-          // Ignore invalid JSON and keep existing schedule, if any
         }
       }
 
@@ -768,6 +813,63 @@ export async function updatePortfolio(
       return {
         success: false,
         error: updateError.message || 'Failed to update portfolio',
+      }
+    }
+
+    // For activity portfolios, notify members when time and/or location changes.
+    if (portfolio.type === 'activities' && (activityTimeChanged || activityLocationChanged)) {
+      try {
+        const metadataAfter = updatedMetadata as any
+        const members: string[] = metadataAfter?.members || []
+        const managers: string[] = metadataAfter?.managers || []
+        const basicAfter = metadataAfter?.basic || {}
+        const activityName: string = (basicAfter.name as string) || 'this activity'
+
+        const participantIds = new Set<string>()
+        participantIds.add(portfolio.user_id as string)
+        for (const id of managers) participantIds.add(id)
+        for (const id of members) participantIds.add(id)
+        participantIds.delete(user.id)
+
+        if (participantIds.size > 0) {
+          const changes: string[] = []
+          if (activityTimeChanged) changes.push('time')
+          if (activityLocationChanged) changes.push('location')
+
+          const changeLabel =
+            changes.length === 2
+              ? 'time and location'
+              : changes[0]
+
+          const baseUrl =
+            process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+          const activityPath = `/portfolio/activities/${portfolioId}`
+          const activityUrl = `${baseUrl}${activityPath}`
+
+          const text = `updated the ${changeLabel} for ${activityName} (activity). View details: ${activityPath}`
+
+          const inserts = Array.from(participantIds).map((receiverId) => ({
+            sender_id: user.id,
+            receiver_id: receiverId,
+            text,
+          }))
+
+          if (inserts.length > 0) {
+            await supabase.from('messages').insert(inserts)
+
+            // Reset conversation activation barrier for all participants and the editor
+            for (const receiverId of participantIds) {
+              await supabase
+                .from('conversation_completions')
+                .delete()
+                .or(
+                  `and(user_id.eq.${receiverId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${receiverId})`
+                )
+            }
+          }
+        }
+      } catch (notifyError) {
+        console.error('Failed to send activity update notifications:', notifyError)
       }
     }
 
@@ -1372,8 +1474,9 @@ export async function applyToActivityCallToJoin(
       await supabase
         .from('conversation_completions')
         .delete()
-        .eq('user_id', receiverId)
-        .eq('partner_id', user.id)
+        .or(
+          `and(user_id.eq.${receiverId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${receiverId})`
+        )
     }
 
     const basic = metadata?.basic || {}
@@ -1661,6 +1764,12 @@ export async function approveActivityJoinRequest(
       receiver_id: applicantId,
       text: `approved your request to join ${activityName} (activity) as ${memberRoleLabel}`,
     })
+    await supabase
+      .from('conversation_completions')
+      .delete()
+      .or(
+        `and(user_id.eq.${applicantId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${applicantId})`
+      )
 
     try {
       const { addPortfolioTopicsToUserInterests } = await import('@/lib/indexing/interest-tracking')
@@ -1763,8 +1872,9 @@ export async function rejectActivityJoinRequest(
     await supabase
       .from('conversation_completions')
       .delete()
-      .eq('user_id', request.applicant_user_id)
-      .eq('partner_id', user.id)
+      .or(
+        `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
+      )
 
     revalidatePath(`/portfolio/activities/${activityId}`)
     revalidatePath(`/portfolio/activities/${activityId}/members`)
@@ -1849,8 +1959,9 @@ export async function applyToCommunityJoin(
     await supabase
       .from('conversation_completions')
       .delete()
-      .eq('user_id', portfolio.user_id)
-      .eq('partner_id', user.id)
+      .or(
+        `and(user_id.eq.${portfolio.user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${portfolio.user_id})`
+      )
 
     return { success: true }
   } catch (e: any) {
@@ -1980,6 +2091,12 @@ export async function respondToCommunityJoinRequest(
       receiver_id: request.applicant_user_id,
       text,
     })
+    await supabase
+      .from('conversation_completions')
+      .delete()
+      .or(
+        `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
+      )
     revalidatePath(`/portfolio/community/${portfolioId}`)
     revalidatePath(`/portfolio/community/${portfolioId}/members`)
     return { success: true }
@@ -2062,11 +2179,17 @@ export async function approveCommunityJoinRequest(requestId: string): Promise<Si
     }
     const basic = metadata?.basic || {}
     const communityName = (basic.name as string) || 'this community'
-    await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: applicantId,
-      text: `approved your request to join ${communityName} (community)`,
-    })
+  await supabase.from('messages').insert({
+    sender_id: user.id,
+    receiver_id: applicantId,
+    text: `approved your request to join ${communityName} (community)`,
+  })
+  await supabase
+    .from('conversation_completions')
+    .delete()
+    .or(
+      `and(user_id.eq.${applicantId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${applicantId})`
+    )
     revalidatePath(`/portfolio/community/${portfolioId}`)
     revalidatePath(`/portfolio/community/${portfolioId}/members`)
     return { success: true }
@@ -2135,6 +2258,12 @@ export async function rejectCommunityJoinRequest(
       receiver_id: request.applicant_user_id,
       text,
     })
+  await supabase
+    .from('conversation_completions')
+    .delete()
+    .or(
+      `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
+    )
     revalidatePath(`/portfolio/community/${portfolioId}`)
     revalidatePath(`/portfolio/community/${portfolioId}/members`)
     return { success: true }

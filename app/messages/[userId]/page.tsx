@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
+import { ActivityUpdateCard } from '@/components/portfolio/ActivityUpdateCard'
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { CommentPreviewCard } from '@/components/notes/CommentPreviewCard'
@@ -63,6 +64,7 @@ function ConversationViewContent() {
   const lastMessagesLengthRef = useRef(0)
   const supabase = createClient()
   const portfolioHelpers = createHumanPortfolioHelpers(supabase)
+  const [activityUpdatePortfolios, setActivityUpdatePortfolios] = useState<Map<string, any>>(new Map())
 
   const loadPartnerInfo = async () => {
     if (!localPartnerInfo) {
@@ -104,6 +106,63 @@ function ConversationViewContent() {
     }
   }, [userId])
 
+  // Load activity portfolios referenced by activity update messages
+  useEffect(() => {
+    const activityIds = new Set<string>()
+    messages.forEach((message) => {
+      if (!message.text || typeof message.text !== 'string') return
+      const match = message.text.match(
+        /updated the (?:time and location|time|location) for .+? \(activity\)\. View details: \/portfolio\/activities\/([a-f0-9-]+)/i
+      )
+      if (match && match[1]) {
+        activityIds.add(match[1])
+      }
+    })
+
+    const missingIds = Array.from(activityIds).filter(
+      (id) => !activityUpdatePortfolios.has(id)
+    )
+    if (missingIds.length === 0) {
+      return
+    }
+
+    let cancelled = false
+    const load = async () => {
+      try {
+        const { data: portfolios, error } = await supabase
+          .from('portfolios')
+          .select('*')
+          .eq('type', 'activities')
+          .in('id', missingIds)
+
+        if (error || !portfolios || cancelled) {
+          if (error) {
+            console.error('Error loading activity portfolios for messages:', error)
+          }
+          return
+        }
+
+        setActivityUpdatePortfolios((prev) => {
+          const next = new Map(prev)
+          portfolios.forEach((p: any) => {
+            next.set(p.id as string, p)
+          })
+          return next
+        })
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Error loading activity portfolios for messages:', error)
+        }
+      }
+    }
+
+    load()
+
+    return () => {
+      cancelled = true
+    }
+  }, [messages, supabase, activityUpdatePortfolios])
+
   useEffect(() => {
     loadMessages(false)
     loadFriendStatus()
@@ -137,7 +196,14 @@ function ConversationViewContent() {
               
               const updated = [...prev, newMessage]
               const container = messagesContainerRef.current
-              const isNearBottom = container && container.scrollTop < 200
+              
+              if (!container) {
+                return updated.length > 100 ? updated.slice(-100) : updated
+              }
+
+              const maxScrollTop = container.scrollHeight - container.clientHeight
+              const isNearBottom = maxScrollTop <= 0 || (maxScrollTop - container.scrollTop <= 200)
+
               return isNearBottom && updated.length > 100 ? updated.slice(-100) : updated
             })
             
@@ -375,14 +441,15 @@ function ConversationViewContent() {
   const scrollToBottomStable = useCallback((smooth: boolean = true) => {
     const container = messagesContainerRef.current
     if (container) {
+      const targetTop = container.scrollHeight
       requestAnimationFrame(() => {
         if (smooth) {
           container.scrollTo({
-            top: 0,
+            top: targetTop,
             behavior: 'smooth'
           })
         } else {
-          container.scrollTop = 0
+          container.scrollTop = targetTop
         }
       })
     }
@@ -405,12 +472,13 @@ function ConversationViewContent() {
     const messagesLengthChanged = messages.length !== lastMessagesLengthRef.current
     lastMessagesLengthRef.current = messages.length
     
-    const isNearBottom = container.scrollTop < 200
+    const maxScrollTop = container.scrollHeight - container.clientHeight
+    const isNearBottom = maxScrollTop <= 0 || (maxScrollTop - container.scrollTop <= 200)
     
     if (!messagesLengthChanged && isNearBottom && !isUserScrollingRef.current) {
       requestAnimationFrame(() => {
         if (container) {
-          container.scrollTop = 0
+          container.scrollTop = maxScrollTop
         }
       })
     } else if (!messagesLengthChanged && preservedScrollTopRef.current !== null && !isUserScrollingRef.current) {
@@ -430,7 +498,8 @@ function ConversationViewContent() {
         const isNewMessage = latestMessage && latestMessage.id !== lastMessageIdRef.current
         
         if (isNewMessage) {
-          const isNearBottom = container.scrollTop < 200
+          const maxScrollTop = container.scrollHeight - container.clientHeight
+          const isNearBottom = maxScrollTop <= 0 || (maxScrollTop - container.scrollTop <= 200)
           
           if (isNearBottom && !isUserScrollingRef.current) {
             scrollToBottomStable(true)
@@ -462,19 +531,19 @@ function ConversationViewContent() {
     
     preservedScrollTopRef.current = container.scrollTop
     
+    const scrollTop = container.scrollTop
     const scrollHeight = container.scrollHeight
     const clientHeight = container.clientHeight
-    const scrollTop = container.scrollTop
     const maxScrollTop = scrollHeight - clientHeight
     
     const threshold = 300
-    const isNearTop = maxScrollTop > 0 && scrollTop >= Math.max(0, maxScrollTop - threshold)
+    const isNearTop = scrollTop <= threshold
     
     if (isNearTop && hasMore && !loadingMore && !loading && messages.length > 0) {
       loadMessages(true)
     }
     
-    const isNearBottom = container.scrollTop < 200
+    const isNearBottom = maxScrollTop <= 0 || (maxScrollTop - container.scrollTop <= 200)
     if (isNearBottom && hasNewMessages) {
       setHasNewMessages(false)
     }
@@ -779,6 +848,12 @@ function ConversationViewContent() {
               const isAcceptMessage = message.text.includes('accepted your invitation to join') || message.text.includes('accepted your invitation to become a manager')
               const isManagerAcceptMessage = message.text.includes('accepted your invitation to become a manager')
               const isPortfolioInvitationMessage = isInviteMessage || isAcceptMessage
+
+              const activityUpdateMatch = message.text.match(
+                /updated the (?:time and location|time|location) for (.+?) \(activity\)\. View details: \/portfolio\/activities\/([a-f0-9-]+)/i
+              )
+              const isActivityUpdateMessage = !!activityUpdateMatch
+              const activityIdFromMessage = activityUpdateMatch ? activityUpdateMatch[2] : null
               
               let portfolioInvitation: { invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string } | null = null
               if (isPortfolioInvitationMessage && portfolioInvitations.size > 0 && currentUserId) {
@@ -844,6 +919,10 @@ function ConversationViewContent() {
                 ? portfolioDetails.get(portfolioInvitation.portfolioId) 
                 : null
 
+              const activityUpdatePortfolio = isActivityUpdateMessage && activityIdFromMessage
+                ? activityUpdatePortfolios.get(activityIdFromMessage)
+                : null
+
               return (
                 <div
                   key={`${message.id}-${refreshKey}`}
@@ -874,6 +953,12 @@ function ConversationViewContent() {
                         portfolio={portfolio as Portfolio} 
                         isSent={isSent}
                       />
+                    </div>
+                  )}
+                  
+                  {isActivityUpdateMessage && activityUpdatePortfolio && (
+                    <div className={`mb-1 max-w-xs lg:max-w-md`}>
+                      <ActivityUpdateCard portfolio={activityUpdatePortfolio as Portfolio} />
                     </div>
                   )}
                   

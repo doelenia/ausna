@@ -156,13 +156,15 @@ export async function processHumanDescription(
     finalDescription = metadata.basic?.description || ''
   }
 
+  // Always cleanup existing indexes for this description source before deciding
+  // whether there is any new content to index. This ensures that when a
+  // description is cleared, its old atomic knowledge is removed.
+  await cleanupPropertyIndexes('human_description', portfolioId)
+
   if (!finalDescription || finalDescription.trim().length === 0) {
-    // No description to process
+    // No description to process after cleanup
     return
   }
-
-  // Cleanup existing indexes
-  await cleanupPropertyIndexes('human_description', portfolioId)
 
   // Build context
   const context = await buildPropertyContext(portfolioId, 'human_description')
@@ -285,8 +287,13 @@ export async function processProjectDescription(
     finalDescription = metadata.basic?.description || ''
   }
 
+  // Always cleanup existing indexes for this description source before deciding
+  // whether there is any new content to index. This ensures that when a
+  // description is cleared, its old atomic knowledge is removed.
+  await cleanupPropertyIndexes('project_description', portfolioId)
+
   if (!finalDescription || finalDescription.trim().length === 0) {
-    // No description to process
+    // No description to process after cleanup
     return
   }
 
@@ -309,9 +316,6 @@ export async function processProjectDescription(
     .single()
 
   const humanPortfolioId = humanPortfolio?.id
-
-  // Cleanup existing indexes
-  await cleanupPropertyIndexes('project_description', portfolioId)
 
   // Build context
   const context = await buildPropertyContext(portfolioId, 'project_description')
@@ -647,14 +651,17 @@ export async function processActivityDescription(
     isExternal = Boolean(resolvedExternalLink)
   }
 
+  // Always cleanup existing indexes for this description source before deciding
+  // whether there is any new content (description or external link) to index.
+  // This ensures that when both are cleared, old atomic knowledge is removed.
+  await cleanupPropertyIndexes('activity_description', portfolioId)
+
   if (!finalDescription || finalDescription.trim().length === 0) {
     if (!resolvedExternalLink) {
       return
     }
     finalDescription = '' // Allow extraction from external link only
   }
-
-  await cleanupPropertyIndexes('activity_description', portfolioId)
 
   const context = await buildPropertyContext(portfolioId, 'activity_description')
 

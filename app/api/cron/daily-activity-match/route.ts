@@ -144,6 +144,35 @@ export async function GET(request: NextRequest) {
         }
       }
 
+      // Compute the local calendar date (YYYY-MM-DD) for this user.
+      const localDateYmd = localDateForIso(now.toISOString(), tz)
+
+      // Compute the local week start (Monday) in YYYY-MM-DD for this user.
+      // This is used to:
+      // 1) record all daily top picks across the week, and
+      // 2) ensure we don't recommend the same activity twice within the same week.
+      const weekStartYmd = (() => {
+        const ymd = localDateYmd
+        if (!ymd) return undefined
+        const d = new Date(`${ymd}T00:00:00`)
+        if (Number.isNaN(d.getTime())) return undefined
+        const day = d.getDay() // 0 = Sun, 1 = Mon, ..., 6 = Sat
+        const diffFromMonday = (day + 6) % 7 // 0 when Monday, 1 when Tuesday, ..., 6 when Sunday
+        d.setDate(d.getDate() - diffFromMonday)
+        return d.toISOString().slice(0, 10)
+      })()
+
+      const dateLabel = (() => {
+        const ymd = localDateYmd
+        if (!ymd) return undefined
+        const d = new Date(`${ymd}T00:00:00`)
+        if (Number.isNaN(d.getTime())) return undefined
+        return new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: 'numeric',
+        }).format(d)
+      })()
+
       console.log('[daily-activity-match] Running match for user', {
         userId,
         timezone: tz,
@@ -151,7 +180,7 @@ export async function GET(request: NextRequest) {
       })
       ran += 1
 
-      const daily = await computeAndStoreDailyExploreMatchService(userId)
+      const daily = await computeAndStoreDailyExploreMatchService(userId, weekStartYmd)
       if (!daily.success) {
         console.error('[daily-activity-match] Compute match failed', {
           userId,
@@ -195,18 +224,6 @@ export async function GET(request: NextRequest) {
 
       const userName =
         (meta?.basic?.name && typeof meta.basic.name === 'string' && meta.basic.name.trim()) || undefined
-
-      const localDateYmd = localDateForIso(now.toISOString(), tz)
-      const dateLabel = (() => {
-        const ymd = localDateYmd
-        if (!ymd) return undefined
-        const d = new Date(`${ymd}T00:00:00`)
-        if (Number.isNaN(d.getTime())) return undefined
-        return new Intl.DateTimeFormat(undefined, {
-          month: 'short',
-          day: 'numeric',
-        }).format(d)
-      })()
 
       const unsubscribeToken = createUnsubscribeToken(userId)
       const unsubscribeUrl = `${siteUrl}/api/unsubscribe/daily-match?token=${encodeURIComponent(unsubscribeToken)}`
