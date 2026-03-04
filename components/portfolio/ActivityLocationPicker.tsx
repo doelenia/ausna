@@ -32,6 +32,7 @@ export function ActivityLocationPicker({
   const state = value?.state ?? ''
   const country = value?.country ?? ''
   const isExactLocationPrivate = value?.isExactLocationPrivate ?? false
+  const isOnlineLocationPrivate = value?.isOnlineLocationPrivate ?? false
 
   const countries = useMemo(() => Country.getAllCountries(), [])
 
@@ -122,25 +123,50 @@ export function ActivityLocationPicker({
         </div>
 
         {isOnline && (
-          <div>
-            <UIText as="label" className="block mb-1">
-              Meeting URL <span className="text-gray-500">(optional)</span>
-            </UIText>
-            <input
-              type="url"
-              value={onlineUrl}
-              onChange={(e) => {
-                const url = e.target.value.trim()
-                handleChange({ online: true, onlineUrl: url || undefined })
-              }}
-              placeholder="https://zoom.us/j/... or https://meet.google.com/..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-            />
-            {onlineUrl && (
-              <UIText as="p" className="mt-1 text-gray-500 text-sm">
-                Will display as: {getOnlineLocationDisplayName(onlineUrl)}
+          <div className="space-y-2">
+            <div>
+              <UIText as="label" className="block mb-1">
+                Meeting URL <span className="text-gray-500">(optional)</span>
               </UIText>
-            )}
+              <input
+                type="url"
+                value={onlineUrl}
+                onChange={(e) => {
+                  const url = e.target.value.trim()
+                  handleChange({
+                    online: true,
+                    onlineUrl: url || undefined,
+                    isOnlineLocationPrivate,
+                  })
+                }}
+                placeholder="https://zoom.us/j/... or https://meet.google.com/..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              />
+              {onlineUrl && (
+                <UIText as="p" className="mt-1 text-gray-500 text-sm">
+                  Will display as: {getOnlineLocationDisplayName(onlineUrl)}
+                </UIText>
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={isOnlineLocationPrivate}
+                  onChange={(e) => {
+                    const nextPrivate = e.target.checked
+                    handleChange({
+                      ...(value || { online: true }),
+                      online: true,
+                      onlineUrl: onlineUrl || undefined,
+                      isOnlineLocationPrivate: nextPrivate,
+                    })
+                  }}
+                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                />
+                <UIText as="span">Hide meeting link from visitors</UIText>
+              </label>
+            </div>
           </div>
         )}
 

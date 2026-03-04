@@ -41,13 +41,17 @@ export function ActivityLocationField({
 
   return (
     <>
-      <div className="max-w-full">
+      <button
+        type="button"
+        className="max-w-full text-left"
+        onClick={() => setShowPicker(true)}
+      >
         <ActivityLocationBadge
           value={value ?? undefined}
           canSeeFullLocation={canSeeFullLocation}
-          onClick={() => setShowPicker(true)}
+          disableRootClick
         />
-      </div>
+      </button>
 
       {showPicker && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">

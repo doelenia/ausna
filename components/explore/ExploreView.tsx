@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button, Card, Title, Content, UIText, UIButtonText, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
@@ -15,6 +15,7 @@ import {
   type ActivityMatchDetails,
   type DailyMatchActivity,
   type DailyMatchHighlightMeta,
+  getExploreActivityHighlights,
 } from '@/app/explore/actions'
 
 function formatDateOnly(isoDate: string): string {
@@ -500,6 +501,30 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
   const [loading, setLoading] = useState(false)
   const [emailSending, setEmailSending] = useState(false)
   const [emailStatus, setEmailStatus] = useState<string | null>(null)
+  const [joinableHighlights, setJoinableHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadHighlights = async () => {
+      if (!activities || activities.length === 0) return
+      try {
+        const ids = activities.map((a) => a.id)
+        const result = await getExploreActivityHighlights(userId, ids)
+        if (!cancelled && result.success && result.highlights) {
+          setJoinableHighlights(result.highlights)
+        }
+      } catch {
+        // Swallow errors; pills are non-critical UI
+      }
+    }
+
+    loadHighlights()
+
+    return () => {
+      cancelled = true
+    }
+  }, [userId, activities])
 
   const handleRunMatch = async () => {
     setLoading(true)
@@ -640,15 +665,27 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
               )}
             </div>
             <ul className="flex flex-col gap-4">
-              {dailyMatch.activities.map((item) => (
-                <ActivityCard
-                  key={item.activity.id}
-                  activity={item.activity}
-                  score={item.score}
-                  details={item.details}
-                  highlight={item.highlight}
-                />
-              ))}
+              {dailyMatch.activities.map((item) => {
+                const dynamic = joinableHighlights[item.activity.id]
+                const staticHighlight = item.highlight
+                const mergedHighlight: DailyMatchHighlightMeta = {
+                  host: dynamic?.host ?? staticHighlight.host,
+                  accessibility: dynamic?.accessibility ?? staticHighlight.accessibility,
+                  // Keep interest tags from the top match result (heavy computation)
+                  interestTags: staticHighlight.interestTags,
+                  friends: dynamic?.friends ?? staticHighlight.friends,
+                }
+
+                return (
+                  <ActivityCard
+                    key={item.activity.id}
+                    activity={item.activity}
+                    score={item.score}
+                    details={item.details}
+                    highlight={mergedHighlight}
+                  />
+                )
+              })}
             </ul>
           </div>
         </section>
@@ -712,14 +749,49 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
           <ul className="flex flex-col gap-4">
             {matched.map((m) => {
               const activity = activityById.get(m.id)
-              return activity ? (
+              if (!activity) return null
+
+              const baseHighlight = joinableHighlights[activity.id]
+              let interestTags: DailyMatchHighlightMeta['interestTags'] = []
+
+              if (m.details?.alignment.activityTopTopics?.length) {
+                interestTags = m.details.alignment.activityTopTopics
+                  .filter(
+                    (t) =>
+                      t.similarity > 0 &&
+                      (typeof t.aggregate === 'number' || typeof t.memory === 'number')
+                  )
+                  .slice(0, 3)
+                  .map((t) => ({
+                    topicId: t.topicId,
+                    topicName: t.topicName,
+                  }))
+              }
+
+              let highlight: DailyMatchHighlightMeta | undefined
+              if (baseHighlight) {
+                highlight = {
+                  ...baseHighlight,
+                  interestTags,
+                }
+              } else if (interestTags.length > 0) {
+                highlight = {
+                  host: undefined,
+                  accessibility: undefined,
+                  interestTags,
+                  friends: undefined,
+                }
+              }
+
+              return (
                 <ActivityCard
                   key={activity.id}
                   activity={activity}
                   score={m.score}
                   details={m.details}
+                  highlight={highlight}
                 />
-              ) : null
+              )
             })}
           </ul>
         </section>
@@ -740,7 +812,11 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
                 </div>
                 <div className="ml-2 space-y-4">
                   {group.activities.map((activity) => (
-                    <ActivityCard key={activity.id} activity={activity} />
+                    <ActivityCard
+                      key={activity.id}
+                      activity={activity}
+                      highlight={joinableHighlights[activity.id]}
+                    />
                   ))}
                 </div>
               </div>

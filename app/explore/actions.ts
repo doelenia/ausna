@@ -148,6 +148,28 @@ function normalizeCity(s: string | undefined): string {
   return s.trim().toLowerCase()
 }
 
+/** Smart accessibility matcher used for both pills and initial filtering. */
+function computeAccessibilityKind(
+  userLoc: ActivityLocationValue | null,
+  activityLoc: ActivityLocationValue | undefined | null
+): 'online' | 'local' | null {
+  if (activityLoc?.online) return 'online'
+
+  if (activityLoc && userLoc?.city && activityLoc.city) {
+    const cityMatches = normalizeCity(userLoc.city) === normalizeCity(activityLoc.city)
+    const countryMatches =
+      !!userLoc.country &&
+      !!activityLoc.country &&
+      normalizeCity(userLoc.country) === normalizeCity(activityLoc.country)
+
+    if (cityMatches && (!userLoc.country || countryMatches)) {
+      return 'local'
+    }
+  }
+
+  return null
+}
+
 /** Same city: compare city and country (both normalized). */
 function isSameCity(
   userLoc: ActivityLocationValue | null,
@@ -201,12 +223,10 @@ function isOpenToJoin(activity: ActivityRow): boolean {
   return isCallToJoinWindowOpen(visibility, callToJoin, activityDateTime ?? undefined, status)
 }
 
-/** User has not joined and did not upload (create) this activity. */
+/** User has not joined this activity (uploader and managers are allowed). */
 function userNotJoinedOrUploaded(activity: ActivityRow, userId: string): boolean {
-  if (activity.user_id === userId) return false
   const members = activity.metadata?.members || []
-  const managers = activity.metadata?.managers || []
-  return !members.includes(userId) && !managers.includes(userId)
+  return !members.includes(userId)
 }
 
 /** At least one of: external, friend/shared-member in activity, host in subscribed/joined, same city or online. */
@@ -279,7 +299,13 @@ export async function getExploreActivities(userId: string): Promise<GetExploreAc
       if (row.visibility === 'private') continue
       if (!isOpenToJoin(row)) continue
       if (!userNotJoinedOrUploaded(row, userId)) continue
-      if (!activityMatchesAtLeastOne(row, context)) continue
+      // Accessibility/location is the only initial relevance filter we keep for explore/match,
+      // but if the user has no location recorded we skip this filter entirely.
+      if (userLocation) {
+        const location = row.metadata?.properties?.location
+        const accessibilityKind = computeAccessibilityKind(userLocation, location)
+        if (!accessibilityKind) continue
+      }
 
       const basic = row.metadata?.basic || {}
       filtered.push({
@@ -348,6 +374,12 @@ export interface DailyMatchActivity {
   score: number
   details?: ActivityMatchDetails
   highlight: DailyMatchHighlightMeta
+}
+
+export interface ExploreActivityHighlightsResult {
+  success: boolean
+  highlights: Record<string, DailyMatchHighlightMeta>
+  error?: string
 }
 
 export interface DailyExploreMatchResult {
@@ -453,6 +485,279 @@ async function computeActivityMatchContext(
     joinedProjectIds,
     joinedCommunityIds,
     activityMetadata,
+  }
+}
+
+async function buildHighlightMetadata(
+  userId: string,
+  activityIds: string[]
+): Promise<{
+  activityById: Map<string, ExploreActivity>
+  activityMetadata: Map<string, ActivityMetadata>
+  friendIds: string[]
+  hostProjectMap: Map<string, { name: string; avatar?: string | null; emoji?: string | null }>
+  hostCommunityMap: Map<string, { name: string; avatar?: string | null; emoji?: string | null }>
+  friendProfileMap: Map<string, { name: string; avatar?: string | null }>
+  userLocation: ActivityLocationValue | null
+}> {
+  const supabase = await createClient()
+
+  const [friendIds, { data: activitiesRaw }, userLocation] = await Promise.all([
+    getFriendIds(userId, supabase),
+    supabase.from('portfolios').select('id, user_id, host_project_id, metadata').in('id', activityIds),
+    getUserLocationForExplore(userId, supabase),
+  ])
+
+  const activityMetadata = new Map<string, ActivityMetadata>()
+  const activityById = new Map<string, ExploreActivity>()
+
+  const hostProjectIdsAll = new Set<string>()
+  const hostCommunityIdsAll = new Set<string>()
+  const friendIdsAll = new Set<string>()
+
+  ;(activitiesRaw || []).forEach(
+    (row: {
+      id: string
+      user_id: string
+      host_project_id?: string | null
+      metadata?: {
+        basic?: { name?: string; avatar?: string; emoji?: string; description?: string }
+        members?: string[]
+        managers?: string[]
+        properties?: {
+          host_project_ids?: string[]
+          host_community_ids?: string[]
+          external?: boolean
+          activity_datetime?: ActivityDateTimeValue
+          location?: ActivityLocationValue
+        }
+      }
+    }) => {
+      const meta = row.metadata || {}
+      const props = meta.properties || {}
+      const hostProjectIds: string[] = [...(props.host_project_ids || [])]
+      const hostCommunityIds: string[] = [...(props.host_community_ids || [])]
+      if (row.host_project_id) hostProjectIds.push(row.host_project_id)
+
+      const managerIds = Array.isArray(meta.managers) ? meta.managers : []
+      const memberIdsCombined = Array.isArray(meta.members) ? meta.members : []
+      const external = props.external === true
+
+      activityMetadata.set(row.id, {
+        hostProjectIds,
+        hostCommunityIds,
+        memberIds: memberIdsCombined,
+        managerIds,
+        ownerId: row.user_id,
+        external,
+      })
+
+      const basic = meta.basic || {}
+      activityById.set(row.id, {
+        id: row.id,
+        name: (basic.name as string) || 'Activity',
+        avatar: basic.avatar as string | undefined,
+        emoji: basic.emoji as string | undefined,
+        description: (basic.description as string) || undefined,
+        hostProjectId: row.host_project_id ?? undefined,
+        activityDateTime: props.activity_datetime ?? null,
+        location: props.location ?? null,
+        external,
+      })
+
+      hostProjectIds.forEach((id) => hostProjectIdsAll.add(id))
+      hostCommunityIds.forEach((id) => hostCommunityIdsAll.add(id))
+
+      const goingIds = new Set<string>(memberIdsCombined)
+      friendIds.forEach((fid) => {
+        if (goingIds.has(fid)) friendIdsAll.add(fid)
+      })
+    }
+  )
+
+  const [hostProjects, hostCommunities, friendPortfolios] = await Promise.all([
+    hostProjectIdsAll.size > 0
+      ? supabase
+          .from('portfolios')
+          .select('id, metadata')
+          .eq('type', 'projects')
+          .in('id', Array.from(hostProjectIdsAll))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    hostCommunityIdsAll.size > 0
+      ? supabase
+          .from('portfolios')
+          .select('id, metadata')
+          .eq('type', 'community')
+          .in('id', Array.from(hostCommunityIdsAll))
+      : Promise.resolve({ data: [] as any[], error: null }),
+    friendIdsAll.size > 0
+      ? supabase
+          .from('portfolios')
+          .select('user_id, metadata')
+          .eq('type', 'human')
+          .in('user_id', Array.from(friendIdsAll))
+      : Promise.resolve({ data: [] as any[], error: null }),
+  ])
+
+  const hostProjectMap = new Map<string, { name: string; avatar?: string | null; emoji?: string | null }>()
+  ;(hostProjects.data || []).forEach((row: any) => {
+    const meta = (row.metadata as any) || {}
+    const basic = meta.basic || {}
+    hostProjectMap.set(row.id as string, {
+      name: (basic.name as string) || 'Project',
+      avatar: (basic.avatar as string | null | undefined) ?? null,
+      emoji: (basic.emoji as string | null | undefined) ?? null,
+    })
+  })
+
+  const hostCommunityMap = new Map<string, { name: string; avatar?: string | null; emoji?: string | null }>()
+  ;(hostCommunities.data || []).forEach((row: any) => {
+    const meta = (row.metadata as any) || {}
+    const basic = meta.basic || {}
+    hostCommunityMap.set(row.id as string, {
+      name: (basic.name as string) || 'Community',
+      avatar: (basic.avatar as string | null | undefined) ?? null,
+      emoji: (basic.emoji as string | null | undefined) ?? null,
+    })
+  })
+
+  const friendProfileMap = new Map<string, { name: string; avatar?: string | null }>()
+  ;(friendPortfolios.data || []).forEach((row: any) => {
+    const meta = (row.metadata as any) || {}
+    const basic = meta.basic || {}
+    const user = row.user_id as string
+    friendProfileMap.set(user, {
+      name: (basic.name as string) || `User ${user.slice(0, 8)}`,
+      avatar: (basic.avatar as string | null | undefined) ?? null,
+    })
+  })
+
+  return {
+    activityById,
+    activityMetadata,
+    friendIds,
+    hostProjectMap,
+    hostCommunityMap,
+    friendProfileMap,
+    userLocation,
+  }
+}
+
+export async function getExploreActivityHighlights(
+  userId: string,
+  activityIds: string[]
+): Promise<ExploreActivityHighlightsResult> {
+  try {
+    if (!activityIds || activityIds.length === 0) {
+      return { success: true, highlights: {} }
+    }
+
+    const {
+      activityById,
+      activityMetadata,
+      friendIds,
+      hostProjectMap,
+      hostCommunityMap,
+      friendProfileMap,
+      userLocation,
+    } = await buildHighlightMetadata(userId, activityIds)
+
+    const highlights: Record<string, DailyMatchHighlightMeta> = {}
+
+    activityIds.forEach((id) => {
+      const meta = activityMetadata.get(id)
+      const activity = activityById.get(id)
+      if (!meta || !activity) return
+
+      const friendParticipantIds = friendIds.filter((fid) => meta.memberIds.includes(fid))
+      const topFriendIds = friendParticipantIds.slice(0, 3)
+      const extraFriendCount =
+        friendParticipantIds.length > topFriendIds.length
+          ? friendParticipantIds.length - topFriendIds.length
+          : 0
+
+      let host: DailyMatchHostHighlight | undefined
+      if (meta) {
+        let friendHostId: string | undefined
+        if (!meta.external) {
+          const ownerOrManagers = [meta.ownerId, ...meta.managerIds]
+          friendHostId = ownerOrManagers.find((ownerId) => friendParticipantIds.includes(ownerId))
+        }
+
+        if (friendHostId) {
+          const fp = friendProfileMap.get(friendHostId)
+          host = {
+            kind: 'friend',
+            friendUserId: friendHostId,
+            name: fp?.name ?? `Friend ${friendHostId.slice(0, 8)}`,
+            avatar: fp?.avatar ?? null,
+            emoji: null,
+          }
+        } else if (meta.hostProjectIds.length > 0) {
+          const projectId = meta.hostProjectIds[0]
+          const hp = hostProjectMap.get(projectId)
+          host = {
+            kind: 'project',
+            projectId,
+            name: hp?.name ?? 'Project',
+            avatar: hp?.avatar ?? null,
+            emoji: hp?.emoji ?? null,
+          }
+        } else if (meta.hostCommunityIds.length > 0) {
+          const communityId = meta.hostCommunityIds[0]
+          const hc = hostCommunityMap.get(communityId)
+          host = {
+            kind: 'community',
+            communityId,
+            name: hc?.name ?? 'Community',
+            avatar: hc?.avatar ?? null,
+            emoji: hc?.emoji ?? null,
+          }
+        }
+      }
+
+      let accessibility: DailyMatchAccessibilityHighlight | undefined
+      const loc = activity.location
+      const accessibilityKind = computeAccessibilityKind(userLocation, loc)
+
+      if (accessibilityKind === 'online') {
+        accessibility = { kind: 'online', label: 'Online' }
+      } else if (accessibilityKind === 'local') {
+        accessibility = { kind: 'local', label: 'Local' }
+      }
+
+      let friendsHighlight: DailyMatchFriendsHighlight | undefined
+      if (topFriendIds.length > 0) {
+        const topFriends = topFriendIds.map((uid) => {
+          const fp = friendProfileMap.get(uid)
+          return {
+            userId: uid,
+            name: fp?.name ?? `Friend ${uid.slice(0, 8)}`,
+            avatar: fp?.avatar ?? null,
+          }
+        })
+        friendsHighlight = {
+          topFriends,
+          extraCount: extraFriendCount,
+        }
+      }
+
+      highlights[id] = {
+        host,
+        accessibility,
+        interestTags: [],
+        friends: friendsHighlight,
+      }
+    })
+
+    return { success: true, highlights }
+  } catch (err: any) {
+    console.error('getExploreActivityHighlights error:', err)
+    return {
+      success: false,
+      highlights: {},
+      error: err?.message ?? 'Failed to load activity highlights',
+    }
   }
 }
 
@@ -680,9 +985,10 @@ async function computeAndStoreDailyExploreMatch(
 
       let accessibility: DailyMatchAccessibilityHighlight | undefined
       const loc = activity.location
-      if (loc?.online) {
+      const accessibilityKind = computeAccessibilityKind(userLocation, loc)
+      if (accessibilityKind === 'online') {
         accessibility = { kind: 'online', label: 'Online' }
-      } else if (loc && isSameCity(userLocation, loc)) {
+      } else if (accessibilityKind === 'local') {
         accessibility = { kind: 'local', label: 'Local' }
       }
 

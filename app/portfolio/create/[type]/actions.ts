@@ -46,6 +46,9 @@ export async function createPortfolio(
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
     const activityLocationOnlineRaw = formData.get('activity_location_online') as string | null
     const activityLocationOnlineUrlRaw = formData.get('activity_location_online_url') as string | null
+    const activityLocationOnlinePrivateRaw = formData.get(
+      'activity_location_online_private'
+    ) as string | null
     const activityCallToJoinDescriptionRaw = formData.get('activity_call_to_join_description') as string | null
     const activityCallToJoinJoinByRaw = formData.get('activity_call_to_join_join_by') as string | null
     const activityCallToJoinRequireApprovalRaw = formData.get('activity_call_to_join_require_approval') as string | null
@@ -273,6 +276,7 @@ export async function createPortfolio(
 
       const isLocationOnline = activityLocationOnlineRaw === 'true'
       const locationOnlineUrl = (activityLocationOnlineUrlRaw || '').trim() || undefined
+      const locationOnlinePrivate = activityLocationOnlinePrivateRaw === 'true'
 
       const hasAnyLocationField =
         locationLine1.length > 0 ||
@@ -280,13 +284,15 @@ export async function createPortfolio(
         locationState.length > 0 ||
         locationCountry.length > 0 ||
         locationPrivate ||
-        isLocationOnline
+        isLocationOnline ||
+        locationOnlinePrivate
 
       if (hasAnyLocationField) {
         const location: Record<string, any> = {}
         if (isLocationOnline) {
           location.online = true
           if (locationOnlineUrl) location.onlineUrl = locationOnlineUrl
+          if (locationOnlinePrivate) location.isOnlineLocationPrivate = true
         } else {
           if (locationLine1) location.line1 = locationLine1
           if (locationCity) location.city = locationCity

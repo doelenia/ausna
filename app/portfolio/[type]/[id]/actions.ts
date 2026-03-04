@@ -378,6 +378,9 @@ export async function updatePortfolio(
     const activityLocationPrivateRaw = formData.get('activity_location_private') as string | null
     const activityLocationOnlineRaw = formData.get('activity_location_online') as string | null
     const activityLocationOnlineUrlRaw = formData.get('activity_location_online_url') as string | null
+    const activityLocationOnlinePrivateRaw = formData.get(
+      'activity_location_online_private'
+    ) as string | null
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostCommunityIdsRaw = formData.get('host_community_ids') as string | null
     const humanAutoCityLocationEnabledRaw = formData.get(
@@ -519,6 +522,7 @@ export async function updatePortfolio(
 
       const isLocationOnline = activityLocationOnlineRaw === 'true'
       const locationOnlineUrl = (activityLocationOnlineUrlRaw || '').trim() || undefined
+      const locationOnlinePrivate = activityLocationOnlinePrivateRaw === 'true'
 
       const hasAnyLocationField =
         (activityLocationLine1Raw !== null && activityLocationLine1Raw !== undefined) ||
@@ -541,13 +545,15 @@ export async function updatePortfolio(
           locationCountryCode.length > 0 ||
           locationStateCode.length > 0 ||
           locationPrivate ||
-          isLocationOnline
+          isLocationOnline ||
+          locationOnlinePrivate
 
         if (hasAnyNonEmptyLocationField) {
           const location: Record<string, any> = {}
           if (isLocationOnline) {
             location.online = true
             if (locationOnlineUrl) location.onlineUrl = locationOnlineUrl
+            if (locationOnlinePrivate) location.isOnlineLocationPrivate = true
           } else {
             if (locationLine1) location.line1 = locationLine1
             if (locationCity) location.city = locationCity

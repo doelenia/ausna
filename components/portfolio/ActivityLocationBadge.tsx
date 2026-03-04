@@ -36,20 +36,26 @@ export function ActivityLocationBadge({
   const { line1, line2, googleMapsQuery, onlineUrl } = formatted
   const isOnline = !!value?.online
   const isExactPrivate = !!value?.isExactLocationPrivate
+  const isOnlinePrivate = !!value?.isOnlineLocationPrivate
 
-  const showFirstLine = hasLocation && !!line1 && (canSeeFullLocation || !isExactPrivate || isOnline)
+  const showFirstLine =
+    hasLocation && !!line1 && (canSeeFullLocation || !isExactPrivate || isOnline)
   const showSecondLine = hasLocation && !!line2 && !isOnline
 
   const displayFirstLine = showFirstLine ? line1 : null
   const displaySecondLine = showSecondLine ? line2 : null
 
-  const isOnlineWithUrl = isOnline && !!onlineUrl
+  const isOnlineWithUrl =
+    isOnline && !!onlineUrl && (!isOnlinePrivate || !!canSeeFullLocation)
+
   const Wrapper: React.ElementType =
-    isOnlineWithUrl
-      ? 'a'
-      : (onClick && !disableRootClick) || onUnauthorizedClick
-        ? 'button'
-        : 'div'
+    disableRootClick
+      ? 'div'
+      : isOnlineWithUrl
+        ? 'a'
+        : (onClick || onUnauthorizedClick)
+          ? 'button'
+          : 'div'
 
   const handleClick = (e: React.MouseEvent) => {
     if (isOnlineWithUrl) return
@@ -58,6 +64,13 @@ export function ActivityLocationBadge({
 
     if (!hasLocation) {
       if (onClick) onClick()
+      return
+    }
+
+    // Online location: when marked private, visitors should see the same
+    // members-only notification as for private physical addresses.
+    if (isOnline && isOnlinePrivate && !canSeeFullLocation && onUnauthorizedClick) {
+      onUnauthorizedClick()
       return
     }
 
@@ -71,11 +84,13 @@ export function ActivityLocationBadge({
   }
 
   const wrapperProps =
-    isOnlineWithUrl
-      ? { href: onlineUrl!, target: '_blank', rel: 'noopener noreferrer' }
-      : (onClick && !disableRootClick) || onUnauthorizedClick
-        ? { type: 'button' as const, onClick: handleClick }
-        : {}
+    disableRootClick
+      ? {}
+      : isOnlineWithUrl
+        ? { href: onlineUrl!, target: '_blank', rel: 'noopener noreferrer' }
+        : (onClick || onUnauthorizedClick)
+          ? { type: 'button' as const, onClick: handleClick }
+          : {}
 
   return (
     <Wrapper
