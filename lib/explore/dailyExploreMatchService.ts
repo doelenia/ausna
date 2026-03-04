@@ -442,7 +442,17 @@ async function computeActivityMatchContextService(
   }
 }
 
-export async function computeAndStoreDailyExploreMatchService(userId: string): Promise<DailyExploreMatchResult> {
+export async function computeAndStoreDailyExploreMatchService(
+  userId: string,
+  /**
+   * Local week start (Monday) for the user in YYYY-MM-DD, used to
+   * (a) avoid recommending the same activity more than once per week and
+   * (b) reset weekly history when a new week begins.
+   *
+   * When omitted, weekly de-duplication is skipped.
+   */
+  weekStartYmd?: string | null
+): Promise<DailyExploreMatchResult> {
   try {
     const activities = await getExploreActivitiesService(userId)
     if (!activities.length) {
@@ -630,6 +640,33 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
       return { activity, score: r.score, details, highlight }
     })
 
+    // Weekly de-duplication: avoid recommending the same activity more than once
+    // between Monday-Sunday in the user's local week. The caller supplies weekStartYmd
+    // based on the user's timezone.
+    const currentWeekStart = weekStartYmd ?? null
+    let weeklyActivityIds = new Set<string>()
+    if (currentWeekStart && humanPortfolio?.data?.metadata) {
+      const meta = humanPortfolio.data.metadata as any
+      const props = ((meta.properties as Record<string, any> | undefined) || {}) as Record<string, any>
+      const existingWeekly = props.daily_explore_match_week as
+        | { week_start_ymd?: string | null; activity_ids?: string[] }
+        | undefined
+      if (existingWeekly && existingWeekly.week_start_ymd === currentWeekStart) {
+        const existingIds = Array.isArray(existingWeekly.activity_ids) ? existingWeekly.activity_ids : []
+        weeklyActivityIds = new Set(existingIds.filter((id) => typeof id === 'string'))
+      }
+    }
+
+    const filteredActivitiesWithHighlights: DailyMatchActivity[] =
+      currentWeekStart && weeklyActivityIds.size > 0
+        ? activitiesWithHighlights.filter((a) => !weeklyActivityIds.has(a.activity.id))
+        : activitiesWithHighlights
+
+    if (filteredActivitiesWithHighlights.length === 0) {
+      // Nothing new to recommend this week.
+      return { success: true, introText: null, activities: [], ranAt: null }
+    }
+
     const profileMeta = (humanPortfolio?.data?.metadata as any) || {}
     const profileBasic = profileMeta.basic || {}
     const profileDescription =
@@ -647,7 +684,7 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
         return { name, description }
       }) ?? []
 
-    const interestTopics = activitiesWithHighlights[0]?.details?.alignment.userInterestTopics ?? []
+    const interestTopics = filteredActivitiesWithHighlights[0]?.details?.alignment.userInterestTopics ?? []
     const interestNames = interestTopics
       .slice(0, 5)
       .map((t) => t.topicName)
@@ -658,7 +695,7 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
         profileDescription,
         projects: projectSummaries,
         interestTags: interestNames,
-        activities: activitiesWithHighlights.map((a) => ({
+        activities: filteredActivitiesWithHighlights.map((a) => ({
           name: a.activity.name,
           accessibility: a.highlight.accessibility?.label ?? '',
           interestTags: a.highlight.interestTags.map((t) => t.topicName),
@@ -671,7 +708,20 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
         const existingMeta = (humanRow.metadata as any) || {}
         const existingProps = (existingMeta.properties as Record<string, any> | undefined) || {}
 
-        const serializedActivities = activitiesWithHighlights.map((a) => ({
+        // Update the weekly history for the current week.
+        const weeklyIdsForUpdate = new Set<string>(weeklyActivityIds)
+        filteredActivitiesWithHighlights.forEach((a) => {
+          weeklyIdsForUpdate.add(a.activity.id)
+        })
+        const weeklySnapshot =
+          currentWeekStart != null
+            ? {
+                week_start_ymd: currentWeekStart,
+                activity_ids: Array.from(weeklyIdsForUpdate),
+              }
+            : existingProps.daily_explore_match_week
+
+        const serializedActivities = filteredActivitiesWithHighlights.map((a) => ({
           activity_id: a.activity.id,
           score: a.score,
           host: a.highlight.host ?? null,
@@ -692,6 +742,7 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
               pattern_path: patternPath,
               ...(existingDaily.unsubscribed === true ? { unsubscribed: true } : {}),
             },
+            ...(weeklySnapshot ? { daily_explore_match_week: weeklySnapshot } : {}),
           },
         }
 
@@ -701,7 +752,7 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
       console.error('computeAndStoreDailyExploreMatchService: failed to persist daily match snapshot', e)
     }
 
-    return { success: true, introText, activities: activitiesWithHighlights, ranAt, patternPath }
+    return { success: true, introText, activities: filteredActivitiesWithHighlights, ranAt, patternPath }
   } catch (err: any) {
     console.error('computeAndStoreDailyExploreMatchService error:', err)
     return {

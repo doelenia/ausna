@@ -230,6 +230,11 @@ export function NotesFeed({
           
           setNotes(filteredNotes)
           setHasMore(result.hasMore ?? false)
+
+          // Keep the offset in sync with how many notes we've actually loaded
+          // so subsequent "load more" requests fetch the next page instead of
+          // re-requesting the first page (which would yield only duplicates).
+          offsetRef.current = result.notes.length
         } else {
           setError(result.error || 'Failed to load notes')
         }

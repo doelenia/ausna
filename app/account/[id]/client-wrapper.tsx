@@ -276,7 +276,12 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                             {label}
                           </UIText>
                           <UIText as="dd">
-                            <Link href={href} className="text-blue-600 hover:text-blue-500">
+                            <Link
+                              href={href}
+                              className="text-blue-600 hover:text-blue-500"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
                               View {label}
                             </Link>
                           </UIText>

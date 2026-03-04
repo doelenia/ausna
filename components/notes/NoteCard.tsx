@@ -5,11 +5,13 @@ import { Note, NoteReference, ImageReference, UrlReference, NoteSource } from '@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
-import { Portfolio } from '@/types/portfolio'
+import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
+import type { ActivityLocationValue } from '@/lib/location'
+import { formatActivityLocation } from '@/lib/formatActivityLocation'
 import { Title, Subtitle, Content, UIText, UIButtonText, Card, UserAvatar, Button } from '@/components/ui'
 import { SkeletonAvatar, SkeletonText, SkeletonBanner } from '@/components/ui/Skeleton'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
@@ -759,6 +761,36 @@ export function NoteCard({
     ? 'You'
     : (ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`)
 
+  const ownerLocationText = (() => {
+    if (!ownerPortfolio || !isHumanPortfolio(ownerPortfolio)) {
+      return null
+    }
+
+    const metadata = ownerPortfolio.metadata as any
+    const explicitLocation =
+      typeof metadata?.location === 'string' && metadata.location.trim()
+        ? metadata.location.trim()
+        : null
+
+    const properties = metadata?.properties as any | undefined
+    const autoCityLocationEnabled = properties?.auto_city_location_enabled !== false
+    const autoCityLocation: ActivityLocationValue | undefined =
+      autoCityLocationEnabled && properties?.auto_city_location
+        ? (properties.auto_city_location as ActivityLocationValue)
+        : undefined
+
+    if (explicitLocation) {
+      return explicitLocation
+    }
+
+    if (autoCityLocation) {
+      const formatted = formatActivityLocation(autoCityLocation)
+      return formatted.line2 || formatted.line1
+    }
+
+    return null
+  })()
+
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
   const effectiveVisibility = localVisibility ?? (note as any).visibility ?? 'public'
   const isPrivate = effectiveVisibility === 'private'
@@ -1267,7 +1299,9 @@ export function NoteCard({
                 </Link>
               )}
               <UIButtonText as="span" className="text-gray-500">
-                {formatRelativeTime(note.created_at)}
+                {ownerLocationText
+                  ? `${ownerLocationText} · ${formatRelativeTime(note.created_at)}`
+                  : formatRelativeTime(note.created_at)}
               </UIButtonText>
               {/* Feed source label - only show in "all" feed */}
               {note.feedSource && (
