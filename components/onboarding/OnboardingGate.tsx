@@ -398,6 +398,9 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
           <UIText as="label" className="block mb-1">
             Description
           </UIText>
+          <UIText as="p" className="text-xs text-gray-500 mb-1">
+            You can also add relevant linnks (NOT LinkedIn!) This description will be used to build the advance knowledge graph that help us to find the best opportunities for you.
+          </UIText>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}

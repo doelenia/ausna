@@ -425,6 +425,9 @@ export function CreateActivityForm() {
           if (activityLocation.onlineUrl) {
             formData.append('activity_location_online_url', activityLocation.onlineUrl)
           }
+          if (activityLocation.isOnlineLocationPrivate) {
+            formData.append('activity_location_online_private', 'true')
+          }
         } else {
           if (activityLocation.line1) {
             formData.append('activity_location_line1', activityLocation.line1)
@@ -700,6 +703,9 @@ export function CreateActivityForm() {
           <div>
             <UIText as="label" className="block mb-2">
               Description
+            </UIText>
+            <UIText as="p" className="text-xs text-gray-500 mb-2">
+              You can also add relevant linnks (NOT LinkedIn!) This description will be used to build the advance knowledge graph that help us to find the best opportunities for you.
             </UIText>
             <textarea
               value={description}

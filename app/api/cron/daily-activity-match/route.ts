@@ -9,6 +9,17 @@ import { DEFAULT_ACTIVITY_PATTERN_PATH } from '@/lib/explore/activityPatterns'
 import { isLocalEightAmNow, localDateForIso } from '@/lib/timezone/localTime'
 
 export const dynamic = 'force-dynamic'
+/** Avoid caching large Supabase responses (e.g. topics with name_vector) that exceed Next.js 2MB cache limit. */
+export const fetchCache = 'force-no-store'
+
+/** Default timezone when user has no timezone set (e.g. no location recorded). */
+const DEFAULT_TIMEZONE = 'Asia/Tokyo'
+
+/** For local/testing: skip 8am check so match+email run for eligible users. Use ?force_run=1 with CRON_SECRET. */
+function isForceRun(request: NextRequest): boolean {
+  if (process.env.VERCEL_ENV === 'production') return false
+  return request.nextUrl.searchParams.get('force_run') === '1'
+}
 
 function isAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET
@@ -34,10 +45,22 @@ function extractUserEmail(input: { authEmail?: string | null; portfolioMetadata?
 }
 
 export async function GET(request: NextRequest) {
+  const forceRun = isForceRun(request)
+  console.log('[daily-activity-match] START', {
+    time: new Date().toISOString(),
+    env: process.env.VERCEL_ENV || process.env.NODE_ENV || 'unknown',
+    force_run: forceRun,
+  })
+
   if (!isAuthorized(request)) {
+    console.warn('[daily-activity-match] Unauthorized request', {
+      hasAuthHeader: !!request.headers.get('authorization'),
+      hasSecretQueryParam: !!request.nextUrl.searchParams.get('secret'),
+    })
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  try {
   const supabase = createServiceClient()
   const siteUrl = getSiteUrl()
   const exploreUrl = `${siteUrl}/explore?utm_source=daily_match_email&utm_medium=email`
@@ -59,51 +82,109 @@ export async function GET(request: NextRequest) {
       .range(offset, offset + pageSize - 1)
 
     if (error) {
+      console.error('[daily-activity-match] Failed to load human portfolios batch', {
+        offset,
+        pageSize,
+        error: error.message,
+      })
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    if (!humans || humans.length === 0) break
+    if (!humans || humans.length === 0) {
+      console.log('[daily-activity-match] No more humans to scan', { offset })
+      break
+    }
+
+    console.log('[daily-activity-match] Loaded humans batch', {
+      offset,
+      batchSize: humans.length,
+    })
 
     for (const row of humans as any[]) {
       scanned += 1
       const userId = row.user_id as string
       const meta = row.metadata as any
-      const tz = meta?.properties?.timezone
-      if (typeof tz !== 'string' || !tz.trim()) continue
+      const tzRaw = meta?.properties?.timezone
+      const tz = typeof tzRaw === 'string' && tzRaw.trim() ? tzRaw.trim() : DEFAULT_TIMEZONE
+      const usedDefaultTz = !(typeof tzRaw === 'string' && tzRaw.trim())
 
-      const eightAmCheck = isLocalEightAmNow({ now, timeZone: tz.trim() })
-      if (!eightAmCheck.ok) continue
+      if (!forceRun) {
+        const eightAmCheck = isLocalEightAmNow({ now, timeZone: tz })
+        if (!eightAmCheck.ok) {
+          console.log('[daily-activity-match] Skip user; not 8am local', {
+            userId,
+            timezone: tz,
+            usedDefaultTz,
+            reason: eightAmCheck.reason,
+          })
+          continue
+        }
 
-      if (meta?.properties?.daily_explore_match?.unsubscribed === true) continue
+        if (meta?.properties?.daily_explore_match?.unsubscribed === true) {
+          console.log('[daily-activity-match] Skip user; unsubscribed', { userId })
+          continue
+        }
 
-      const lastRanAtIso = meta?.properties?.daily_explore_match?.ran_at
-      if (typeof lastRanAtIso === 'string') {
-        const lastRanLocal = localDateForIso(lastRanAtIso, tz.trim())
-        if (lastRanLocal && lastRanLocal === eightAmCheck.localDate) {
+        const lastRanAtIso = meta?.properties?.daily_explore_match?.ran_at
+        if (typeof lastRanAtIso === 'string') {
+          const lastRanLocal = localDateForIso(lastRanAtIso, tz)
+          if (lastRanLocal && lastRanLocal === eightAmCheck.localDate) {
+            console.log('[daily-activity-match] Skip user; already ran today', {
+              userId,
+              lastRanAtIso,
+              localDate: lastRanLocal,
+            })
+            continue
+          }
+        }
+      } else {
+        if (meta?.properties?.daily_explore_match?.unsubscribed === true) {
+          console.log('[daily-activity-match] Skip user; unsubscribed (force_run)', { userId })
           continue
         }
       }
 
+      console.log('[daily-activity-match] Running match for user', {
+        userId,
+        timezone: tz,
+        usedDefaultTz,
+      })
       ran += 1
 
       const daily = await computeAndStoreDailyExploreMatchService(userId)
       if (!daily.success) {
+        console.error('[daily-activity-match] Compute match failed', {
+          userId,
+          error: daily.error,
+        })
         errors.push({ userId, error: daily.error ?? 'Failed to compute match' })
         continue
       }
 
-      if (!daily.activities || daily.activities.length < 1) continue
+      if (!daily.activities || daily.activities.length < 1) {
+        console.log('[daily-activity-match] No activities to email', {
+          userId,
+          activityCount: daily.activities?.length ?? 0,
+        })
+        continue
+      }
 
       let authEmail: string | null = null
       try {
         const { data: userRes } = await supabase.auth.admin.getUserById(userId)
         authEmail = (userRes as any)?.user?.email ?? null
       } catch (e: any) {
-        console.error('cron daily-activity-match: getUserById failed', userId, e)
+        console.error('[daily-activity-match] getUserById failed', {
+          userId,
+          error: e?.message,
+        })
+        errors.push({ userId, error: e?.message ?? 'Failed to get user' })
+        continue
       }
 
       const toEmail = extractUserEmail({ authEmail, portfolioMetadata: meta })
       if (!toEmail) {
+        console.error('[daily-activity-match] No email for user', { userId })
         errors.push({ userId, error: 'No email address found for user' })
         continue
       }
@@ -115,8 +196,9 @@ export async function GET(request: NextRequest) {
       const userName =
         (meta?.basic?.name && typeof meta.basic.name === 'string' && meta.basic.name.trim()) || undefined
 
+      const localDateYmd = localDateForIso(now.toISOString(), tz)
       const dateLabel = (() => {
-        const ymd = eightAmCheck.localDate
+        const ymd = localDateYmd
         if (!ymd) return undefined
         const d = new Date(`${ymd}T00:00:00`)
         if (Number.isNaN(d.getTime())) return undefined
@@ -128,6 +210,12 @@ export async function GET(request: NextRequest) {
 
       const unsubscribeToken = createUnsubscribeToken(userId)
       const unsubscribeUrl = `${siteUrl}/api/unsubscribe/daily-match?token=${encodeURIComponent(unsubscribeToken)}`
+
+      console.log('[daily-activity-match] Sending email', {
+        userId,
+        toEmail: toEmail.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
+        activityCount: daily.activities.length,
+      })
 
       const sendResult = await sendDailyActivityMatchEmail({
         toEmail,
@@ -170,13 +258,25 @@ export async function GET(request: NextRequest) {
       })
 
       if (!sendResult.success) {
+        console.error('[daily-activity-match] Send email failed', {
+          userId,
+          error: sendResult.error,
+        })
         errors.push({ userId, error: sendResult.error })
         continue
       }
 
       emailed += 1
+      console.log('[daily-activity-match] Email sent', { userId })
     }
   }
+
+  console.log('[daily-activity-match] DONE', {
+    scanned_users: scanned,
+    matches_ran: ran,
+    emails_sent: emailed,
+    error_count: errors.length,
+  })
 
   return NextResponse.json({
     ok: true,
@@ -186,5 +286,16 @@ export async function GET(request: NextRequest) {
     error_count: errors.length,
     errors: errors.slice(0, 50),
   })
+  } catch (e: unknown) {
+    const err = e as { message?: string; stack?: string }
+    console.error('[daily-activity-match] UNHANDLED ERROR', {
+      error: err?.message,
+      stack: err?.stack,
+    })
+    return NextResponse.json(
+      { error: err?.message ?? 'Internal server error in daily-activity-match' },
+      { status: 500 }
+    )
+  }
 }
 

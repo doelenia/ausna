@@ -92,7 +92,7 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000
+        const oneHourAgoMs = Date.now() - 60 * 60 * 1000
 
         const unreadConversations = conversations.filter((conv) => conv.unread_count > 0)
 
@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
           const lastMessageAt = last.created_at as string
 
           const lastMessageAtMs = Date.parse(lastMessageAt)
-          if (!Number.isNaN(lastMessageAtMs) && lastMessageAtMs >= tenMinutesAgoMs) {
+          if (!Number.isNaN(lastMessageAtMs) && lastMessageAtMs >= oneHourAgoMs) {
             hasRecentUnread = true
           }
 
@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
         })
 
         if (!hasRecentUnread) {
-          console.log('[messages-digest] Skipping user; no unread messages in last 10 minutes', {
+          console.log('[messages-digest] Skipping user; no unread messages in last 1 hour', {
             userId,
           })
           continue

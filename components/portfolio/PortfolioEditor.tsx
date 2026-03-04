@@ -545,6 +545,10 @@ export function PortfolioEditor({
           if (activityLocation.online) {
             formData.append('activity_location_online', 'true')
             formData.append('activity_location_online_url', activityLocation.onlineUrl || '')
+            formData.append(
+              'activity_location_online_private',
+              activityLocation.isOnlineLocationPrivate ? 'true' : 'false'
+            )
           } else {
             formData.append('activity_location_online', 'false')
             if (activityLocation.line1) {
@@ -788,6 +792,9 @@ export function PortfolioEditor({
             <div>
               <UIText as="label" htmlFor="description" className="block mb-2">
                 Description
+              </UIText>
+              <UIText as="p" className="text-xs text-gray-500 mb-2">
+                You can also add relevant linnks (NOT LinkedIn!) This description will be used to build the advance knowledge graph that help us to find the best opportunities for you.
               </UIText>
               <textarea
                 id="description"

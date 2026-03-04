@@ -182,6 +182,27 @@ function normalizeCity(s: string | undefined): string {
   return s.trim().toLowerCase()
 }
 
+function computeAccessibilityKind(
+  userLoc: ActivityLocationValue | null,
+  activityLoc: ActivityLocationValue | undefined | null
+): 'online' | 'local' | null {
+  if (activityLoc?.online) return 'online'
+
+  if (activityLoc && userLoc?.city && activityLoc.city) {
+    const cityMatches = normalizeCity(userLoc.city) === normalizeCity(activityLoc.city)
+    const countryMatches =
+      !!userLoc.country &&
+      !!activityLoc.country &&
+      normalizeCity(userLoc.country) === normalizeCity(activityLoc.country)
+
+    if (cityMatches && (!userLoc.country || countryMatches)) {
+      return 'local'
+    }
+  }
+
+  return null
+}
+
 function isSameCity(
   userLoc: ActivityLocationValue | null,
   activityLoc: ActivityLocationValue | undefined | null
@@ -237,10 +258,8 @@ function isOpenToJoin(activity: ActivityRow): boolean {
 }
 
 function userNotJoinedOrUploaded(activity: ActivityRow, userId: string): boolean {
-  if (activity.user_id === userId) return false
   const members = activity.metadata?.members || []
-  const managers = activity.metadata?.managers || []
-  return !members.includes(userId) && !managers.includes(userId)
+  return !members.includes(userId)
 }
 
 function activityMatchesAtLeastOne(
@@ -307,7 +326,13 @@ export async function getExploreActivitiesService(userId: string): Promise<Explo
     if (row.visibility === 'private') continue
     if (!isOpenToJoin(row)) continue
     if (!userNotJoinedOrUploaded(row, userId)) continue
-    if (!activityMatchesAtLeastOne(row, context)) continue
+    // Accessibility/location is the only initial relevance filter we keep for explore/match,
+    // but if the user has no location recorded we skip this filter entirely.
+    if (userLocation) {
+      const location = row.metadata?.properties?.location
+      const accessibilityKind = computeAccessibilityKind(userLocation, location)
+      if (!accessibilityKind) continue
+    }
 
     const basic = row.metadata?.basic || {}
     filtered.push({
@@ -571,9 +596,10 @@ export async function computeAndStoreDailyExploreMatchService(userId: string): P
 
       let accessibility: DailyMatchAccessibilityHighlight | undefined
       const loc = activity.location
-      if (loc?.online) {
+      const accessibilityKind = computeAccessibilityKind(userLocation, loc)
+      if (accessibilityKind === 'online') {
         accessibility = { kind: 'online', label: 'Online' }
-      } else if (loc && isSameCity(userLocation, loc)) {
+      } else if (accessibilityKind === 'local') {
         accessibility = { kind: 'local', label: 'Local' }
       }
 

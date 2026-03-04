@@ -35,6 +35,15 @@ export interface ActivityLocationValue {
    * When set, display name can be derived from host (e.g. zoom.us → "Zoom").
    */
   onlineUrl?: string
+
+  /**
+   * When true for an online activity that has a meeting URL, visitors who are
+   * not members/managers/owners should not get a clickable link. They still
+   * see that the activity is online (e.g. "Zoom"), but clicking the badge
+   * should show the same "members only" notification as private physical
+   * addresses.
+   */
+  isOnlineLocationPrivate?: boolean
 }
 
 /**

@@ -55,7 +55,7 @@ Each user’s timezone is read from their **human portfolio** row:
 - `portfolios.type = 'human'`
 - `metadata.properties.timezone = "<IANA timezone>"` (example: `"Asia/Tokyo"`)
 
-If timezone is missing, that user is skipped by the cron run.
+If timezone is missing or not set (e.g. no location recorded for the user), the cron uses **Tokyo time zone** (`Asia/Tokyo`) as the default so the user still receives the daily match at 8am JST.
 
 ## Vercel Cron setup
 
@@ -65,6 +65,26 @@ This repo includes `vercel.json`:
 - Calls: `/api/cron/daily-activity-match`
 
 On each invocation, the endpoint checks each user’s local time and only runs when that user is at **8am** and hasn’t already run today (based on `metadata.properties.daily_explore_match.ran_at`). Users who have unsubscribed (`metadata.properties.daily_explore_match.unsubscribed === true`) are skipped and do not receive the email.
+
+## How to test the daily match cron
+
+1. **Call the cron endpoint** with your `CRON_SECRET` (same as Vercel Cron uses):
+   - Header: `Authorization: Bearer <CRON_SECRET>`
+   - Or query: `?secret=<CRON_SECRET>`
+   - Example (local):  
+     `curl -H "Authorization: Bearer YOUR_CRON_SECRET" "http://localhost:3000/api/cron/daily-activity-match"`
+   - Example (preview/production):  
+     `curl -H "Authorization: Bearer YOUR_CRON_SECRET" "https://your-domain.vercel.app/api/cron/daily-activity-match"`
+
+2. **When does it actually send?**  
+   The cron runs every hour. It only runs the match and sends email for users whose **local time is 8:00** (in their stored timezone, or Tokyo if none). To test without waiting for 8am:
+   - **Non-production only:** add `&force_run=1` to the URL. This skips the 8am check and runs match + email for every eligible (non-unsubscribed) user.  
+     Example:  
+     `curl -H "Authorization: Bearer YOUR_CRON_SECRET" "http://localhost:3000/api/cron/daily-activity-match?force_run=1"`
+   - `force_run` is ignored in production.
+
+3. **Logs**  
+   The handler logs with the `[daily-activity-match]` prefix: START, batch load, per-user skip reasons (not 8am, unsubscribed, already ran today), run match, send email, and DONE summary. Check your server or Vercel logs for these.
 
 ## Test-only “send email” button
 
