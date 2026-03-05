@@ -1,0 +1,3 @@
+{"sessionId":"5a7dba","location":"app/login/actions.ts:checkEmailStatus:entry","message":"checkEmailStatus called","data":{"normalizedEmail":"fddf@mml.com"},"hypothesisId":"D","timestamp":1772672652378}
+{"sessionId":"5a7dba","location":"app/login/actions.ts:afterListUsers","message":"after listUsers","data":{"listError":null,"userCount":1,"firstUserId":"2e246509-10bd-48ed-a6e1-2214f3d8d452","firstUserEmail":"seratrimyjew@gmail.com","hasExistingUser":true,"requestedEmail":"fddf@mml.com"},"hypothesisId":"A","timestamp":1772672652852}
+{"sessionId":"5a7dba","location":"AuthForm.tsx:afterCheckEmailResponse","message":"check-email response received","data":{"apiStatus":"new_or_pseudo","rawKeys":["status"]},"hypothesisId":"C","timestamp":1772672652859}
