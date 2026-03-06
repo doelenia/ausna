@@ -32,28 +32,56 @@ export async function findUserByEmail(email: string): Promise<string | null> {
 
 /**
  * Find human portfolio by email (searches metadata.email field)
- * Returns portfolio if found, null otherwise
+ * Uses request-scoped client; RLS applies (pseudo portfolios hidden from non-admins).
  */
 export async function findHumanPortfolioByEmail(email: string): Promise<HumanPortfolio | null> {
   const supabase = await createClient()
-  
+
   try {
-    // Search for human portfolios where metadata.email matches
     const { data, error } = await supabase
       .from('portfolios')
       .select('*')
       .eq('type', 'human')
       .eq('metadata->>email', email.toLowerCase())
       .maybeSingle()
-    
+
     if (error) {
       console.error('Error finding human portfolio by email:', error)
       return null
     }
-    
+
     return data as HumanPortfolio | null
   } catch (error) {
     console.error('Error finding human portfolio by email:', error)
+    return null
+  }
+}
+
+/**
+ * Find human portfolio by email using service client (bypasses RLS).
+ * Use when the caller must see pseudo portfolios (e.g. invite flow).
+ */
+export async function findHumanPortfolioByEmailWithService(
+  email: string
+): Promise<HumanPortfolio | null> {
+  const serviceClient = createServiceClient()
+
+  try {
+    const { data, error } = await serviceClient
+      .from('portfolios')
+      .select('*')
+      .eq('type', 'human')
+      .eq('metadata->>email', email.toLowerCase())
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error finding human portfolio by email (service):', error)
+      return null
+    }
+
+    return data as HumanPortfolio | null
+  } catch (error) {
+    console.error('Error finding human portfolio by email (service):', error)
     return null
   }
 }

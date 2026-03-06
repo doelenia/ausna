@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { findHumanPortfolioByEmail } from '@/lib/portfolio/admin-helpers'
+import { findAuthUserIdByEmail } from '@/lib/auth-admin'
+import {
+  findHumanPortfolioByEmailWithService,
+} from '@/lib/portfolio/admin-helpers'
+import { sendContactInviteEmail } from '@/lib/email/contactInvite'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,7 +36,7 @@ function getSiteUrl(): string {
  * - Ensures a pseudo human portfolio exists for this email (creating one if needed).
  * - Creates a friend relation between inviter and the pseudo human's user account.
  * - Creates a user_invites record with a one-time token.
- * - Sends an invitation email via Supabase Auth Admin API.
+ * - Sends an invitation email via Resend.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -101,9 +105,9 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Resend path: reuse existing token and just send another email
+      // Resend path: reuse existing token and send email via Resend.
+      // inviteUserByEmail fails for already-registered users; Resend works for all.
       try {
-        // Derive inviter display name
         let inviterName = 'Someone'
         const { data: inviterPortfolio } = await supabase
           .from('portfolios')
@@ -121,18 +125,18 @@ export async function POST(request: NextRequest) {
             inviterName
         }
 
-        const { data: emailResult, error: emailError } =
-          await serviceClient.auth.admin.inviteUserByEmail(normalizedEmail, {
-            redirectTo: inviteLink,
-            data: {
-              invited_by_name: inviterName,
-            },
-          } as any)
+        const inviteeName = (existingInvite.invitee_name as string) || trimmedName
+        const result = await sendContactInviteEmail({
+          toEmail: normalizedEmail,
+          inviterName,
+          inviteeName,
+          inviteLink,
+        })
 
-        if (emailError) {
-          console.error('Error resending invite email:', emailError)
+        if (result.success) {
+          console.log('Resent invite email via Resend:', result.messageId)
         } else {
-          console.log('Resent invite email via Supabase:', emailResult)
+          console.error('Error resending invite email:', result.error)
         }
       } catch (err) {
         console.error('Exception when resending invite email:', err)
@@ -141,32 +145,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, invite_link: inviteLink })
     }
 
-    // 2. Ensure we have an auth user for this email (create if needed)
-    const { data: listResult, error: listError } =
-      await serviceClient.auth.admin.listUsers({
-        email: normalizedEmail,
-        perPage: 1,
-      } as any)
+    // 2. Ensure we have an auth user for this email (create if needed).
+    // listUsers() does not support email filter; find via pagination.
+    let inviteeUserId: string | null = await findAuthUserIdByEmail(
+      serviceClient,
+      normalizedEmail
+    )
 
-    if (listError) {
-      console.error('Error checking auth user for invite:', listError)
-      return NextResponse.json(
-        { error: 'Failed to prepare invitation.' },
-        { status: 500 }
-      )
-    }
-
-    let inviteeUserId: string | null = null
-    const existingUser =
-      (listResult as any)?.users?.find(
-        (u: any) =>
-          typeof u.email === 'string' &&
-          u.email.toLowerCase() === normalizedEmail
-      ) ?? null
-
-    if (existingUser) {
-      inviteeUserId = existingUser.id as string
-    } else {
+    if (!inviteeUserId) {
       // Create a new auth user in disabled / invite-only fashion
       const { data: createdUser, error: createError } =
         await serviceClient.auth.admin.createUser({
@@ -203,9 +189,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 3. Ensure a (possibly pseudo) human portfolio exists for this email
+    // 3. Ensure a (possibly pseudo) human portfolio exists for this email.
+    // Use service client so we see pseudo portfolios (RLS hides them from non-admins).
     let pseudoPortfolioId: string | null = null
-    const existingPortfolio = await findHumanPortfolioByEmail(normalizedEmail)
+    const existingPortfolio =
+      await findHumanPortfolioByEmailWithService(normalizedEmail)
 
     if (existingPortfolio) {
       pseudoPortfolioId = existingPortfolio.id
@@ -345,25 +333,23 @@ export async function POST(request: NextRequest) {
       console.error('Error resolving inviter name for invite email:', e)
     }
 
-    // 6. Send invitation email via Supabase Auth Admin API
+    // 6. Send invitation email via Resend.
+    // inviteUserByEmail fails for already-registered users (e.g. pseudo); Resend works for all.
     try {
-      const { data: emailResult, error: emailError } =
-        await serviceClient.auth.admin.inviteUserByEmail(normalizedEmail, {
-          redirectTo: inviteLink,
-          data: {
-            invited_by_name: inviterName,
-          },
-        } as any)
+      const result = await sendContactInviteEmail({
+        toEmail: normalizedEmail,
+        inviterName,
+        inviteeName: trimmedName,
+        inviteLink,
+      })
 
-      if (emailError) {
-        console.error('Error sending invite email:', emailError)
-        // Do not fail the request if email sending fails; user_invites row exists
+      if (result.success) {
+        console.log('Invite email sent via Resend:', result.messageId)
       } else {
-        console.log('Invite email sent via Supabase:', emailResult)
+        console.error('Error sending invite email:', result.error)
       }
     } catch (err) {
       console.error('Exception when sending invite email:', err)
-      // Non-fatal
     }
 
     return NextResponse.json({ success: true, invite_link: inviteLink })
