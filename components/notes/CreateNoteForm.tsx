@@ -1,45 +1,100 @@
 'use client'
 
-import { useState, useRef, useEffect, Fragment } from 'react'
+import { useState, useRef, useEffect, Fragment, useMemo } from 'react'
 import { createNote } from '@/app/notes/actions'
-import { Portfolio, isProjectPortfolio, isActivityPortfolio, PortfolioVisibility } from '@/types/portfolio'
+import {
+  Portfolio,
+  isProjectPortfolio,
+  isActivityPortfolio,
+  isCommunityPortfolio,
+} from '@/types/portfolio'
+import type { NoteVisibility } from '@/types/note'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
-import { UIText, Button, Content, UIButtonText } from '@/components/ui'
+import { UIText, Button, Content, UIButtonText, Card, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import Link from 'next/link'
 import { ensureBrowserCompatibleImage } from '@/lib/utils/heic-converter'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
-import { Image as ImageIcon, Link2 } from 'lucide-react'
+import { Image as ImageIcon, Link2, Megaphone, Plus } from 'lucide-react'
+import {
+  addDays,
+  addMonths,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  startOfWeek,
+  endOfWeek,
+  isSameMonth,
+  isSameDay,
+  format,
+  isBefore,
+  startOfDay,
+} from 'date-fns'
+
+export type CollaboratorCandidate = {
+  id: string
+  username: string | null
+  name: string | null
+  avatar: string | null
+}
 
 interface CreateNoteFormProps {
   portfolios: Portfolio[]
   defaultPortfolioIds?: string[]
   humanPortfolioId?: string
+  /** Owner's human portfolio for display (same style as NoteCard) */
+  ownerPortfolio?: Portfolio | null
+  currentUserId?: string
   mentionedNoteId?: string
   redirectUrl?: string
   onSuccess?: () => void
   onCancel?: () => void
+  /** When true, form is for creating an open call (title, end date; no comment/collection settings) */
+  isOpenCall?: boolean
 }
 
 type ReferenceType = 'none' | 'image' | 'url'
+
+const OPEN_CALL_NEVER_ENDS_WARNING = 'Setting never ends might lower the priority for broadcasting.'
 
 export function CreateNoteForm({
   portfolios,
   defaultPortfolioIds = [],
   humanPortfolioId,
+  ownerPortfolio = null,
+  currentUserId,
   mentionedNoteId,
   redirectUrl,
   onSuccess,
   onCancel,
+  isOpenCall = false,
 }: CreateNoteFormProps) {
   const router = useRouter()
   const [text, setText] = useState('')
+  const [openCallTitle, setOpenCallTitle] = useState('')
+  const [openCallEndDate, setOpenCallEndDate] = useState<Date | null>(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 7)
+    return d
+  })
+  const [showEndDatePopup, setShowEndDatePopup] = useState(false)
+  const [openCallCalendarMonth, setOpenCallCalendarMonth] = useState<Date>(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 7)
+    return d
+  })
   const [referenceType, setReferenceType] = useState<ReferenceType>('none')
   const [urlInput, setUrlInput] = useState('')
   const [confirmedUrl, setConfirmedUrl] = useState<string | null>(null)
   const [selectedPortfolios, setSelectedPortfolios] = useState<string[]>(defaultPortfolioIds)
+  const [collaborators, setCollaborators] = useState<CollaboratorCandidate[]>([])
+  const [showCollaboratorPopup, setShowCollaboratorPopup] = useState(false)
+  const [collaboratorSearchQuery, setCollaboratorSearchQuery] = useState('')
+  const [collaboratorCandidates, setCollaboratorCandidates] = useState<CollaboratorCandidate[]>([])
+  const [collaboratorCandidatesLoading, setCollaboratorCandidatesLoading] = useState(false)
   const [images, setImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([]) // Thumbnail URLs for previews
   const [dragIndex, setDragIndex] = useState<number | null>(null)
@@ -58,16 +113,40 @@ export function CreateNoteForm({
   const [pinInfo, setPinInfo] = useState<{ count: number; max: number; canPin: boolean } | null>(null)
   const [loadingPinInfo, setLoadingPinInfo] = useState(false)
   const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone'>('everyone')
-  const [visibility, setVisibility] = useState<PortfolioVisibility>('public')
+  const [visibility, setVisibility] = useState<NoteVisibility>('public')
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [showAssignPanel, setShowAssignPanel] = useState(false)
+  const [userSelectedPortfolio, setUserSelectedPortfolio] = useState<Portfolio | null>(null)
+  const [assignableProjects, setAssignableProjects] = useState<Portfolio[]>([])
+  const [assignableActivities, setAssignableActivities] = useState<Portfolio[]>([])
+  const [assignableCommunities, setAssignableCommunities] = useState<Portfolio[]>([])
+  const [assignableLoading, setAssignableLoading] = useState(false)
+  /** When collaborators are added: portfolio id -> true if all (owner + collaborators) can create there */
+  const [portfolioIdsAllCanCreate, setPortfolioIdsAllCanCreate] = useState<Record<string, boolean>>({})
+  const [portfolioIdsAllCanCreateLoading, setPortfolioIdsAllCanCreateLoading] = useState(false)
+  const supabase = useMemo(() => createClient(), [])
 
-  // Filter to show portfolios passed in (currently projects/activities only)
-  const displayablePortfolios = portfolios
+  // Effective list: props portfolios + portfolio selected from assign panel (for display and submit)
+  const effectivePortfolios = useMemo(() => {
+    const list = [...portfolios]
+    if (userSelectedPortfolio && !list.some((p) => p.id === userSelectedPortfolio.id)) {
+      list.push(userSelectedPortfolio)
+    }
+    return list
+  }, [portfolios, userSelectedPortfolio])
 
-  // Get the selected context portfolio ID (project or activity)
+  // Filter to show portfolios passed in (currently projects/activities/communities)
+  const displayablePortfolios = effectivePortfolios
+
+  // Get the selected context portfolio ID (project, activity, or community)
   const selectedContextId = selectedPortfolios.find((id) => {
-    const portfolio = portfolios.find((p) => p.id === id)
-    return portfolio && (isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio))
+    const portfolio = effectivePortfolios.find((p) => p.id === id)
+    return (
+      portfolio &&
+      (isProjectPortfolio(portfolio) ||
+        isActivityPortfolio(portfolio) ||
+        isCommunityPortfolio(portfolio))
+    )
   })
 
   // Fetch collections for the selected project or activity
@@ -96,6 +175,27 @@ export function CreateNoteForm({
 
     fetchCollections()
   }, [selectedContextId])
+
+  // Fetch collaborator candidates when popup is open (friends or portfolio members, then filter by q)
+  useEffect(() => {
+    if (!showCollaboratorPopup) {
+      setCollaboratorCandidates([])
+      return
+    }
+    const portfolioId = selectedContextId || ''
+    const params = new URLSearchParams()
+    if (portfolioId) params.set('portfolio_id', portfolioId)
+    if (collaboratorSearchQuery.trim()) params.set('q', collaboratorSearchQuery.trim())
+    const url = `/api/notes/collaborator-candidates?${params.toString()}`
+    setCollaboratorCandidatesLoading(true)
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : { users: [] }))
+      .then((data) => {
+        setCollaboratorCandidates(data.users || [])
+      })
+      .catch(() => setCollaboratorCandidates([]))
+      .finally(() => setCollaboratorCandidatesLoading(false))
+  }, [showCollaboratorPopup, selectedContextId, collaboratorSearchQuery])
 
   // Fetch pin info for the selected project or activity
   useEffect(() => {
@@ -145,6 +245,164 @@ export function CreateNoteForm({
   useEffect(() => {
     setSelectedCollectionIds([])
   }, [selectedContextId])
+
+  // Keep visibility valid when assignment changes (unassigned: public/friends/private; assigned: public/members)
+  useEffect(() => {
+    if (selectedContextId) {
+      if (visibility === 'friends' || visibility === 'private') {
+        setVisibility('members')
+      }
+    } else {
+      if (visibility === 'members') {
+        setVisibility('public')
+      }
+    }
+  }, [selectedContextId, visibility])
+
+  // Fetch assignable projects and activities when assign panel opens
+  useEffect(() => {
+    if (!showAssignPanel) return
+
+    const fetchAssignable = async () => {
+      setAssignableLoading(true)
+      try {
+        const { data: { user: authUser } } = await supabase.auth.getUser()
+        if (!authUser) {
+          setAssignableProjects([])
+          setAssignableActivities([])
+          return
+        }
+
+        const { data: allProjects } = await supabase
+          .from('portfolios')
+          .select('*')
+          .eq('type', 'projects')
+          .order('created_at', { ascending: false })
+
+        const { data: allActivities } = await supabase
+          .from('portfolios')
+          .select('*')
+          .eq('type', 'activities')
+          .order('created_at', { ascending: false })
+
+        const { data: allCommunities } = await supabase
+          .from('portfolios')
+          .select('*')
+          .eq('type', 'community')
+          .order('created_at', { ascending: false })
+
+        const projects = (allProjects || [])
+          .filter((p: any) => {
+            const metadata = p.metadata as any
+            const managers = metadata?.managers || []
+            const members = metadata?.members || []
+            const status = (metadata?.status as string | undefined) || null
+            const isMemberOrManager =
+              p.user_id === authUser.id ||
+              (Array.isArray(managers) && managers.includes(authUser.id)) ||
+              (Array.isArray(members) && members.includes(authUser.id))
+            const isActive = status !== 'archived'
+            return isMemberOrManager && isActive
+          })
+          .map((p: any) => ({ ...p, type: 'projects' as const } as Portfolio))
+
+        const projectNameById = new Map<string, string>()
+        ;(allProjects || []).forEach((p: any) => {
+          const meta = p.metadata as any
+          const basic = meta?.basic || {}
+          projectNameById.set(p.id, (basic.name as string) || 'Project')
+        })
+
+        const now = new Date()
+        const activities = (allActivities || [])
+          .filter((p: any) => {
+            const metadata = p.metadata as any
+            const managers: string[] = metadata?.managers || []
+            const members: string[] = metadata?.members || []
+            const isOwner = p.user_id === authUser.id
+            const isManager = Array.isArray(managers) && managers.includes(authUser.id)
+            const isMember = Array.isArray(members) && members.includes(authUser.id)
+            if (!isOwner && !isManager && !isMember) return false
+            const props = metadata?.properties || {}
+            const activity = props.activity_datetime as { start?: string; end?: string | null } | undefined
+            if (!activity?.start) return false
+            const start = new Date(activity.start)
+            if (Number.isNaN(start.getTime())) return false
+            let end: Date | null = null
+            if (activity.end) {
+              const parsedEnd = new Date(activity.end)
+              end = Number.isNaN(parsedEnd.getTime()) ? null : parsedEnd
+            }
+            const effectiveEnd = end ?? start
+            return effectiveEnd >= now
+          })
+          .map((p: any) => ({ ...p, type: 'activities' as const } as Portfolio))
+
+        const communities = (allCommunities || [])
+          .filter((p: any) => {
+            const metadata = p.metadata as any
+            const managers: string[] = metadata?.managers || []
+            const members: string[] = metadata?.members || []
+            const isOwner = p.user_id === authUser.id
+            const isManager = Array.isArray(managers) && managers.includes(authUser.id)
+            const isMember = Array.isArray(members) && members.includes(authUser.id)
+            return isOwner || isManager || isMember
+          })
+          .map((p: any) => ({ ...p, type: 'community' as const } as Portfolio))
+
+        setAssignableProjects(projects)
+        setAssignableActivities(activities)
+        setAssignableCommunities(communities)
+      } catch (err) {
+        console.error('Failed to fetch assignable portfolios:', err)
+        setAssignableProjects([])
+        setAssignableActivities([])
+        setAssignableCommunities([])
+      } finally {
+        setAssignableLoading(false)
+      }
+    }
+
+    fetchAssignable()
+  }, [showAssignPanel, supabase])
+
+  // When collaborators are added, check which assignable portfolios allow all (owner + collaborators) to post
+  useEffect(() => {
+    if (collaborators.length === 0) {
+      setPortfolioIdsAllCanCreate({})
+      return
+    }
+    const portfolioIds = [
+      ...assignableProjects.map((p) => p.id),
+      ...assignableActivities.map((p) => p.id),
+      ...assignableCommunities.map((p) => p.id),
+    ]
+    if (portfolioIds.length === 0 || !currentUserId) {
+      setPortfolioIdsAllCanCreate({})
+      return
+    }
+    const userIds = [currentUserId, ...collaborators.map((c) => c.id)]
+    setPortfolioIdsAllCanCreateLoading(true)
+    fetch('/api/portfolios/can-create-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ portfolio_ids: portfolioIds, user_ids: userIds }),
+    })
+      .then((res) => (res.ok ? res.json() : { result: {} }))
+      .then((data) => setPortfolioIdsAllCanCreate(data.result || {}))
+      .catch(() => setPortfolioIdsAllCanCreate({}))
+      .finally(() => setPortfolioIdsAllCanCreateLoading(false))
+  }, [collaborators, currentUserId, assignableProjects, assignableActivities, assignableCommunities])
+
+  // If a portfolio is selected and collaborators are added such that not all can post there, clear the selection
+  useEffect(() => {
+    if (collaborators.length === 0 || !selectedPortfolios.length) return
+    const id = selectedPortfolios[0]
+    if (portfolioIdsAllCanCreate[id] === false) {
+      setSelectedPortfolios([])
+      setUserSelectedPortfolio(null)
+    }
+  }, [collaborators.length, portfolioIdsAllCanCreate, selectedPortfolios])
 
   /**
    * Read EXIF orientation from image file
@@ -741,6 +999,10 @@ export function CreateNoteForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    if (isOpenCall && !openCallTitle.trim()) {
+      setError('Open call title is required')
+      return
+    }
     setIsSubmitting(true)
 
     try {
@@ -759,33 +1021,42 @@ export function CreateNoteForm({
         })
       }
       
-      // Only allow IDs that correspond to portfolios we know about
+      // Only allow IDs that correspond to portfolios we know about (props + user-selected)
       const contextPortfolios = selectedPortfolios.filter((id) =>
-        portfolios.some((p) => p.id === id)
+        effectivePortfolios.some((p) => p.id === id)
       )
-      
-      // Must have exactly one portfolio assigned
-      if (contextPortfolios.length !== 1) {
-        setError('Note must be assigned to exactly one portfolio')
+      // Allow zero or one portfolio (assignment is optional)
+      if (contextPortfolios.length > 1) {
+        setError('Note can be assigned to at most one portfolio')
         setIsSubmitting(false)
         return
       }
-      
       formData.append('assigned_portfolios', JSON.stringify(contextPortfolios))
-      
+
+      // Collaborators are invited after note is created (invite flow), not added directly
+      formData.append('collaborator_account_ids', '[]')
+
       if (mentionedNoteId) {
         formData.append('mentioned_note_id', mentionedNoteId)
       }
 
-      if (!mentionedNoteId) {
-        formData.append('annotation_privacy', annotationPrivacy)
+      if (isOpenCall) {
+        formData.append('note_type', 'open_call')
+        formData.append('open_call_title', openCallTitle.trim())
+        formData.append('open_call_never_ends', openCallEndDate === null ? 'true' : 'false')
+        if (openCallEndDate) {
+          formData.append('open_call_end_date', openCallEndDate.toISOString())
+        }
+      } else {
+        if (!mentionedNoteId) {
+          formData.append('annotation_privacy', annotationPrivacy)
+        }
+        if (selectedCollectionIds.length > 0) {
+          formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
+        }
       }
 
-      if (selectedCollectionIds.length > 0) {
-        formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
-      }
-
-      // Visibility: public or private (default public)
+      // Visibility: public/friends/private (unassigned) or public/members (assigned)
       formData.append('visibility', visibility)
 
       // Add pin preference if user wants to pin
@@ -803,13 +1074,33 @@ export function CreateNoteForm({
       }
 
       if (result.success) {
+        if (result.noteId && collaborators.length > 0) {
+          for (const c of collaborators) {
+            try {
+              await fetch(`/api/notes/${result.noteId}/collaborator-invites`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ invitee_id: c.id }),
+              })
+            } catch (err) {
+              console.error('Failed to send invite to', c.id, err)
+            }
+          }
+        }
         setText('')
         setReferenceType('none')
         setUrlInput('')
         setConfirmedUrl(null)
+        setCollaborators([])
         setImages([])
         imagePreviews.forEach((url) => URL.revokeObjectURL(url))
         setImagePreviews([])
+        if (isOpenCall) {
+          setOpenCallTitle('')
+          const d = addDays(startOfDay(new Date()), 7)
+          setOpenCallEndDate(d)
+          setOpenCallCalendarMonth(d)
+        }
         if (onSuccess) {
           onSuccess()
         } else if (redirectUrl) {
@@ -828,11 +1119,170 @@ export function CreateNoteForm({
     }
   }
 
+  const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
+  const ownerName = ownerBasic?.name || 'You'
+  const ownerUrl = currentUserId ? getPortfolioUrl('human', ownerPortfolio?.id ?? '') : '#'
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
           {error}
+        </div>
+      )}
+
+      {/* Open call heading + title at top (same size/style as Projects, Activities, Notes section headings) */}
+      {isOpenCall && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Megaphone className="w-5 h-5 text-orange-500 flex-shrink-0" strokeWidth={1.5} aria-hidden />
+            <UIText>Open call</UIText>
+          </div>
+          <textarea
+            id="open_call_title"
+            value={openCallTitle}
+            onChange={(e) => setOpenCallTitle(e.target.value)}
+            placeholder="Open call title"
+            rows={2}
+            className="w-full px-0 py-2 bg-transparent text-xl font-normal text-gray-900 placeholder:text-gray-400 focus:outline-none resize-none"
+            aria-label="Open call title"
+          />
+        </div>
+      )}
+
+      {/* Authors pill (stacked avatars when 2+ people) + Plus to add collaborators (invite after create) */}
+      {ownerPortfolio && (
+        <div className="flex items-center gap-2 flex-wrap mb-2">
+          <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0">
+            {collaborators.length === 0 ? (
+              <>
+                <UserAvatar
+                  userId={currentUserId ?? ''}
+                  name={ownerName}
+                  avatar={ownerBasic?.avatar}
+                  size={32}
+                  showLink={false}
+                />
+                <UIText as="span" className="text-gray-700 whitespace-nowrap">{ownerName}</UIText>
+              </>
+            ) : (
+              (() => {
+                const authorProfiles: { id: string; name: string; avatar?: string | null }[] = [
+                  { id: currentUserId ?? '', name: ownerName, avatar: ownerBasic?.avatar },
+                  ...collaborators.map((c) => ({ id: c.id, name: c.name || c.username || c.id.slice(0, 8), avatar: c.avatar })),
+                ]
+                const display = authorProfiles.slice(0, 5)
+                const label =
+                  authorProfiles.length === 2
+                    ? `${authorProfiles[0].name} and ${authorProfiles[1].name}`
+                    : authorProfiles.length > 2
+                      ? `${authorProfiles[0].name}, ${authorProfiles[1].name}, and others`
+                      : authorProfiles[0].name
+                return (
+                  <>
+                    <div className="flex -space-x-2 flex-shrink-0">
+                      {display.map((p, index) => (
+                        <div
+                          key={p.id}
+                          className="relative ring-2 ring-white rounded-full"
+                          style={{ zIndex: display.length - index }}
+                        >
+                          <UserAvatar userId={p.id} name={p.name} avatar={p.avatar} size={32} showLink={false} />
+                        </div>
+                      ))}
+                    </div>
+                    <UIText as="span" className="text-gray-700 whitespace-nowrap">{label}</UIText>
+                  </>
+                )
+              })()
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowCollaboratorPopup(true)}
+            className="p-2 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 flex-shrink-0"
+            title="Add collaborators (invite)"
+            aria-label="Add collaborators"
+          >
+            <Plus className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
+      {/* Collaborator popup - same style as reactions (reactions-style modal) */}
+      {showCollaboratorPopup && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+          onClick={() => setShowCollaboratorPopup(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 flex items-center justify-center border-b border-gray-100">
+              <UIText>Add collaborators (invite after note is created)</UIText>
+            </div>
+            {collaborators.length > 0 && (
+              <div className="px-4 py-3 border-b border-gray-100">
+                <UIText as="p" className="text-xs text-gray-500 mb-2">Added (to invite)</UIText>
+                <div className="space-y-1">
+                  {collaborators.map((c) => (
+                    <div key={c.id} className="flex items-center justify-between gap-2 py-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <UserAvatar userId={c.id} name={c.name || c.username || ''} avatar={c.avatar} size={28} showLink={false} />
+                        <UIText as="span" className="truncate text-sm">{c.name || c.username || c.id.slice(0, 8)}</UIText>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCollaborators((prev) => prev.filter((x) => x.id !== c.id))}
+                        className="text-sm text-red-600 hover:text-red-700 flex-shrink-0"
+                        aria-label="Remove"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <input
+              type="text"
+              value={collaboratorSearchQuery}
+              onChange={(e) => setCollaboratorSearchQuery(e.target.value)}
+              placeholder="Search by username or name..."
+              className="mx-4 mt-3 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              autoFocus={collaborators.length === 0}
+            />
+            <div className="px-4 py-3 overflow-y-auto flex-1" style={{ maxHeight: '50vh' }}>
+              {collaboratorCandidatesLoading ? (
+                <UIText className="text-gray-500 text-sm">Loading...</UIText>
+              ) : collaboratorCandidates.length === 0 ? (
+                <UIText className="text-gray-500 text-sm">
+                  {collaboratorSearchQuery.trim() ? 'No matching people.' : 'No friends or members to add.'}
+                </UIText>
+              ) : (
+                collaboratorCandidates
+                  .filter((u) => !collaborators.some((c) => c.id === u.id))
+                  .map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        setCollaborators((prev) => [...prev, u])
+                        setCollaboratorSearchQuery('')
+                      }}
+                      className="w-full flex items-center gap-3 py-2 rounded-lg hover:bg-gray-50 text-left"
+                    >
+                      <UserAvatar userId={u.id} name={u.name || u.username || ''} avatar={u.avatar} size={32} showLink={false} />
+                      <div className="min-w-0">
+                        <UIText as="span" className="block truncate">{u.name || u.username || u.id.slice(0, 8)}</UIText>
+                        {u.username && u.name && <UIText as="span" className="text-gray-500 text-xs block truncate">@{u.username}</UIText>}
+                      </div>
+                    </button>
+                  ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -845,7 +1295,7 @@ export function CreateNoteForm({
           required
           rows={4}
           className="w-full px-0 py-2 bg-transparent focus:outline-none resize-none placeholder:text-gray-400"
-          placeholder="Write your note..."
+          placeholder={isOpenCall ? 'Describe your open call...' : 'Write your note...'}
           aria-label="Note text"
         />
       </div>
@@ -1019,12 +1469,214 @@ export function CreateNoteForm({
         </div>
       )}
 
-      {/* Assigned project banner (same style as NoteCard) */}
-      {selectedContextId && (() => {
-        const context = portfolios.find(
+      {/* End date (open call only): below note content, before Advanced */}
+      {isOpenCall && (
+        <div>
+          <UIText as="label" className="block text-sm font-medium text-gray-700 mb-1">
+            End date
+          </UIText>
+          <button
+            type="button"
+            onClick={() => setShowEndDatePopup(true)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 text-left"
+          >
+            <span className="text-gray-900">
+              {openCallEndDate === null
+                ? 'Never ends'
+                : (() => {
+                    const now = new Date()
+                    now.setHours(0, 0, 0, 0)
+                    const end = new Date(openCallEndDate)
+                    end.setHours(0, 0, 0, 0)
+                    const daysLeft = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                    if (daysLeft <= 0) return 'Ended'
+                    if (daysLeft === 1) return 'Ends in 1 day'
+                    if (daysLeft < 30) return `Ends in ${daysLeft} days`
+                    return `Ends on ${end.toLocaleDateString()}`
+                  })()}
+            </span>
+            <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {openCallEndDate === null && (
+            <UIText as="p" className="mt-1.5 text-xs text-amber-700">
+              {OPEN_CALL_NEVER_ENDS_WARNING}
+            </UIText>
+          )}
+        </div>
+      )}
+
+      {/* Edit end date popup (open call only) */}
+      {isOpenCall && showEndDatePopup && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+          onClick={() => setShowEndDatePopup(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <UIText as="h3" className="font-medium text-gray-900 mb-3">
+              Set end date
+            </UIText>
+            <div className="space-y-3">
+              {/* When "Never ends" is selected: hide end-in-days and calendar, show only warning */}
+              {openCallEndDate === null ? (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="w-full px-3 py-2 rounded-lg text-sm text-left bg-amber-100 text-amber-900 border border-amber-300"
+                  >
+                    Never ends (selected)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = addDays(startOfDay(new Date()), 7)
+                      setOpenCallEndDate(d)
+                      setOpenCallCalendarMonth(d)
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-sm text-left bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  >
+                    End in X days
+                  </button>
+                  <UIText as="p" className="text-xs text-amber-700">
+                    {OPEN_CALL_NEVER_ENDS_WARNING}
+                  </UIText>
+                </div>
+              ) : (
+                <>
+                  {/* End in [ ] day - editable number */}
+                  {(() => {
+                    const today = startOfDay(new Date())
+                    const end = startOfDay(openCallEndDate)
+                    const daysVal = Math.max(1, Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)))
+                    return (
+                      <div className="flex items-center gap-2">
+                        <UIText as="span" className="text-sm text-gray-700">
+                          End in
+                        </UIText>
+                        <input
+                          type="number"
+                          min={1}
+                          value={daysVal}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10)
+                            if (!Number.isNaN(n) && n >= 1) {
+                              const d = addDays(startOfDay(new Date()), n)
+                              setOpenCallEndDate(d)
+                              setOpenCallCalendarMonth(d)
+                            }
+                          }}
+                          className="w-16 px-2 py-1.5 border border-gray-300 rounded-md text-sm text-center"
+                        />
+                        <UIText as="span" className="text-sm text-gray-700">
+                          day{daysVal !== 1 ? 's' : ''}
+                        </UIText>
+                      </div>
+                    )
+                  })()}
+                  {/* Calendar grid - bidirectional with end-in-days */}
+                  {(() => {
+                    const monthStart = startOfMonth(openCallCalendarMonth)
+                    const monthEnd = endOfMonth(monthStart)
+                    const calendarStart = startOfWeek(monthStart)
+                    const calendarEnd = endOfWeek(monthEnd)
+                    const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd })
+                    const today = startOfDay(new Date())
+                    return (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setOpenCallCalendarMonth(addMonths(openCallCalendarMonth, -1))}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                            aria-label="Previous month"
+                          >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                          </button>
+                          <UIText as="span" className="text-sm font-medium text-gray-900">
+                            {format(openCallCalendarMonth, 'MMMM yyyy')}
+                          </UIText>
+                          <button
+                            type="button"
+                            onClick={() => setOpenCallCalendarMonth(addMonths(openCallCalendarMonth, 1))}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                            aria-label="Next month"
+                          >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-7 gap-0.5 text-center text-xs">
+                          {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+                            <div key={d} className="py-1 text-gray-500 font-medium">
+                              {d}
+                            </div>
+                          ))}
+                          {days.map((day) => {
+                            const isPast = isBefore(day, today)
+                            const isSelected = openCallEndDate && isSameDay(day, openCallEndDate)
+                            const isCurrentMonth = isSameMonth(day, monthStart)
+                            return (
+                              <button
+                                key={day.toISOString()}
+                                type="button"
+                                disabled={isPast}
+                                onClick={() => {
+                                  if (isPast) return
+                                  setOpenCallEndDate(day)
+                                }}
+                                className={`p-1.5 rounded text-sm ${
+                                  isPast
+                                    ? 'text-gray-300 cursor-not-allowed'
+                                    : isSelected
+                                      ? 'bg-blue-600 text-white'
+                                      : isCurrentMonth
+                                        ? 'text-gray-900 hover:bg-gray-100'
+                                        : 'text-gray-400 hover:bg-gray-50'
+                                }`}
+                              >
+                                {format(day, 'd')}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })()}
+                  {/* Never ends selector */}
+                  <button
+                    type="button"
+                    onClick={() => setOpenCallEndDate(null)}
+                    className="w-full px-3 py-2 rounded-lg text-sm text-left bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  >
+                    Never ends
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="secondary" onClick={() => setShowEndDatePopup(false)}>
+                <UIText>Cancel</UIText>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assigned portfolio: badge or "Assign to" placeholder */}
+      {selectedContextId ? (() => {
+        const context = effectivePortfolios.find(
           (p) =>
             p.id === selectedContextId &&
-            (isProjectPortfolio(p) || isActivityPortfolio(p))
+            (isProjectPortfolio(p) ||
+              isActivityPortfolio(p) ||
+              isCommunityPortfolio(p))
         )
         if (!context) return null
         const basic = getPortfolioBasic(context)
@@ -1035,39 +1687,262 @@ export function CreateNoteForm({
         const emoji = metadata?.basic?.emoji
         const projectType = metadata?.project_type_specific ?? null
         const description = basic.description
+        const canClear = !!userSelectedPortfolio && userSelectedPortfolio.id === selectedContextId
         return (
-          <Link
-            href={getPortfolioUrl(context.type, context.id)}
-            className="flex items-start gap-3 p-3 rounded-lg bg-gray-100"
-          >
-            <div className="flex-shrink-0">
-              <StickerAvatar
-                src={basic.avatar}
-                alt={basic.name}
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-100">
+            <Link
+              href={getPortfolioUrl(context.type, context.id)}
+              className="flex items-start gap-3 flex-1 min-w-0 overflow-hidden"
+            >
+              <div className="flex-shrink-0">
+                <StickerAvatar
+                  src={basic.avatar}
+                  alt={basic.name}
                   type={context.type}
-                size={48}
-                emoji={emoji}
-                name={basic.name}
-              />
-            </div>
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
-                <Content className="truncate min-w-0">{basic.name}</Content>
-                {projectType && (
-                  <UIButtonText className="text-gray-500 flex-shrink-0">{projectType}</UIButtonText>
+                  size={48}
+                  emoji={emoji}
+                  name={basic.name}
+                />
+              </div>
+              <div className="flex-1 min-w-0 overflow-hidden">
+                <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+                  <Content className="truncate min-w-0">{basic.name}</Content>
+                  {projectType && (
+                    <UIButtonText className="text-gray-500 flex-shrink-0">{projectType}</UIButtonText>
+                  )}
+                </div>
+                {description && (
+                  <div className="min-w-0 overflow-hidden">
+                    <UIText className="text-gray-500 truncate block w-full">{description}</UIText>
+                  </div>
                 )}
               </div>
-              {description && (
-                <div className="min-w-0 overflow-hidden">
-                  <UIText className="text-gray-500 truncate block w-full">{description}</UIText>
-                </div>
-              )}
-            </div>
-          </Link>
+            </Link>
+            {canClear && (
+              <button
+                type="button"
+                onClick={() => {
+                  setUserSelectedPortfolio(null)
+                  setSelectedPortfolios([])
+                }}
+                className="p-1.5 rounded text-gray-500 hover:bg-gray-200 flex-shrink-0"
+                title="Remove assignment"
+                aria-label="Remove assignment"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         )
-      })()}
-      {selectedPortfolios.length === 0 && (
-        <UIText as="p" className="text-red-600">A project must be assigned to create a note</UIText>
+      })() : (
+        <button
+          type="button"
+          onClick={() => setShowAssignPanel(true)}
+          className="flex items-center justify-center gap-2 w-full p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-left"
+        >
+          <Plus className="w-5 h-5 text-gray-500 flex-shrink-0" />
+          <UIText as="span" className="font-medium text-gray-700">Assign to</UIText>
+        </button>
+      )}
+
+      {/* Assign portfolio panel (project or activity) */}
+      {showAssignPanel && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowAssignPanel(false)}
+        >
+          <div
+            className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Card variant="default" padding="sm">
+              <div className="mb-4">
+                <UIText>
+                  Choose a project, activity, or community to assign this note to
+                </UIText>
+              </div>
+              {assignableLoading ? (
+                <div className="py-8 text-center">
+                  <UIText className="text-gray-500">Loading...</UIText>
+                </div>
+              ) : (
+                <>
+                  {assignableProjects.length > 0 && (
+                    <div className="mb-4">
+                      <UIText as="p" className="mb-2 font-medium text-gray-700">Projects</UIText>
+                      {collaborators.length > 0 && (
+                        <UIText as="p" className="mb-2 text-xs text-gray-500">
+                          Only projects where all collaborators can post are selectable.
+                        </UIText>
+                      )}
+                      <div className="grid grid-cols-3 gap-x-4 gap-y-6">
+                        {assignableProjects.map((project) => {
+                          const basic = getPortfolioBasic(project)
+                          const metadata = project.metadata as { basic?: { emoji?: string } } | undefined
+                          const canSelect = collaborators.length === 0 || portfolioIdsAllCanCreate[project.id] === true
+                          return (
+                            <button
+                              key={project.id}
+                              type="button"
+                              disabled={!canSelect}
+                              onClick={() => {
+                                if (!canSelect) return
+                                setUserSelectedPortfolio(project)
+                                setSelectedPortfolios([project.id])
+                                setShowAssignPanel(false)
+                              }}
+                              className={`flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
+                                canSelect
+                                  ? 'hover:opacity-80'
+                                  : 'opacity-50 cursor-not-allowed grayscale'
+                              }`}
+                              title={!canSelect ? 'Not available: not all collaborators can post here' : basic.name}
+                            >
+                              <StickerAvatar
+                                src={basic.avatar}
+                                alt={basic.name}
+                                type="projects"
+                                size={72}
+                                emoji={metadata?.basic?.emoji}
+                                name={basic.name}
+                              />
+                              <UIText className="text-center max-w-[96px] truncate" title={basic.name}>
+                                {basic.name}
+                              </UIText>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {assignableActivities.length > 0 && (
+                    <div className="mb-4">
+                      <UIText as="p" className="mb-2 font-medium text-gray-700">Activities</UIText>
+                      {collaborators.length > 0 && (
+                        <UIText as="p" className="mb-2 text-xs text-gray-500">
+                          Only activities where all collaborators can post are selectable.
+                        </UIText>
+                      )}
+                      <div className="grid grid-cols-3 gap-x-4 gap-y-6">
+                        {assignableActivities.map((activity) => {
+                          const basic = getPortfolioBasic(activity)
+                          const metadata = activity.metadata as { basic?: { emoji?: string } } | undefined
+                          const canSelect = collaborators.length === 0 || portfolioIdsAllCanCreate[activity.id] === true
+                          return (
+                            <button
+                              key={activity.id}
+                              type="button"
+                              disabled={!canSelect}
+                              onClick={() => {
+                                if (!canSelect) return
+                                setUserSelectedPortfolio(activity)
+                                setSelectedPortfolios([activity.id])
+                                setShowAssignPanel(false)
+                              }}
+                              className={`flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
+                                canSelect
+                                  ? 'hover:opacity-80'
+                                  : 'opacity-50 cursor-not-allowed grayscale'
+                              }`}
+                              title={!canSelect ? 'Not available: not all collaborators can post here' : basic.name}
+                            >
+                              <StickerAvatar
+                                src={basic.avatar}
+                                alt={basic.name}
+                                type="activities"
+                                size={72}
+                                emoji={metadata?.basic?.emoji}
+                                name={basic.name}
+                              />
+                              <UIText className="text-center max-w-[96px] truncate" title={basic.name}>
+                                {basic.name}
+                              </UIText>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {assignableCommunities.length > 0 && (
+                    <div className="mb-4">
+                      <UIText as="p" className="mb-2 font-medium text-gray-700">
+                        Communities
+                      </UIText>
+                      {collaborators.length > 0 && (
+                        <UIText as="p" className="mb-2 text-xs text-gray-500">
+                          Only communities where all collaborators can post are selectable.
+                        </UIText>
+                      )}
+                      <div className="grid grid-cols-3 gap-x-4 gap-y-6">
+                        {assignableCommunities.map((community) => {
+                          const basic = getPortfolioBasic(community)
+                          const metadata =
+                            (community.metadata as { basic?: { emoji?: string } }) || undefined
+                          const canSelect =
+                            collaborators.length === 0 ||
+                            portfolioIdsAllCanCreate[community.id] === true
+                          return (
+                            <button
+                              key={community.id}
+                              type="button"
+                              disabled={!canSelect}
+                              onClick={() => {
+                                if (!canSelect) return
+                                setUserSelectedPortfolio(community)
+                                setSelectedPortfolios([community.id])
+                                setShowAssignPanel(false)
+                              }}
+                              className={`flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
+                                canSelect
+                                  ? 'hover:opacity-80'
+                                  : 'opacity-50 cursor-not-allowed grayscale'
+                              }`}
+                              title={
+                                !canSelect
+                                  ? 'Not available: not all collaborators can post here'
+                                  : basic.name
+                              }
+                            >
+                              <StickerAvatar
+                                src={basic.avatar}
+                                alt={basic.name}
+                                type="community"
+                                size={72}
+                                emoji={metadata?.basic?.emoji}
+                                name={basic.name}
+                              />
+                              <UIText
+                                className="text-center max-w-[96px] truncate"
+                                title={basic.name}
+                              >
+                                {basic.name}
+                              </UIText>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {!assignableLoading &&
+                    assignableProjects.length === 0 &&
+                    assignableActivities.length === 0 &&
+                    assignableCommunities.length === 0 && (
+                      <UIText className="text-gray-500 py-4">
+                        No projects, activities, or communities available.
+                      </UIText>
+                    )}
+                </>
+              )}
+              <div className="flex justify-end mt-4">
+                <Button variant="secondary" onClick={() => setShowAssignPanel(false)}>
+                  <UIText>Cancel</UIText>
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </div>
       )}
 
       {/* Pin option - only show if user is owner and there's space */}
@@ -1087,7 +1962,7 @@ export function CreateNoteForm({
         </div>
       )}
 
-      {/* Advanced settings: who can comment, visibility, collections — collapsed by default */}
+      {/* Advanced settings: visibility, collections — collapsed by default */}
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <button
           type="button"
@@ -1110,62 +1985,69 @@ export function CreateNoteForm({
         </button>
         {advancedOpen && (
           <div className="p-4 pt-2 space-y-4 border-t border-gray-200">
-            {/* Comment privacy - who can comment (post note only) */}
-            {!mentionedNoteId && (
-              <div>
-                <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
-                  Who can comment
-                </UIText>
-                <div className="flex flex-wrap gap-2">
-                  {(['everyone', 'friends', 'authors'] as const).map((privacy) => (
-                    <button
-                      key={privacy}
-                      type="button"
-                      onClick={() => setAnnotationPrivacy(privacy)}
-                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                        annotationPrivacy === privacy
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      }`}
-                    >
-                      {privacy === 'everyone' && 'Everyone'}
-                      {privacy === 'friends' && 'Friends only'}
-                      {privacy === 'authors' && 'Authors only'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Visibility toggle (Public / Private) */}
+            {/* Visibility */}
             <div>
               <UIText as="label" className="block text-sm font-medium text-gray-700 mb-2">
                 Visibility
               </UIText>
               <div className="flex flex-wrap gap-2">
-                {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setVisibility(v)}
-                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                      visibility === v
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                  >
-                    {v === 'public' && 'Public'}
-                    {v === 'private' && 'Private'}
-                  </button>
-                ))}
+                {selectedContextId
+                  ? (
+                      [
+                        { value: 'public' as const, label: 'Public' },
+                        {
+                          value: 'members' as const,
+                          label: (() => {
+                            const context = effectivePortfolios.find((p) => p.id === selectedContextId)
+                            const name = context ? getPortfolioName(context) : 'this portfolio'
+                            return `Members of ${name}`
+                          })(),
+                        },
+                      ] satisfies Array<{ value: NoteVisibility; label: string }>
+                    ).map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setVisibility(value)}
+                        className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                          visibility === value
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))
+                  : (
+                      [
+                        { value: 'public' as const, label: 'Public' },
+                        { value: 'friends' as const, label: 'Friends' },
+                        { value: 'private' as const, label: 'Private' },
+                      ] satisfies Array<{ value: NoteVisibility; label: string }>
+                    ).map(({ value, label }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setVisibility(value)}
+                        className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                          visibility === value
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
               </div>
               <UIText as="p" className="text-xs text-gray-500 mt-1">
-                Private notes are only visible to you and will not appear in feeds.
+                {selectedContextId
+                  ? 'Members-only notes are only visible to members of the assigned portfolio.'
+                  : 'Friends-only notes are only visible to your friends. Private notes are only visible to you.'}
               </UIText>
             </div>
 
-            {/* Collection selection - only show if a context portfolio is selected */}
-            {selectedContextId && (
+            {/* Collection selection - only show if a context portfolio is selected (hidden for open call) */}
+            {!isOpenCall && selectedContextId && (
               <div>
                 <UIText as="label" className="block mb-2">
                   Collections (optional)
@@ -1230,7 +2112,7 @@ export function CreateNoteForm({
           variant="primary"
           disabled={isSubmitting || !text.trim()}
         >
-          <UIText>{isSubmitting ? 'Creating...' : 'Create Note'}</UIText>
+          <UIText>{isSubmitting ? 'Creating...' : isOpenCall ? 'Create Open call' : 'Create Note'}</UIText>
         </Button>
         {onCancel && (
           <Button

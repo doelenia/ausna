@@ -393,6 +393,14 @@ export function NotesFeed({
     }
   }
 
+  const handleNoteLeftCollaboration = async () => {
+    await handleNoteRemovedFromPortfolio()
+  }
+
+  const handleCollaboratorsUpdated = async () => {
+    await handleNoteRemovedFromPortfolio()
+  }
+
   if (error) {
     return (
       <div className="py-8 text-center">
@@ -430,6 +438,8 @@ export function NotesFeed({
             canAnnotate={canCreateNote}
             onNoteDeleted={handleNoteDeleted}
             onNoteRemovedFromPortfolio={handleNoteRemovedFromPortfolio}
+            onNoteLeftCollaboration={handleNoteLeftCollaboration}
+            onCollaboratorsUpdated={handleCollaboratorsUpdated}
           />
         </div>
       )}
@@ -596,6 +606,8 @@ export function NotesFeed({
               canAnnotate={canCreateNote}
               onNoteDeleted={handleNoteDeleted}
               onNoteRemovedFromPortfolio={handleNoteRemovedFromPortfolio}
+              onNoteLeftCollaboration={handleNoteLeftCollaboration}
+              onCollaboratorsUpdated={handleCollaboratorsUpdated}
             />
           ) : (
             <div className="py-4 text-center">

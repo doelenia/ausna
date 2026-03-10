@@ -427,6 +427,16 @@ export async function updatePortfolio(
     const oldDescription = (basicMetadata.description || '').trim()
 
     // Normalize description from formData (could be string or null)
+    const incomingDescription =
+      description !== null && description !== undefined ? description : (basicMetadata.description || '')
+
+    if (incomingDescription.length > 3000) {
+      return {
+        success: false,
+        error: 'Description must be 3000 characters or less',
+      }
+    }
+
     const normalizedDescription = description !== null && description !== undefined 
       ? description.trim() 
       : (basicMetadata.description || '').trim()
@@ -498,7 +508,7 @@ export async function updatePortfolio(
           inProgress: activityInProgressRaw === 'true',
           allDay: activityAllDayRaw === 'true',
           },
-          { intervalMinutes: 15 }
+          { intervalMinutes: 1 }
         )
 
         if (normalized) {

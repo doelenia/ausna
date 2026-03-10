@@ -10,6 +10,8 @@ interface NotesListProps {
   canAnnotate?: boolean
   onNoteDeleted?: () => void
   onNoteRemovedFromPortfolio?: () => void
+  onNoteLeftCollaboration?: () => void
+  onCollaboratorsUpdated?: () => void
 }
 
 export function NotesList({
@@ -19,6 +21,8 @@ export function NotesList({
   canAnnotate = false,
   onNoteDeleted,
   onNoteRemovedFromPortfolio,
+  onNoteLeftCollaboration,
+  onCollaboratorsUpdated,
 }: NotesListProps) {
   if (notes.length === 0) {
     return (
@@ -38,6 +42,8 @@ export function NotesList({
             currentUserId={currentUserId}
             onDeleted={onNoteDeleted}
             onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
+            onLeftCollaboration={onNoteLeftCollaboration}
+            onCollaboratorsUpdated={onCollaboratorsUpdated}
           />
         </div>
       ))}

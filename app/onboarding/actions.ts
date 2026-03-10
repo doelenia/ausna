@@ -8,6 +8,7 @@ import { createUserAgreement } from '@/lib/legal/documents'
 import { ensureHumanPortfolio } from '@/lib/portfolio/human'
 import { uploadAvatar } from '@/lib/storage/avatars-server'
 import type { HumanAvailabilitySchedule } from '@/types/portfolio'
+import { createNote } from '@/app/notes/actions'
 
 export type { OnboardingStatus, OnboardingStepId }
 
@@ -84,6 +85,63 @@ export async function setAvailabilitiesComplete(): Promise<SetOnboardingFlagResu
 
 export async function setJoinCommunitySeen(): Promise<SetOnboardingFlagResult> {
   return setOnboardingFlag('join_community_seen', true)
+}
+
+export interface CompleteOpenCallsOnboardingResult {
+  success: boolean
+  noteId?: string
+  error?: string
+}
+
+export async function completeOpenCallsOnboarding(input: {
+  title: string
+  description: string
+  endDate?: string | null
+}): Promise<CompleteOpenCallsOnboardingResult> {
+  try {
+    const auth = await getCurrentUserAndClient()
+    if (!auth) return { success: false, error: 'Unauthorized' }
+
+    const title = (input.title ?? '').trim()
+    const description = (input.description ?? '').trim()
+    const endDateRaw = input.endDate ?? null
+
+    if (!title) return { success: false, error: 'Open call title is required' }
+    if (!description) return { success: false, error: 'Open call description is required' }
+
+    let endDateIso: string | null = null
+    if (endDateRaw) {
+      const d = new Date(endDateRaw)
+      if (!Number.isFinite(d.getTime())) {
+        return { success: false, error: 'Invalid end date' }
+      }
+      endDateIso = d.toISOString()
+    }
+
+    const formData = new FormData()
+    formData.set('text', description)
+    formData.set('note_type', 'open_call')
+    formData.set('open_call_title', title)
+    formData.set('assigned_portfolios', JSON.stringify([]))
+    formData.set('open_call_never_ends', endDateIso ? 'false' : 'true')
+    if (endDateIso) {
+      formData.set('open_call_end_date', endDateIso)
+    }
+
+    const created = await createNote(formData)
+    if (!created.success || !created.noteId) {
+      return { success: false, error: created.error ?? 'Failed to create open call' }
+    }
+
+    const flagged = await setOnboardingFlag('open_calls_setup_complete', true)
+    if (!flagged.success) {
+      return { success: false, error: flagged.error ?? 'Failed to update onboarding' }
+    }
+
+    return { success: true, noteId: created.noteId }
+  } catch (e: any) {
+    return { success: false, error: e?.message ?? 'Failed to complete open calls onboarding' }
+  }
 }
 
 export interface AgreeToLegalResult {

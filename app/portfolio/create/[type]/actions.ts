@@ -63,7 +63,8 @@ export async function createPortfolio(
     const iAmGoingRaw = formData.get('i_am_going') as string | null
     const iAmGoing = iAmGoingRaw !== 'false'
     const descriptionRaw = formData.get('description') as string | null
-    const activityDescription = descriptionRaw?.trim() || ''
+    const description = descriptionRaw || ''
+    const descriptionTrimmed = description.trim()
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostProjectIds: string[] =
       hostProjectIdsRaw && typeof hostProjectIdsRaw === 'string'
@@ -113,6 +114,13 @@ export async function createPortfolio(
       return {
         success: false,
         error: 'Portfolio name is required',
+      }
+    }
+
+    if (description.length > 3000) {
+      return {
+        success: false,
+        error: 'Description must be 3000 characters or less',
       }
     }
 
@@ -219,7 +227,7 @@ export async function createPortfolio(
     const metadata: any = {
       basic: {
         name: name.trim(),
-        description: type === 'activities' && activityDescription ? activityDescription : '',
+        description: descriptionTrimmed,
         avatar: externalAvatarUrl || '',
         emoji: emoji || '',
       },
@@ -254,7 +262,7 @@ export async function createPortfolio(
             inProgress: activityInProgressRaw === 'true',
             allDay: activityAllDayRaw === 'true',
           },
-          { intervalMinutes: 15 }
+          { intervalMinutes: 1 }
         )
         
         if (normalized) {
@@ -537,8 +545,8 @@ export async function createPortfolio(
 
     // Trigger background interest processing if description exists (fire-and-forget)
     // Note: Currently description starts empty, but this handles future cases
-    const description = metadata.basic.description || ''
-    if (description.trim().length > 0) {
+    const interestDescription = metadata.basic.description || ''
+    if (interestDescription.trim().length > 0) {
       try {
         // Use absolute URL - in server actions, we need the full URL
         const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
@@ -553,7 +561,7 @@ export async function createPortfolio(
             portfolioId: portfolio.id,
             userId: user.id,
             isPersonalPortfolio: false, // New portfolios are not personal
-            description,
+            description: interestDescription,
           }),
         }).catch((error) => {
           // Log error but don't fail portfolio creation

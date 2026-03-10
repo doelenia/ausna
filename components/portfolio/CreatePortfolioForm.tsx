@@ -9,9 +9,11 @@ import { PortfolioType, PortfolioVisibility } from '@/types/portfolio'
 import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
+import { DescriptionEditorPopup } from './DescriptionPopups'
+import { ImageViewerPopup } from './ImageViewerPopup'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
-import { UIText, Button, Card } from '@/components/ui'
+import { UIText, Button, Card, Content } from '@/components/ui'
 
 interface CreatePortfolioFormProps {
   type: 'projects' | 'community'
@@ -19,8 +21,11 @@ interface CreatePortfolioFormProps {
 
 export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [showDescriptionEditor, setShowDescriptionEditor] = useState(false)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
+  const [showAvatarPopup, setShowAvatarPopup] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState<string | null>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>('')
@@ -94,6 +99,11 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       return
     }
 
+    if (description.length > 3000) {
+      setError('Description must be 3000 characters or less')
+      return
+    }
+
     // Require either image or emoji
     if (!avatarFile && !selectedEmoji) {
       setError('Please upload an image or select an emoji')
@@ -120,6 +130,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
       const formData = new FormData()
       formData.append('type', type)
       formData.append('name', name.trim())
+      formData.append('description', description)
       if (avatarFile) {
         formData.append('avatar', avatarFile)
       }
@@ -173,6 +184,20 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           onClose={() => setShowEmojiPicker(false)}
         />
       )}
+      <DescriptionEditorPopup
+        open={showDescriptionEditor}
+        value={description}
+        onChange={setDescription}
+        onClose={() => setShowDescriptionEditor(false)}
+      />
+      {avatarPreview && (
+        <ImageViewerPopup
+          open={showAvatarPopup}
+          src={avatarPreview}
+          alt={name || 'Avatar preview'}
+          onClose={() => setShowAvatarPopup(false)}
+        />
+      )}
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Avatar Upload or Emoji Selection */}
         <div>
@@ -182,10 +207,13 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           <div className="flex items-center gap-4">
             <div className="flex-shrink-0">
               {avatarPreview ? (
-                <img
+                <StickerAvatar
                   src={avatarPreview}
-                  alt="Avatar preview"
-                  className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
+                  alt={name || 'Avatar preview'}
+                  type={type}
+                  size={80}
+                  onClick={() => setShowAvatarPopup(true)}
+                  className="flex-shrink-0 transition-transform hover:rotate-3"
                 />
               ) : selectedEmoji ? (
                 <StickerAvatar
@@ -276,6 +304,36 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           placeholder={`Enter ${type === 'projects' ? 'project' : 'community'} name`}
           disabled={loading}
         />
+      </div>
+
+      {/* Description (preview + popup editor) */}
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <UIText as="label" className="block">
+            Description
+          </UIText>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setShowDescriptionEditor(true)}
+            disabled={loading}
+          >
+            <UIText>{description.trim().length > 0 ? 'Edit' : 'Add'}</UIText>
+          </Button>
+        </div>
+        {description.trim().length > 0 ? (
+          <Card variant="subtle" padding="sm">
+            <UIText as="div" className="text-xs text-gray-500 mb-2">
+              Preview (truncated)
+            </UIText>
+            <Content className="whitespace-pre-wrap line-clamp-5">{description}</Content>
+          </Card>
+        ) : (
+          <UIText as="p" className="text-xs text-gray-500">
+            Add a description with paragraphs (max 3000 characters).
+          </UIText>
+        )}
       </div>
 
       {/* Type Selection */}

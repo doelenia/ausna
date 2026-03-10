@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { receiver_id, text, note_id } = await request.json()
+    const { receiver_id, text, note_id, message_type } = await request.json()
 
     if (!receiver_id) {
       return NextResponse.json(
@@ -81,6 +81,8 @@ export async function POST(request: NextRequest) {
         receiver_id,
         text: text ? text.trim() : '', // Allow empty string if note_id is provided
         note_id: note_id || null,
+        // Optional message type (e.g. comment previews, portfolio shares)
+        message_type: typeof message_type === 'string' && message_type.trim() ? message_type.trim() : null,
       })
       .select()
       .single()

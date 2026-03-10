@@ -37,7 +37,7 @@ function formatLocationShort(location: ExploreActivity['location']): string {
 
 interface ExploreViewProps {
   activities: ExploreActivity[]
-  userId: string
+  userId?: string
   isAdmin?: boolean
   dailyMatch?: {
     introText: string | null
@@ -369,16 +369,28 @@ function MatchedHighlights({ highlight }: { highlight: DailyMatchHighlightMeta }
   )
 }
 
-function ActivityCard({
+export function ActivityCard({
   activity,
   score,
   details,
   highlight,
+  hrefOverride,
+  hideMetaRow,
+  memberLabel,
+  memberUserIds,
+  memberUsers,
+  avatarTypeOverride,
 }: {
   activity: ExploreActivity
   score?: number
   details?: ActivityMatchDetails
   highlight?: DailyMatchHighlightMeta
+  hrefOverride?: string
+  hideMetaRow?: boolean
+  memberLabel?: string
+  memberUserIds?: string[]
+  memberUsers?: Array<{ userId: string; name?: string | null; avatar?: string | null }>
+  avatarTypeOverride?: 'activities' | 'projects' | 'community' | 'human'
 }) {
   const dateStr = activity.activityDateTime?.start
     ? formatDateOnly(activity.activityDateTime.start)
@@ -386,16 +398,18 @@ function ActivityCard({
   const locationStr = formatLocationShort(activity.location)
   const hasDate = !!dateStr
   const hasLocation = !!locationStr
+  const href = hrefOverride ?? `/portfolio/activities/${activity.id}`
+  const avatarType = avatarTypeOverride ?? 'activities'
 
   return (
     <div>
-      <Link href={`/portfolio/activities/${activity.id}`} className="block">
+      <Link href={href} className="block">
         <Card variant="subtle" padding="sm" className="hover:border-gray-300 transition-colors">
           <div className="flex items-start gap-4">
             <StickerAvatar
               src={activity.avatar}
               alt={activity.name}
-              type="activities"
+              type={avatarType}
               size={48}
               emoji={activity.emoji}
             />
@@ -405,7 +419,7 @@ function ActivityCard({
                   {activity.name}
                 </Title>
               </div>
-              {(hasDate || hasLocation) && (
+              {(hasDate || hasLocation) && !hideMetaRow && (
                 <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mb-1.5 text-gray-700">
                   {hasDate && (
                     <>
@@ -434,6 +448,44 @@ function ActivityCard({
               {highlight && <MatchedHighlights highlight={highlight} />}
               {details && (
                 <MatchDetailsDev details={details} />
+              )}
+              {memberLabel && ((memberUsers && memberUsers.length > 0) || (memberUserIds && memberUserIds.length > 0)) && (
+                <div className="mt-2 inline-flex items-center gap-2 px-2 h-8 rounded-full bg-gray-100 flex-shrink-0 min-w-0">
+                  <div className="flex -space-x-2 flex-shrink-0">
+                    {(memberUsers && memberUsers.length > 0
+                      ? memberUsers.slice(0, 3).map((u) => ({
+                          id: u.userId,
+                          name: u.name ?? undefined,
+                          avatar: u.avatar ?? undefined,
+                        }))
+                      : (memberUserIds || []).slice(0, 3).map((id) => ({
+                          id,
+                          name: undefined,
+                          avatar: undefined,
+                        }))
+                    ).map((u, index) => (
+                      <div
+                        key={u.id}
+                        className="relative"
+                        style={{
+                          zIndex:
+                            (memberUsers && memberUsers.length > 0
+                              ? memberUsers.length
+                              : memberUserIds?.length ?? 0) - index,
+                        }}
+                      >
+                        <UserAvatar
+                          userId={u.id}
+                          name={u.name}
+                          avatar={u.avatar}
+                          size={24}
+                          showLink={false}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <UIText className="text-gray-700 whitespace-nowrap">{memberLabel}</UIText>
+                </div>
               )}
             </div>
           </div>
@@ -507,6 +559,7 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
     let cancelled = false
 
     const loadHighlights = async () => {
+      if (!userId) return
       if (!activities || activities.length === 0) return
       try {
         const ids = activities.map((a) => a.id)
@@ -527,6 +580,7 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
   }, [userId, activities])
 
   const handleRunMatch = async () => {
+    if (!userId) return
     setLoading(true)
     try {
       const result = await runActivityMatch(userId)
@@ -691,7 +745,7 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
         </section>
       )}
 
-      {process.env.NODE_ENV !== 'production' && isAdmin && (
+      {process.env.NODE_ENV !== 'production' && isAdmin && !!userId && (
         <div className="mb-4">
           <div className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">

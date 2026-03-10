@@ -22,10 +22,117 @@ interface GetFeedNotesResult {
   error?: string
 }
 
+export type FeedItem =
+  | {
+      kind: 'note'
+      created_at: string
+      note: Note
+    }
+  | {
+      kind: 'portfolio_created'
+      created_at: string
+      portfolio: Portfolio
+      creator_profile: AuthorProfile
+    }
+
+interface GetFeedItemsResult {
+  success: boolean
+  items?: FeedItem[]
+  hasMore?: boolean
+  error?: string
+}
+
 interface GetUserCommunitiesResult {
   success: boolean
   communities?: Array<{ id: string; name: string; slug: string }>
   error?: string
+}
+
+export type AuthorProfile = { id: string; name: string; avatar?: string | null }
+
+/**
+ * Enrich notes with author_profiles (owner + collaborators) for immediate avatar/name display.
+ * Avoids client-side fetch delay so collaborator avatars show on first paint.
+ */
+export async function enrichNotesWithAuthorProfiles(
+  notes: any[],
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  currentUserId?: string | null
+): Promise<any[]> {
+  if (!notes.length) return notes
+
+  const userIds = new Set<string>()
+  notes.forEach((note: any) => {
+    if (note.owner_account_id) userIds.add(note.owner_account_id)
+    ;(note.collaborator_account_ids || []).forEach((id: string) => userIds.add(id))
+  })
+  const ids = Array.from(userIds)
+  if (ids.length === 0) return notes
+
+  const { data: portfolios } = await supabase
+    .from('portfolios')
+    .select('*')
+    .eq('type', 'human')
+    .in('user_id', ids)
+
+  const profileByUserId = new Map<string, AuthorProfile>()
+  ;(portfolios || []).forEach((p: Portfolio) => {
+    const basic = getPortfolioBasic(p)
+    profileByUserId.set(p.user_id, {
+      id: p.user_id,
+      name: currentUserId && p.user_id === currentUserId ? 'You' : basic.name,
+      avatar: basic.avatar,
+    })
+  })
+
+  return notes.map((note: any) => {
+    const authorIds = [note.owner_account_id, ...(note.collaborator_account_ids || [])]
+    const author_profiles: AuthorProfile[] = authorIds.map((userId: string) => {
+      const p = profileByUserId.get(userId)
+      return p || { id: userId, name: `User ${userId.slice(0, 8)}`, avatar: null }
+    })
+    return { ...note, author_profiles }
+  })
+}
+
+export async function enrichPortfoliosWithCreatorProfiles(
+  portfolios: any[],
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  currentUserId?: string | null
+): Promise<Array<{ portfolio: Portfolio; creator_profile: AuthorProfile }>> {
+  if (!portfolios.length) return []
+
+  const userIds = Array.from(new Set(portfolios.map((p: any) => String(p.user_id)).filter(Boolean)))
+  const { data: humanPortfolios } = await supabase
+    .from('portfolios')
+    .select('*')
+    .eq('type', 'human')
+    .in('user_id', userIds)
+
+  const profileByUserId = new Map<string, AuthorProfile>()
+  ;(humanPortfolios || []).forEach((p: Portfolio) => {
+    const basic = getPortfolioBasic(p)
+    profileByUserId.set(p.user_id, {
+      id: p.user_id,
+      name: currentUserId && p.user_id === currentUserId ? 'You' : basic.name,
+      avatar: basic.avatar,
+    })
+  })
+
+  return (portfolios as Portfolio[]).map((p: Portfolio) => {
+    const profile =
+      profileByUserId.get(p.user_id) || {
+        id: p.user_id,
+        name: `User ${String(p.user_id).slice(0, 8)}`,
+        avatar: null,
+      }
+    return { portfolio: p, creator_profile: profile }
+  })
+}
+
+function portfolioIsPublicOrNull(p: any) {
+  const v = (p as any)?.visibility
+  return v === undefined || v === null || v === 'public'
 }
 
 interface MarkNotesAsSeenResult {
@@ -330,10 +437,10 @@ export async function getFeedNotes(
         ...note,
         references: Array.isArray(note.references) ? note.references : [],
       }))
-
+      const enriched = await enrichNotesWithAuthorProfiles(notesWithReferences, supabase, null)
       return {
         success: true,
-        notes: notesWithReferences,
+        notes: enriched,
         hasMore: false, // No more notes for logged-out users
       }
     }
@@ -355,12 +462,68 @@ export async function getFeedNotes(
       .range(rangeStart, rangeEnd)
 
     if (feedType === 'friends') {
-      // Get notes from friends
+      // Get notes from friends (owner in friendIds) or where current user is collaborator
       const friendIds = await getFriendIds(user.id, supabase)
-      if (friendIds.length === 0) {
-        return { success: true, notes: [], hasMore: false }
-      }
-      notesQuery = notesQuery.in('owner_account_id', friendIds)
+      // Fetch in three parts:
+      // - notes by friends (public + friends-only)
+      // - notes by current user (so authors can see their own friends-only notes)
+      // - notes where current user is a collaborator
+      const [byOwner, bySelf, byCollaborator] = await Promise.all([
+        friendIds.length > 0
+          ? supabase
+              .from('notes')
+              .select('*')
+              .is('deleted_at', null)
+              .is('mentioned_note_id', null)
+              .in('visibility', ['public', 'friends'])
+              .in('owner_account_id', friendIds)
+              .order('created_at', { ascending: false })
+              .range(rangeStart, rangeEnd)
+          : { data: [], error: null },
+        supabase
+          .from('notes')
+          .select('*')
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+          .in('visibility', ['public', 'friends'])
+          .eq('owner_account_id', user.id)
+          .order('created_at', { ascending: false })
+          .range(rangeStart, rangeEnd),
+        supabase
+          .from('notes')
+          .select('*')
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+          .eq('visibility', 'public')
+          .contains('collaborator_account_ids', [user.id])
+          .order('created_at', { ascending: false })
+          .limit(rangeEnd - rangeStart + 1),
+      ])
+      const byOwnerData = byOwner.data || []
+      const bySelfData = bySelf.data || []
+      const byCollabData = byCollaborator.data || []
+      const merged = [...byOwnerData, ...bySelfData]
+      const seen = new Set(byOwnerData.map((n: any) => n.id))
+      bySelfData.forEach((n: any) => {
+        if (!seen.has(n.id)) {
+          seen.add(n.id)
+        }
+      })
+      byCollabData.forEach((n: any) => {
+        if (!seen.has(n.id)) {
+          seen.add(n.id)
+          merged.push(n)
+        }
+      })
+      merged.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      const pageNotes = merged.slice(0, limit)
+      const hasMore = merged.length > limit
+      const notesWithReferences: Note[] = pageNotes.map((note: any) => ({
+        ...note,
+        references: Array.isArray(note.references) ? note.references : [],
+      }))
+      const enriched = await enrichNotesWithAuthorProfiles(notesWithReferences, supabase, user.id)
+      return { success: true, notes: enriched, hasMore }
     } else if (feedType === 'community') {
       // Get notes from community members
       if (!communityId) {
@@ -385,7 +548,7 @@ export async function getFeedNotes(
       )
       const memberPortfolioIds = await getMemberPortfolioIds(user.id, supabase)
 
-      // Combine all relevant user IDs
+      // Combine all relevant user IDs (for "owner is visible")
       const allUserIds = Array.from(
         new Set([...friendIds, ...communityMemberIds])
       )
@@ -430,6 +593,19 @@ export async function getFeedNotes(
         userNotesMaybeMore = (userNotesData || []).length >= poolLimit
       }
 
+      // Also fetch notes where current user is collaborator (treat as creator in feed)
+      let collaboratorNotes: any[] = []
+      const { data: collabNotesData } = await supabase
+        .from('notes')
+        .select('*')
+        .is('deleted_at', null)
+        .is('mentioned_note_id', null)
+        .eq('visibility', 'public')
+        .contains('collaborator_account_ids', [user.id])
+        .order('created_at', { ascending: false })
+        .limit(poolLimit)
+      collaboratorNotes = collabNotesData || []
+
       // Also fetch notes assigned to portfolios - PUBLIC only
       let portfolioNotes: any[] = []
       let portfolioNotesMaybeMore = false
@@ -457,9 +633,12 @@ export async function getFeedNotes(
         }
       }
 
-      // Combine and deduplicate
+      // Combine and deduplicate (user notes + collaborator notes + portfolio notes)
       const allNotesMap = new Map<string, any>()
       ;(userNotes || []).forEach((note: any) => {
+        allNotesMap.set(note.id, note)
+      })
+      collaboratorNotes.forEach((note: any) => {
         allNotesMap.set(note.id, note)
       })
       portfolioNotes.forEach((note: any) => {
@@ -470,17 +649,19 @@ export async function getFeedNotes(
       const validatedNotes = Array.from(allNotesMap.values()).filter((note: any) => {
         const noteOwnerId = note.owner_account_id
         const assignedPortfolios = note.assigned_portfolios || []
-        
+        const collaboratorIds = (note.collaborator_account_ids || []) as string[]
+        const isCollaborator = collaboratorIds.includes(user.id)
+
         // Check if note owner is a friend or community member
         const isOwnerVisible = allUserIds.includes(noteOwnerId)
-        
+
         // Check if note is assigned to a portfolio the user subscribes to or is a member of
         const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) =>
           allPortfolioIds.includes(pid)
         )
-        
-        // Only include note if it meets at least one criteria
-        return isOwnerVisible || isAssignedToVisiblePortfolio
+
+        // Collaborators see the note in their feed (treated as creator)
+        return isOwnerVisible || isAssignedToVisiblePortfolio || isCollaborator
       })
 
       const sortedAllNotes = validatedNotes.sort(
@@ -513,6 +694,7 @@ export async function getFeedNotes(
         ...note,
         references: Array.isArray(note.references) ? note.references : [],
       }))
+      const enriched = await enrichNotesWithAuthorProfiles(notesWithReferences, supabase, user.id)
 
       const hasMore =
         sortedAllNotes.length > offset + limit ||
@@ -521,7 +703,7 @@ export async function getFeedNotes(
 
       return {
         success: true,
-        notes: notesWithReferences,
+        notes: enriched,
         hasMore,
       }
     }
@@ -548,10 +730,11 @@ export async function getFeedNotes(
       ...note,
       references: Array.isArray(note.references) ? note.references : [],
     }))
+    const enriched = await enrichNotesWithAuthorProfiles(notesWithReferences, supabase, user.id)
 
     return {
       success: true,
-      notes: notesWithReferences,
+      notes: enriched,
       hasMore,
     }
   } catch (error: any) {
@@ -559,6 +742,335 @@ export async function getFeedNotes(
       success: false,
       error: error.message || 'An unexpected error occurred',
     }
+  }
+}
+
+/**
+ * Get feed items (notes + portfolio creations) based on feed type.
+ * Items are sorted by created_at desc and paginated over the merged stream.
+ */
+export async function getFeedItems(
+  feedType: FeedType,
+  communityId: string | null = null,
+  offset: number = 0,
+  limit: number = 10
+): Promise<GetFeedItemsResult> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    // Logged-out users: keep existing behavior (public notes only)
+    if (!user) {
+      const publicLimit = 5
+      const { data: notes, error } = await supabase
+        .from('notes')
+        .select('*')
+        .is('deleted_at', null)
+        .is('mentioned_note_id', null)
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false })
+        .limit(publicLimit)
+
+      if (error) {
+        return { success: false, error: error.message || 'Failed to fetch notes' }
+      }
+
+      const normalized: Note[] = (notes || []).map((note: any) => ({
+        ...note,
+        references: Array.isArray(note.references) ? note.references : [],
+      }))
+      const enriched = await enrichNotesWithAuthorProfiles(normalized, supabase, null)
+      return {
+        success: true,
+        items: (enriched || []).map((note: any) => ({
+          kind: 'note' as const,
+          created_at: note.created_at,
+          note,
+        })),
+        hasMore: false,
+      }
+    }
+
+    const poolTarget = offset + limit + 1
+    const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
+
+    const portfolioTypes: Array<'projects' | 'activities' | 'community'> = [
+      'projects',
+      'activities',
+      'community',
+    ]
+
+    if (feedType === 'friends') {
+      const friendIds = await getFriendIds(user.id, supabase)
+
+      const [byOwner, byCollaborator, portfoliosRes] = await Promise.all([
+        friendIds.length > 0
+          ? supabase
+              .from('notes')
+              .select('*')
+              .is('deleted_at', null)
+              .is('mentioned_note_id', null)
+              .eq('visibility', 'public')
+              .in('owner_account_id', friendIds)
+              .order('created_at', { ascending: false })
+              .limit(poolLimit)
+          : { data: [], error: null },
+        supabase
+          .from('notes')
+          .select('*')
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+          .eq('visibility', 'public')
+          .contains('collaborator_account_ids', [user.id])
+          .order('created_at', { ascending: false })
+          .limit(poolLimit),
+        friendIds.length > 0
+          ? supabase
+              .from('portfolios')
+              .select('*')
+              .in('type', portfolioTypes)
+              .in('user_id', friendIds)
+              .order('created_at', { ascending: false })
+              .limit(poolLimit)
+          : { data: [], error: null },
+      ])
+
+      const notesMap = new Map<string, any>()
+      ;(byOwner.data || []).forEach((n: any) => notesMap.set(n.id, n))
+      ;(byCollaborator.data || []).forEach((n: any) => notesMap.set(n.id, n))
+
+      const notesList = Array.from(notesMap.values()).map((note: any) => ({
+        ...note,
+        references: Array.isArray(note.references) ? note.references : [],
+      })) as Note[]
+
+      const enrichedNotes = await enrichNotesWithAuthorProfiles(notesList, supabase, user.id)
+
+      const rawPortfolios = ((portfoliosRes as any)?.data || []).filter(portfolioIsPublicOrNull)
+      const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, user.id)
+
+      const merged: FeedItem[] = [
+        ...((enrichedNotes || []) as any[]).map((note: any) => ({
+          kind: 'note' as const,
+          created_at: note.created_at,
+          note,
+        })),
+        ...enrichedPortfolios.map(({ portfolio, creator_profile }) => ({
+          kind: 'portfolio_created' as const,
+          created_at: portfolio.created_at,
+          portfolio,
+          creator_profile,
+        })),
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+      const page = merged.slice(offset, offset + limit)
+      const hasMore = merged.length > offset + limit
+      return { success: true, items: page, hasMore }
+    }
+
+    if (feedType === 'community') {
+      if (!communityId) {
+        return { success: false, error: 'communityId is required for community feed' }
+      }
+      const memberIds = await getCommunityMemberIds(communityId, supabase)
+      if (memberIds.length === 0) {
+        return { success: true, items: [], hasMore: false }
+      }
+
+      const [notesRes, portfoliosRes] = await Promise.all([
+        supabase
+          .from('notes')
+          .select('*')
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+          .eq('visibility', 'public')
+          .in('owner_account_id', memberIds)
+          .order('created_at', { ascending: false })
+          .limit(poolLimit),
+        supabase
+          .from('portfolios')
+          .select('*')
+          .in('type', portfolioTypes)
+          .in('user_id', memberIds)
+          .order('created_at', { ascending: false })
+          .limit(poolLimit),
+      ])
+
+      const notesList: Note[] = (notesRes.data || []).map((note: any) => ({
+        ...note,
+        references: Array.isArray(note.references) ? note.references : [],
+      }))
+      const enrichedNotes = await enrichNotesWithAuthorProfiles(notesList, supabase, user.id)
+
+      const rawPortfolios = ((portfoliosRes as any)?.data || []).filter(portfolioIsPublicOrNull)
+      const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, user.id)
+
+      const merged: FeedItem[] = [
+        ...((enrichedNotes || []) as any[]).map((note: any) => ({
+          kind: 'note' as const,
+          created_at: note.created_at,
+          note,
+        })),
+        ...enrichedPortfolios.map(({ portfolio, creator_profile }) => ({
+          kind: 'portfolio_created' as const,
+          created_at: portfolio.created_at,
+          portfolio,
+          creator_profile,
+        })),
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+      const page = merged.slice(offset, offset + limit)
+      const hasMore = merged.length > offset + limit
+      return { success: true, items: page, hasMore }
+    }
+
+    // "all" feed: reuse existing visibility logic for notes; add portfolio creations by friends/community members.
+    const friendIds = await getFriendIds(user.id, supabase)
+    const communitiesMap = await getUserCommunitiesMap(user.id, supabase)
+    const communityMemberIds = await getAllCommunityMemberIds(user.id, supabase)
+    const subscribedPortfolioIds = await getSubscribedPortfolioIds(user.id, supabase)
+    const memberPortfolioIds = await getMemberPortfolioIds(user.id, supabase)
+
+    const allUserIds = Array.from(new Set([user.id, ...friendIds, ...communityMemberIds]))
+    const allPortfolioIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds]))
+
+    if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
+      return { success: true, items: [], hasMore: false }
+    }
+
+    // Notes pool
+    let userNotes: any[] = []
+    let userNotesMaybeMore = false
+    if (allUserIds.length > 0) {
+      const { data: userNotesData } = await supabase
+        .from('notes')
+        .select('*')
+        .is('deleted_at', null)
+        .is('mentioned_note_id', null)
+        .eq('visibility', 'public')
+        .in('owner_account_id', allUserIds)
+        .order('created_at', { ascending: false })
+        .limit(poolLimit)
+      userNotes = userNotesData || []
+      userNotesMaybeMore = (userNotesData || []).length >= poolLimit
+    }
+
+    const { data: collabNotesData } = await supabase
+      .from('notes')
+      .select('*')
+      .is('deleted_at', null)
+      .is('mentioned_note_id', null)
+      .eq('visibility', 'public')
+      .contains('collaborator_account_ids', [user.id])
+      .order('created_at', { ascending: false })
+      .limit(poolLimit)
+    const collaboratorNotes = collabNotesData || []
+
+    let portfolioNotes: any[] = []
+    let portfolioNotesMaybeMore = false
+    if (allPortfolioIds.length > 0) {
+      const { data: portfolioNotesData, error: portfolioError } = await supabase
+        .from('notes')
+        .select('*')
+        .is('deleted_at', null)
+        .is('mentioned_note_id', null)
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false })
+        .limit(poolLimit)
+      if (!portfolioError && portfolioNotesData) {
+        portfolioNotes = portfolioNotesData.filter((note: any) => {
+          const assigned = note.assigned_portfolios || []
+          return assigned.some((pid: string) => allPortfolioIds.includes(pid))
+        })
+        portfolioNotesMaybeMore = portfolioNotesData.length >= poolLimit
+      }
+    }
+
+    const allNotesMap = new Map<string, any>()
+    ;(userNotes || []).forEach((note: any) => allNotesMap.set(note.id, note))
+    collaboratorNotes.forEach((note: any) => allNotesMap.set(note.id, note))
+    portfolioNotes.forEach((note: any) => allNotesMap.set(note.id, note))
+
+    const validatedNotes = Array.from(allNotesMap.values()).filter((note: any) => {
+      const noteOwnerId = note.owner_account_id
+      const assignedPortfolios = note.assigned_portfolios || []
+      const collaboratorIds = (note.collaborator_account_ids || []) as string[]
+      const isCollaborator = collaboratorIds.includes(user.id)
+      const isOwnerVisible = allUserIds.includes(noteOwnerId)
+      const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) => allPortfolioIds.includes(pid))
+      return isOwnerVisible || isAssignedToVisiblePortfolio || isCollaborator
+    })
+
+    const sortedNotesPool = validatedNotes.sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
+
+    // Portfolios created by visible users
+    const { data: portfoliosData } = await supabase
+      .from('portfolios')
+      .select('*')
+      .in('type', portfolioTypes)
+      .in('user_id', allUserIds)
+      .order('created_at', { ascending: false })
+      .limit(poolLimit)
+    const rawPortfolios = (portfoliosData || []).filter(portfolioIsPublicOrNull)
+    const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, user.id)
+
+    // Merge pools
+    const mergedPool: FeedItem[] = [
+      ...sortedNotesPool.map((note: any) => ({
+        kind: 'note' as const,
+        created_at: note.created_at,
+        note: {
+          ...note,
+          references: Array.isArray(note.references) ? note.references : [],
+        } as Note,
+      })),
+      ...enrichedPortfolios.map(({ portfolio, creator_profile }) => ({
+        kind: 'portfolio_created' as const,
+        created_at: portfolio.created_at,
+        portfolio,
+        creator_profile,
+      })),
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+    const page = mergedPool.slice(offset, offset + limit)
+
+    // Enrich only notes in the final page (author profiles + source)
+    const pageNotes = page.filter((i) => i.kind === 'note').map((i: any) => i.note)
+    const notesWithSource = await Promise.all(
+      pageNotes.map(async (note: any) => {
+        const source = await determineNoteSource(
+          note,
+          user.id,
+          friendIds,
+          communitiesMap,
+          subscribedPortfolioIds,
+          supabase
+        )
+        return { ...note, feedSource: source }
+      })
+    )
+    const enrichedNotes = await enrichNotesWithAuthorProfiles(notesWithSource, supabase, user.id)
+    const enrichedById = new Map<string, any>()
+    ;(enrichedNotes || []).forEach((n: any) => enrichedById.set(n.id, n))
+
+    const finalPage: FeedItem[] = page.map((item) => {
+      if (item.kind !== 'note') return item
+      const enriched = enrichedById.get((item as any).note.id) || (item as any).note
+      return { ...item, note: enriched }
+    })
+
+    const hasMore =
+      mergedPool.length > offset + limit ||
+      userNotesMaybeMore ||
+      portfolioNotesMaybeMore
+
+    return { success: true, items: finalPage, hasMore }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'An unexpected error occurred' }
   }
 }
 

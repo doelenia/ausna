@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-auth'
 import Link from 'next/link'
@@ -9,10 +10,12 @@ import { HumanPortfolio } from '@/types/portfolio'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
 import { Home, MessageCircle, Plus, Search, Balloon, LogIn } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 type TopNavVariant = 'sidebar' | 'bottom'
 
 export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
+  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
@@ -32,6 +35,12 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
   const supabase = useMemo(() => createClient(), [])
   const isMountedRef = useRef(true)
   const navRef = useRef<HTMLElement | null>(null)
+  const loginHref =
+    typeof window === 'undefined'
+      ? '/login'
+      : buildLoginHref({
+          returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+        })
 
   useEffect(() => {
     isMountedRef.current = true
@@ -398,7 +407,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
               <UserAvatarClient userId={user.id} />
             </>
           ) : (
-            <IconButton icon={LogIn} href="/login" title="Sign in" aria-label="Sign in" />
+            <IconButton icon={LogIn} href={loginHref} title="Sign in" aria-label="Sign in" />
           )}
         </div>
       ) : (
@@ -428,7 +437,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                 <UserAvatarClient userId={user.id} />
               </>
             ) : (
-              <IconButton icon={LogIn} href="/login" title="Sign in" aria-label="Sign in" />
+              <IconButton icon={LogIn} href={loginHref} title="Sign in" aria-label="Sign in" />
             )}
           </div>
         </div>
@@ -453,7 +462,16 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                   variant="primary"
                   onClick={() => {
                     setShowCreateMenu(false)
-                    setShowProjectSelector(true)
+                    router.push('/notes/create/open-call')
+                  }}
+                >
+                  <UIText>Open call</UIText>
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowCreateMenu(false)
+                    router.push('/notes/create')
                   }}
                 >
                   <UIText>New note</UIText>

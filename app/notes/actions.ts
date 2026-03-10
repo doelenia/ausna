@@ -1,9 +1,10 @@
 'use server'
  
 import { createClient } from '@/lib/supabase/server'
+import { enrichNotesWithAuthorProfiles } from '@/app/main/actions'
 import { createServiceClient } from '@/lib/supabase/service'
 import { requireAuth } from '@/lib/auth/requireAuth'
-import { Note, CreateNoteInput, NoteReference, UrlReference } from '@/types/note'
+import { Note, CreateNoteInput, NoteReference, UrlReference, type NoteVisibility } from '@/types/note'
 import { uploadNoteImage } from '@/lib/storage/note-images-server'
 import { fetchUrlMetadata } from '@/lib/notes/url-metadata'
 import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio, canAnnotateNote } from '@/lib/notes/helpers'
@@ -61,6 +62,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
 
     const text = formData.get('text') as string
     const assignedPortfolios = formData.get('assigned_portfolios') as string | null
+    const collaboratorAccountIdsRaw = formData.get('collaborator_account_ids') as string | null
     const mentionedNoteId = formData.get('mentioned_note_id') as string | null
     const parentNoteId = formData.get('parent_note_id') as string | null
     const url = formData.get('url') as string | null
@@ -93,26 +95,56 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // Validate: must have exactly one portfolio assigned
-    if (portfolioIds.length !== 1) {
+    // Allow zero or one portfolio assigned (optional assignment)
+    if (portfolioIds.length > 1) {
       return {
         success: false,
-        error: 'Note must be assigned to exactly one portfolio',
+        error: 'Note can be assigned to at most one portfolio',
       }
     }
 
-    const portfolioId = portfolioIds[0]
+    // Parse collaborators (must be valid UUIDs, exclude self)
+    let collaboratorAccountIds: string[] = []
+    if (collaboratorAccountIdsRaw) {
+      try {
+        const parsed = JSON.parse(collaboratorAccountIdsRaw) as string[]
+        if (Array.isArray(parsed)) {
+          const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+          collaboratorAccountIds = parsed.filter(
+            (id) => typeof id === 'string' && validUuid.test(id) && id !== user.id
+          )
+          collaboratorAccountIds = [...new Set(collaboratorAccountIds)]
+        }
+      } catch {
+        // ignore invalid JSON
+      }
+    }
 
-    // For new notes (not annotations or reactions), user must be a member of the portfolio.
-    // For annotations and reactions, specialized creators already enforce permissions.
+    // For new notes (not annotations or reactions), if a portfolio is assigned, user must be a member.
     const isAnnotation = !!mentionedNoteId && noteTypeRaw !== 'reaction'
     const isReaction = noteTypeRaw === 'reaction'
-    if (!isAnnotation && !isReaction) {
+    if (portfolioIds.length === 1 && !isAnnotation && !isReaction) {
+      const portfolioId = portfolioIds[0]
       const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
       if (!canCreate) {
         return {
           success: false,
           error: 'You must be a member of the portfolio to create notes',
+        }
+      }
+    }
+
+    // Cannot annotate (comment on) an open call note
+    if (mentionedNoteId) {
+      const { data: parentNote } = await supabase
+        .from('notes')
+        .select('id, type')
+        .eq('id', mentionedNoteId)
+        .maybeSingle()
+      if (parentNote?.type === 'open_call') {
+        return {
+          success: false,
+          error: 'Comments are not allowed on open calls',
         }
       }
     }
@@ -136,19 +168,69 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         ? (annotationPrivacyRaw as 'authors' | 'friends' | 'everyone')
         : 'everyone'
 
-    // Visibility: only 'public' and 'private' are allowed, default to public
-    const visibility: 'public' | 'private' =
-      visibilityRaw === 'private' ? 'private' : 'public'
+    // Visibility:
+    // - Unassigned notes: public | friends | private
+    // - Assigned notes: public | members
+    const assignedCount = portfolioIds.length
+    const allowedVisibilities: NoteVisibility[] =
+      assignedCount === 1 ? ['public', 'members'] : ['public', 'friends', 'private']
+    let visibility: NoteVisibility =
+      visibilityRaw && (allowedVisibilities as string[]).includes(visibilityRaw)
+        ? (visibilityRaw as NoteVisibility)
+        : assignedCount === 1
+          ? 'members'
+          : 'public'
+    // Annotations/reactions should follow the parent note's audience and not become "members-only" by default.
+    // Keep them public (RLS still controls access to the parent context).
+    if (isAnnotation || isReaction) {
+      visibility = 'public'
+    }
 
     // Determine note type:
     // - Explicit note_type from formData takes precedence (validated to the allowed set)
     // - Otherwise, infer 'annotation' when mentioning another note
     // - Fallback to 'post'
-    let noteType: 'post' | 'annotation' | 'reaction' = 'post'
-    if (noteTypeRaw === 'post' || noteTypeRaw === 'annotation' || noteTypeRaw === 'reaction') {
+    let noteType: 'post' | 'annotation' | 'reaction' | 'open_call' = 'post'
+    if (noteTypeRaw === 'post' || noteTypeRaw === 'annotation' || noteTypeRaw === 'reaction' || noteTypeRaw === 'open_call') {
       noteType = noteTypeRaw
     } else if (mentionedNoteId) {
       noteType = 'annotation'
+    }
+
+    // Open call: require title and build metadata (begin_date = post time, interested = [])
+    const isOpenCall = noteType === 'open_call'
+    if (isOpenCall) {
+      const openCallTitle = (formData.get('open_call_title') as string | null)?.trim()
+      if (!openCallTitle) {
+        return {
+          success: false,
+          error: 'Open call title is required',
+        }
+      }
+    }
+
+    const now = new Date().toISOString()
+    let metadata: Record<string, unknown> | undefined
+    if (isOpenCall) {
+      const openCallTitle = (formData.get('open_call_title') as string | null)?.trim() ?? ''
+      const openCallEndDate = formData.get('open_call_end_date') as string | null
+      const openCallNeverEnds = formData.get('open_call_never_ends') === 'true'
+      let endDate: string | undefined
+      if (openCallNeverEnds) {
+        endDate = undefined
+      } else if (openCallEndDate) {
+        endDate = openCallEndDate
+      } else {
+        const in7 = new Date()
+        in7.setDate(in7.getDate() + 7)
+        endDate = in7.toISOString()
+      }
+      metadata = {
+        title: openCallTitle,
+        interested: [],
+        begin_date: now,
+        ...(endDate ? { end_date: endDate } : {}),
+      }
     }
 
     // Create note first (we need the ID for image uploads)
@@ -158,13 +240,15 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       text: text.trim(),
       references: [],
       assigned_portfolios: portfolioIds,
+      collaborator_account_ids: collaboratorAccountIds,
       mentioned_note_id: mentionedNoteId || null,
       parent_note_id: parentNoteId || null,
       annotations: [],
       deleted_at: null,
       primary_annotation: primaryAnnotation,
-      annotation_privacy: annotationPrivacy,
+      annotation_privacy: isOpenCall ? undefined : annotationPrivacy,
       visibility,
+      ...(metadata ? { metadata } : {}),
     }
 
     const { data: note, error: noteError } = await supabase
@@ -327,12 +411,11 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     }
 
     // Pin note if user requested it (only if user is owner and there's space)
-    if (shouldPin) {
+    if (shouldPin && portfolioIds.length > 0) {
       try {
         const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
         const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
 
-        // Get the assigned portfolio (should be only one)
         const portfolioId = portfolioIds[0]
         
         // Check if user is owner
@@ -372,16 +455,19 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     }
 
     // If user is the owner of the project, move it to top of owned_projects list
-    try {
-      const { isPortfolioOwner } = await import('@/lib/portfolio/helpers')
-      const isOwner = await isPortfolioOwner(portfolioId, user.id)
-      if (isOwner) {
-        const { addProjectToOwnedList } = await import('@/lib/portfolio/human')
-        await addProjectToOwnedList(user.id, portfolioId)
+    if (portfolioIds.length > 0) {
+      try {
+        const portfolioId = portfolioIds[0]
+        const { isPortfolioOwner } = await import('@/lib/portfolio/helpers')
+        const isOwner = await isPortfolioOwner(portfolioId, user.id)
+        if (isOwner) {
+          const { addProjectToOwnedList } = await import('@/lib/portfolio/human')
+          await addProjectToOwnedList(user.id, portfolioId)
+        }
+      } catch (error) {
+        // Log error but don't fail note creation
+        console.error('Failed to update owned_projects list:', error)
       }
-    } catch (error) {
-      // Log error but don't fail note creation
-      console.error('Failed to update owned_projects list:', error)
     }
 
     // Trigger background indexing (fire-and-forget)
@@ -1223,19 +1309,16 @@ export async function getNoteById(noteId: string, includeDeleted: boolean = fals
     // Ensure references is an array (handle null/undefined cases)
     const noteWithReferences: Note = {
       ...note,
-      type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
+      type: (note.type as Note['type']) || 'post',
       references: Array.isArray(note.references) ? note.references : [],
     }
 
-    console.log('Note fetched:', {
-      id: noteWithReferences.id,
-      referencesCount: noteWithReferences.references?.length || 0,
-      references: noteWithReferences.references,
-    })
+    const { data: { user } } = await supabase.auth.getUser()
+    const [enriched] = await enrichNotesWithAuthorProfiles([noteWithReferences], supabase, user?.id)
 
     return {
       success: true,
-      notes: [noteWithReferences],
+      notes: [enriched],
     }
   } catch (error: any) {
     return {
@@ -1285,15 +1368,15 @@ export async function getAnnotationsByNote(
   try {
     const supabase = await createClient()
 
-    // Check if the note being annotated (noteId) is deleted
+    // Check if the note being annotated (noteId) is deleted or is an open_call (no comments)
     const { data: referencedNote } = await supabase
       .from('notes')
-      .select('id, deleted_at, annotations')
+      .select('id, deleted_at, type, annotations')
       .eq('id', noteId)
       .single()
 
-    // If the referenced note is deleted, return empty (hide annotations when referenced note is deleted)
-    if (referencedNote && referencedNote.deleted_at) {
+    // If the referenced note is deleted or is an open call, return empty
+    if (referencedNote && (referencedNote.deleted_at || referencedNote.type === 'open_call')) {
       return {
         success: true,
         annotations: [],

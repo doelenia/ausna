@@ -24,14 +24,14 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
     redirect('/')
   }
 
-  // Get source portfolio if provided - must be a project or activity
+  // Get source portfolio if provided - must be a project, activity, or community
   let sourcePortfolio: Portfolio | null = null
   if (searchParams.portfolio) {
     const { data, error } = await supabase
       .from('portfolios')
       .select('*')
       .eq('id', searchParams.portfolio)
-      .in('type', ['projects', 'activities'])
+      .in('type', ['projects', 'activities', 'community'])
       .single()
 
     if (!error && data) {
@@ -91,7 +91,9 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
           <CreateNoteForm
             portfolios={portfolios}
             defaultPortfolioIds={defaultPortfolioIds}
-            humanPortfolioId={undefined}
+            humanPortfolioId={humanPortfolio.id}
+            ownerPortfolio={humanPortfolio}
+            currentUserId={user.id}
             mentionedNoteId={searchParams.annotate || undefined}
             redirectUrl="/main"
           />

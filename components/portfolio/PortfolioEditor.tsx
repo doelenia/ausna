@@ -16,6 +16,8 @@ import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { updatePortfolio, updateActivityCallToJoin } from '@/app/portfolio/[type]/[id]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
+import { DescriptionEditorPopup } from './DescriptionPopups'
+import { ImageViewerPopup } from './ImageViewerPopup'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
 import { Title, UIText, Button, Card, Content } from '@/components/ui'
@@ -216,8 +218,10 @@ export function PortfolioEditor({
   const metadata = portfolio.metadata as any
   const [name, setName] = useState(basic.name)
   const [description, setDescription] = useState(basic.description || '')
+  const [showDescriptionEditor, setShowDescriptionEditor] = useState(false)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(basic.avatar || null)
+  const [showAvatarPopup, setShowAvatarPopup] = useState(false)
   const [selectedEmoji, setSelectedEmoji] = useState<string | null>(metadata?.basic?.emoji || null)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>(metadata?.project_type_general || '')
@@ -419,6 +423,11 @@ export function PortfolioEditor({
     
     if (!name.trim()) {
       setError('Name is required')
+      return
+    }
+
+    if (description.length > 3000) {
+      setError('Description must be 3000 characters or less')
       return
     }
 
@@ -678,6 +687,20 @@ export function PortfolioEditor({
           onClose={() => setShowEmojiPicker(false)}
         />
       )}
+      <DescriptionEditorPopup
+        open={showDescriptionEditor}
+        value={description}
+        onChange={setDescription}
+        onClose={() => setShowDescriptionEditor(false)}
+      />
+      {avatarPreview && (
+        <ImageViewerPopup
+          open={showAvatarPopup}
+          src={avatarPreview}
+          alt={name || basic.name || 'Avatar'}
+          onClose={() => setShowAvatarPopup(false)}
+        />
+      )}
       <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl mx-auto">
           <div className="bg-white shadow rounded-lg p-6">
@@ -692,10 +715,13 @@ export function PortfolioEditor({
                 <div className="flex items-center gap-4">
                   <div className="flex-shrink-0">
                     {avatarPreview ? (
-                      <img
+                      <StickerAvatar
                         src={avatarPreview}
-                        alt="Avatar preview"
-                        className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
+                        alt={name || basic.name || 'Avatar preview'}
+                        type={portfolio.type}
+                        size={80}
+                        onClick={() => setShowAvatarPopup(true)}
+                        className="flex-shrink-0 transition-transform hover:rotate-3"
                       />
                     ) : selectedEmoji && !isHumanPortfolio(portfolio) ? (
                       <StickerAvatar
@@ -788,23 +814,37 @@ export function PortfolioEditor({
               />
             </div>
 
-            {/* Description Input */}
+            {/* Description (preview + popup editor) */}
             <div>
-              <UIText as="label" htmlFor="description" className="block mb-2">
-                Description
-              </UIText>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <UIText as="label" className="block">
+                  Description
+                </UIText>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowDescriptionEditor(true)}
+                  disabled={loading}
+                >
+                  <UIText>{description.trim().length > 0 ? 'Edit' : 'Add'}</UIText>
+                </Button>
+              </div>
               <UIText as="p" className="text-xs text-gray-500 mb-2">
-                You can also add relevant linnks (NOT LinkedIn!) This description will be used to build the advance knowledge graph that help us to find the best opportunities for you.
+                You can add relevant links (NOT LinkedIn!) This description helps us build the knowledge graph to find better opportunities for you.
               </UIText>
-              <textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={4}
-                maxLength={1000}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                disabled={loading}
-              />
+              {description.trim().length > 0 ? (
+                <Card variant="subtle" padding="sm">
+                  <UIText as="div" className="text-xs text-gray-500 mb-2">
+                    Preview (truncated)
+                  </UIText>
+                  <Content className="whitespace-pre-wrap line-clamp-5">{description}</Content>
+                </Card>
+              ) : (
+                <UIText as="p" className="text-xs text-gray-500">
+                  Add a description with paragraphs (max 3000 characters).
+                </UIText>
+              )}
             </div>
 
             {/* Type Selection (projects and communities only; activities use Advanced) */}

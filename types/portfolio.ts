@@ -91,6 +91,7 @@ export interface HumanPortfolioOnboarding {
   profile_complete?: boolean
   availabilities_complete?: boolean
   join_community_seen?: boolean
+  open_calls_setup_complete?: boolean
   updated_at?: string
 }
 

@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
+import { buildLoginHref, getReturnToFromReferer } from '@/lib/auth/login-redirect'
 
 const ADMIN_EMAILS = ['allen@doelenia.com', 'ceciliayiyan@gmail.com']
 
@@ -16,7 +18,8 @@ export async function requireAdmin() {
   } = await supabase.auth.getUser()
 
   if (userError || !user) {
-    redirect('/login')
+    const referer = (await headers()).get('referer')
+    redirect(buildLoginHref({ returnTo: getReturnToFromReferer(referer) }))
   }
 
   // Check if user email is in admin list
@@ -28,7 +31,8 @@ export async function requireAdmin() {
     const hasAdminFlag = metadata.is_admin === true
 
     if (!hasAdminFlag) {
-      redirect('/login')
+      const referer = (await headers()).get('referer')
+      redirect(buildLoginHref({ returnTo: getReturnToFromReferer(referer) }))
     }
   }
 

@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { Content, UIText, UIButtonText } from '@/components/ui'
-import { BadgeCheck } from 'lucide-react'
 import { PortfolioType } from '@/types/portfolio'
 
 interface SearchResult {
@@ -176,13 +175,6 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
           <div className="flex items-center gap-1 min-w-0">
             <Content className="truncate min-w-0">{result.name}</Content>
-            {result.type === 'human' && result.is_approved && (
-              <BadgeCheck
-                aria-label="Verified user"
-                className="w-4 h-4 text-blue-500 flex-shrink-0"
-                strokeWidth={2}
-              />
-            )}
           </div>
           {result.type === 'human' && result.username && (
             <UIButtonText className="text-gray-500 flex-shrink-0">@{result.username}</UIButtonText>

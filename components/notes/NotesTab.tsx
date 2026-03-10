@@ -11,12 +11,15 @@ interface NotesTabProps {
   portfolioId: string
   currentUserId?: string
   canCreateNote: boolean
+  /** When true (e.g. human portfolio), create note link goes to /notes/create with no pre-assigned portfolio */
+  isHumanPortfolio?: boolean
 }
 
 export function NotesTab({
   portfolioId,
   currentUserId,
   canCreateNote,
+  isHumanPortfolio = false,
 }: NotesTabProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
@@ -84,7 +87,11 @@ export function NotesTab({
       {/* Create Note Button */}
       {canCreateNote && (
         <div>
-          <Button asLink href={`/notes/create?portfolio=${portfolioId}`} variant="primary">
+          <Button
+            asLink
+            href={isHumanPortfolio ? '/notes/create' : `/notes/create?portfolio=${portfolioId}`}
+            variant="primary"
+          >
             <UIText>Create Note</UIText>
           </Button>
         </div>

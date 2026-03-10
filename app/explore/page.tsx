@@ -3,9 +3,10 @@ export const dynamic = 'force-dynamic'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Content } from '@/components/ui'
-import { getExploreActivities, getStoredDailyExploreMatch } from './actions'
+import { getExploreActivities } from './actions'
 import { ExploreView } from '@/components/explore/ExploreView'
 import { checkAdmin } from '@/lib/auth/requireAdmin'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 export default async function ExplorePage() {
   const supabase = await createClient()
@@ -14,12 +15,11 @@ export default async function ExplorePage() {
   } = await supabase.auth.getUser()
 
   if (!user) {
-    redirect('/login')
+    redirect(buildLoginHref({ returnTo: '/explore' }))
   }
 
-  const [activitiesResult, dailyMatchResult, adminUser] = await Promise.all([
+  const [activitiesResult, adminUser] = await Promise.all([
     getExploreActivities(user.id),
-    getStoredDailyExploreMatch(user.id),
     checkAdmin(),
   ])
 
@@ -38,16 +38,7 @@ export default async function ExplorePage() {
       activities={activitiesResult.activities ?? []}
       userId={user.id}
       isAdmin={!!adminUser}
-      dailyMatch={
-        dailyMatchResult.success && dailyMatchResult.activities.length > 0
-          ? {
-              introText: dailyMatchResult.introText,
-              activities: dailyMatchResult.activities,
-              ranAt: dailyMatchResult.ranAt,
-              patternPath: dailyMatchResult.patternPath ?? null,
-            }
-          : undefined
-      }
+      dailyMatch={undefined}
     />
   )
 }

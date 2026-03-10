@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { Note, NoteReference, ImageReference, UrlReference, NoteSource } from '@/types/note'
+import ReactDOM from 'react-dom'
+import { Note, NoteReference, ImageReference, UrlReference, NoteSource, type NoteVisibility } from '@/types/note'
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
@@ -18,7 +19,10 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
 import { useDataCache } from '@/lib/cache/useDataCache'
-import { MessageCircle, Heart, Lock } from 'lucide-react'
+import { MessageCircle, Heart, Lock, Megaphone, Hand, Send, UsersRound } from 'lucide-react'
+import type { OpenCallMetadata } from '@/types/note'
+import { SendItemModal } from '@/components/messages/SendItemModal'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 interface NoteCardProps {
   note: Note & { feedSource?: NoteSource }
@@ -39,6 +43,7 @@ interface NoteCardProps {
   flatOnMobile?: boolean
   onDeleted?: () => void
   onRemovedFromPortfolio?: () => void
+  onLeftCollaboration?: () => void
   /**
    * When true, show at most 1 comment preview in feed view
    * Comments are loaded lazily when card is in viewport
@@ -49,6 +54,18 @@ interface NoteCardProps {
    * When not provided, the comment icon navigates to the note page (#comments).
    */
   onCommentClick?: () => void
+  /** Called after collaborators are updated (e.g. remove) so parent can refetch */
+  onCollaboratorsUpdated?: () => void
+  /**
+   * When true (open call stack preview), reuse exact same layout but hide:
+   * - Text content and references
+   * - Buttons (NoteActions) and interest pill below
+   */
+  isOpenCallPreview?: boolean
+  /**
+   * When true, override the default card border styling (e.g. for special emphasis).
+   */
+  openCallBorder?: boolean
 }
 
 export function NoteCard({
@@ -62,20 +79,36 @@ export function NoteCard({
   flatOnMobile = false,
   onDeleted,
   onRemovedFromPortfolio,
+  onLeftCollaboration,
   showComments = false,
   onCommentClick,
+  onCollaboratorsUpdated,
+  isOpenCallPreview = false,
+  openCallBorder = false,
 }: NoteCardProps) {
+  const useOrangeBorder = openCallBorder
+  const isBrowser = typeof window !== 'undefined'
+  const renderPortal = (node: React.ReactNode) =>
+    isBrowser ? ReactDOM.createPortal(node, document.body) : node
   const router = useRouter()
   const { getCachedPortfolioData, setCachedPortfolioData, getCachedPortfolio, setCachedPortfolio } = useDataCache()
   const [ownerPortfolio, setOwnerPortfolio] = useState<Portfolio | null>(null)
+  const [collaboratorPortfolios, setCollaboratorPortfolios] = useState<Portfolio[]>([])
   const [assignedProjects, setAssignedProjects] = useState<Portfolio[]>([])
   const [loadingPortfolios, setLoadingPortfolios] = useState(true)
+  const [showAuthorsModal, setShowAuthorsModal] = useState(false)
+  const [showEditCollaboratorsModal, setShowEditCollaboratorsModal] = useState(false)
+  const [editCollabSearchQuery, setEditCollabSearchQuery] = useState('')
+  const [editCollabCandidates, setEditCollabCandidates] = useState<Array<{ id: string; username: string | null; name: string | null; avatar: string | null }>>([])
+  const [editCollabCandidatesLoading, setEditCollabCandidatesLoading] = useState(false)
+  const [removingCollaboratorId, setRemovingCollaboratorId] = useState<string | null>(null)
+  const [sendingInviteToId, setSendingInviteToId] = useState<string | null>(null)
   const [sessionRecoveryTrigger, setSessionRecoveryTrigger] = useState(0)
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
   const [touchStartY, setTouchStartY] = useState<number | null>(null)
-  const [isSendingToAuthor, setIsSendingToAuthor] = useState(false)
+  const [showSendModal, setShowSendModal] = useState(false)
   const [isTextExpanded, setIsTextExpanded] = useState(false)
   const [isTextTruncated, setIsTextTruncated] = useState(false)
   const [wasTruncated, setWasTruncated] = useState(false)
@@ -98,11 +131,78 @@ export function NoteCard({
   const carouselRef = useRef<HTMLDivElement | null>(null)
   const textRef = useRef<HTMLDivElement | null>(null)
   const cardRef = useRef<HTMLDivElement | null>(null)
-  const [localVisibility, setLocalVisibility] = useState<'public' | 'private' | null>(null)
+  const [localVisibility, setLocalVisibility] = useState<NoteVisibility | null>(null)
+  const openCallMeta = (note.type === 'open_call' ? (note.metadata as OpenCallMetadata | undefined) : undefined) ?? {}
+  const [openCallInterested, setOpenCallInterested] = useState<string[]>(() =>
+    Array.isArray(openCallMeta.interested) ? openCallMeta.interested : []
+  )
+  const [openCallInterestedLoading, setOpenCallInterestedLoading] = useState(false)
+  const [openCallInterestedProfiles, setOpenCallInterestedProfiles] = useState<Record<string, { name: string; avatar?: string | null }>>({})
+  const [showInterestPopup, setShowInterestPopup] = useState(false)
+  const [showInterestMessage, setShowInterestMessage] = useState("I'm interested")
+  const [showInterestedModal, setShowInterestedModal] = useState(false)
+
+  const getCurrentReturnTo = () => {
+    if (typeof window === 'undefined') return '/main'
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`
+  }
 
   useEffect(() => {
     setLocalVisibility(null)
   }, [note.id])
+
+  // Load interested list for open call
+  useEffect(() => {
+    if (note.type !== 'open_call') return
+    fetch(`/api/notes/${note.id}/interested`)
+      .then((res) => (res.ok ? res.json() : { interested: [] }))
+      .then((data) => {
+        if (Array.isArray(data.interested)) setOpenCallInterested(data.interested)
+      })
+      .catch(() => {})
+  }, [note.id, note.type])
+
+  // Load profiles for interested users (when author needs to display them)
+  useEffect(() => {
+    if (note.type !== 'open_call' || openCallInterested.length === 0) return
+    const loadProfiles = async () => {
+      const profiles: Record<string, { name: string; avatar?: string | null }> = {}
+      for (const userId of openCallInterested) {
+        const portfolio = (ownerPortfolio && ownerPortfolio.user_id === userId)
+          ? ownerPortfolio
+          : collaboratorPortfolios.find((p) => p.user_id === userId)
+        if (portfolio) {
+          const basic = getPortfolioBasic(portfolio)
+          profiles[userId] = {
+            name: currentUserId && userId === currentUserId ? 'You' : (basic?.name || `User ${userId.slice(0, 8)}`),
+            avatar: basic?.avatar,
+          }
+        } else {
+          try {
+            const { data } = await createClient()
+              .from('portfolios')
+              .select('*')
+              .eq('type', 'human')
+              .eq('user_id', userId)
+              .maybeSingle()
+            if (data) {
+              const basic = getPortfolioBasic(data as Portfolio)
+              profiles[userId] = {
+                name: currentUserId && userId === currentUserId ? 'You' : (basic?.name || `User ${userId.slice(0, 8)}`),
+                avatar: basic?.avatar,
+              }
+            } else {
+              profiles[userId] = { name: `User ${userId.slice(0, 8)}` }
+            }
+          } catch {
+            profiles[userId] = { name: `User ${userId.slice(0, 8)}` }
+          }
+        }
+      }
+      setOpenCallInterestedProfiles(profiles)
+    }
+    loadProfiles()
+  }, [note.type, note.id, openCallInterested, ownerPortfolio, collaboratorPortfolios, currentUserId])
 
   useEffect(() => {
     const fetchPortfolios = async (retryCount = 0) => {
@@ -194,6 +294,21 @@ export function NoteCard({
         } else {
           // No error, but no data - portfolio doesn't exist (expected for some users)
           // This is normal and will use the fallback name
+        }
+
+        // Fetch collaborator human portfolios (for authors pill)
+        const collaboratorIds = (note.collaborator_account_ids || []) as string[]
+        if (collaboratorIds.length > 0) {
+          const { data: collabPortfolios } = await supabase
+            .from('portfolios')
+            .select('*')
+            .eq('type', 'human')
+            .in('user_id', collaboratorIds)
+          if (collabPortfolios && collabPortfolios.length > 0) {
+            setCollaboratorPortfolios(collabPortfolios as Portfolio[])
+          }
+        } else {
+          setCollaboratorPortfolios([])
         }
 
         // Fetch assigned portfolios (any type currently used for notes, e.g. projects/activities)
@@ -294,7 +409,7 @@ export function NoteCard({
     }
 
     fetchPortfolios()
-  }, [note.assigned_portfolios, note.owner_account_id, portfolioId, note.id, sessionRecoveryTrigger])
+  }, [note.assigned_portfolios, note.owner_account_id, note.collaborator_account_ids, portfolioId, note.id, sessionRecoveryTrigger])
 
   // When TopNav recovers session after timeout (e.g. Safari), retry loading user/project so they can show
   useEffect(() => {
@@ -303,9 +418,30 @@ export function NoteCard({
     return () => window.removeEventListener('supabase-session-recovered', onRecovered)
   }, [])
 
-  // Lazy load comments when showComments=true and card is in viewport
+  // Fetch collaborator candidates when Edit collaborators modal is open (for Add flow)
   useEffect(() => {
-    if (!showComments || commentsLoaded || isViewMode) return
+    if (!showEditCollaboratorsModal) {
+      setEditCollabCandidates([])
+      return
+    }
+    const portfolioId = (note.assigned_portfolios && note.assigned_portfolios[0]) || ''
+    const params = new URLSearchParams()
+    if (portfolioId) params.set('portfolio_id', portfolioId)
+    if (editCollabSearchQuery.trim()) params.set('q', editCollabSearchQuery.trim())
+    setEditCollabCandidatesLoading(true)
+    fetch(`/api/notes/collaborator-candidates?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : { users: [] }))
+      .then((data) => setEditCollabCandidates(data.users || []))
+      .catch(() => setEditCollabCandidates([]))
+      .finally(() => setEditCollabCandidatesLoading(false))
+  }, [showEditCollaboratorsModal, note.assigned_portfolios, editCollabSearchQuery])
+
+  const isOpenCall = note.type === 'open_call'
+  const noteLink = typeof window !== 'undefined' ? `${window.location.origin}/notes/${note.id}` : `/notes/${note.id}`
+
+  // Lazy load comments when showComments=true and card is in viewport (skip for open call)
+  useEffect(() => {
+    if (isOpenCall || !showComments || commentsLoaded || isViewMode) return
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -328,10 +464,11 @@ export function NoteCard({
         observer.unobserve(cardRef.current)
       }
     }
-  }, [showComments, commentsLoaded, isViewMode, note.id])
+  }, [isOpenCall, showComments, commentsLoaded, isViewMode, note.id])
 
-  // Load like reactions (top 5) when note changes
+  // Load like reactions (top 5) when note changes (skip for open call)
   useEffect(() => {
+    if (isOpenCall) return
     let cancelled = false
     const loadReactions = async () => {
       try {
@@ -354,7 +491,7 @@ export function NoteCard({
     return () => {
       cancelled = true
     }
-  }, [note.id])
+  }, [note.id, isOpenCall])
 
   const loadMoreReactions = async () => {
     if (reactionsLoading) return
@@ -460,7 +597,7 @@ export function NoteCard({
     e.preventDefault()
     e.stopPropagation()
     if (!currentUserId) {
-      router.push('/login')
+      router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
       return
     }
     // Optimistic toggle in UI
@@ -761,6 +898,32 @@ export function NoteCard({
     ? 'You'
     : (ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`)
 
+  // Authors = owner + collaborators (for pill and popup)
+  // Prefer server-enriched author_profiles when available (avoids client fetch delay for avatars)
+  const collaboratorIds = (note.collaborator_account_ids || []) as string[]
+  const authorIds = [note.owner_account_id, ...collaboratorIds]
+  const authorProfiles: { id: string; name: string; avatar?: string | null }[] =
+    note.author_profiles && note.author_profiles.length > 0
+      ? note.author_profiles
+      : authorIds.map((userId) => {
+          if (userId === note.owner_account_id) {
+            const name = currentUserId && userId === currentUserId ? 'You' : (ownerBasic?.name || `User ${userId.slice(0, 8)}`)
+            return { id: userId, name, avatar: ownerBasic?.avatar }
+          }
+          const collabPortfolio = collaboratorPortfolios.find((p) => p.user_id === userId)
+          const basic = collabPortfolio ? getPortfolioBasic(collabPortfolio) : null
+          const name = currentUserId && userId === currentUserId ? 'You' : (basic?.name || `User ${userId.slice(0, 8)}`)
+          return { id: userId, name, avatar: basic?.avatar }
+        })
+  const authorsLabel =
+    authorProfiles.length === 0
+      ? ''
+      : authorProfiles.length === 1
+        ? authorProfiles[0].name
+        : authorProfiles.length === 2
+          ? `${authorProfiles[0].name} and ${authorProfiles[1].name}`
+          : `${authorProfiles[0].name}, ${authorProfiles[1].name}, and others`
+
   const ownerLocationText = (() => {
     if (!ownerPortfolio || !isHumanPortfolio(ownerPortfolio)) {
       return null
@@ -792,8 +955,25 @@ export function NoteCard({
   })()
 
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
+  const isCollaborator = !isOwner && !!currentUserId && collaboratorIds.includes(currentUserId)
   const effectiveVisibility = localVisibility ?? (note as any).visibility ?? 'public'
   const isPrivate = effectiveVisibility === 'private'
+  const isMembersOnly = effectiveVisibility === 'members'
+  const isFriendsOnly = effectiveVisibility === 'friends'
+
+  const visibilityCornerIcon = !isViewMode ? (
+    isPrivate ? (
+      <Lock
+        className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none"
+        aria-label="Private"
+      />
+    ) : isMembersOnly || isFriendsOnly ? (
+      <UsersRound
+        className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none"
+        aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
+      />
+    ) : null
+  ) : null
 
   const isCollageView = viewMode === 'collage'
   
@@ -1062,39 +1242,7 @@ export function NoteCard({
     setTouchStartY(null)
   }
 
-  // Talk to author handler
-  const handleTalkToAuthor = async (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    
-    if (!currentUserId || currentUserId === note.owner_account_id) return
-    
-    setIsSendingToAuthor(true)
-    try {
-      const response = await fetch('/api/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          receiver_id: note.owner_account_id,
-          text: '',
-          note_id: note.id,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to send note')
-      }
-
-      router.push(`/messages?userId=${note.owner_account_id}`)
-    } catch (error) {
-      console.error('Error sending note:', error)
-      alert('Failed to send note')
-    } finally {
-      setIsSendingToAuthor(false)
-    }
-  }
+  // (Talk-to-author button replaced by Send modal in actions row)
 
   // For URL notes in collage view, render special layout
   if (hasUrlInCollage) {
@@ -1162,9 +1310,7 @@ export function NoteCard({
             </div>
           )}
         </Link>
-        {isOwner && isPrivate && (
-          <Lock className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none" aria-label="Private" />
-        )}
+        {visibilityCornerIcon}
       </div>
     )
   }
@@ -1200,9 +1346,7 @@ export function NoteCard({
             </div>
           )}
         </Link>
-        {isOwner && isPrivate && (
-          <Lock className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none" aria-label="Private" />
-        )}
+        {visibilityCornerIcon}
       </div>
     )
   }
@@ -1268,10 +1412,226 @@ export function NoteCard({
   const hasMediaInDefaultView = !isCollageView && (hasImages || hasUrls)
   const hasReferences = !isCollageView && references && references.length > 0
 
+  const openCallEndDate = openCallMeta.end_date ? new Date(openCallMeta.end_date) : null
+  const openCallDaysLeft = openCallEndDate
+    ? Math.ceil((openCallEndDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null
+  const isUserInterested = currentUserId ? openCallInterested.includes(currentUserId) : false
+
+  const viewedByList = Array.isArray(openCallMeta.viewed_by) ? openCallMeta.viewed_by : []
+  const isOpenCallNew =
+    note.type === 'open_call' && !!currentUserId && !viewedByList.includes(currentUserId)
+
+  // (debug instrumentation removed)
+
+  const openCallHeader = isOpenCall ? (
+    <div className="flex items-center justify-between gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
+        <Megaphone
+          className="w-5 h-5 text-orange-600 flex-shrink-0"
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        <UIText as="span" className="flex items-center gap-2 text-orange-600">
+          Open call
+          {openCallDaysLeft !== null && openCallDaysLeft > 0 && (
+            <>
+              <span className="text-orange-600">·</span>
+              <span className="text-orange-600">
+                ends in {openCallDaysLeft === 1 ? '1 day' : `${openCallDaysLeft} days`}
+              </span>
+            </>
+          )}
+        </UIText>
+      </div>
+      {isOpenCallPreview && isOpenCallNew && (
+        <div className="inline-flex items-center px-2 py-0.5 rounded-full bg-orange-500">
+          <UIText as="span" className="text-white">
+            NEW
+          </UIText>
+        </div>
+      )}
+    </div>
+  ) : undefined
+
+  const openCallAuthorDisplayName = authorIds.length <= 1 ? ownerName : authorsLabel
+  const interestedProfilesList = openCallInterested.map((userId) => ({
+    id: userId,
+    name: openCallInterestedProfiles[userId]?.name ?? `User ${userId.slice(0, 8)}`,
+    avatar: openCallInterestedProfiles[userId]?.avatar,
+  }))
+  const interestedLabel =
+    interestedProfilesList.length === 0
+      ? ''
+      : interestedProfilesList.length === 1
+        ? `${interestedProfilesList[0].name} is interested`
+        : interestedProfilesList.length === 2
+          ? `${interestedProfilesList[0].name} and ${interestedProfilesList[1].name} are interested`
+          : `${interestedProfilesList[0].name}, ${interestedProfilesList[1].name}, and ${interestedProfilesList.length - 2} others are interested`
+
+  const openCallFooter = isOpenCall ? (
+    <div className="flex flex-wrap items-center gap-3">
+      {(isOwner || isCollaborator) ? (
+        /* Authors see interested pill (same style as authors pill) */
+        openCallInterested.length === 0 ? (
+          <UIText className="text-gray-500">No one has shown interest yet</UIText>
+        ) : (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setShowInterestedModal(true)
+            }}
+            className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+            aria-label="View interested"
+          >
+            <div className="flex -space-x-2 flex-shrink-0">
+              {interestedProfilesList.slice(0, 5).map((p, index) => (
+                <div key={p.id} className="relative" style={{ zIndex: interestedProfilesList.length - index }}>
+                  <UserAvatar userId={p.id} name={p.name} avatar={p.avatar} size={32} showLink={false} />
+                </div>
+              ))}
+            </div>
+            <UIText as="span" className="text-gray-700 whitespace-nowrap">{interestedLabel}</UIText>
+          </button>
+        )
+      ) : (
+        /* Non-authors see "Show interest to [author]" button */
+        <Button
+          variant="primary"
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            if (!currentUserId) {
+              router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
+              return
+            }
+            setShowInterestMessage("I'm interested")
+            setShowInterestPopup(true)
+          }}
+          className="inline-flex items-center gap-2"
+        >
+          <Hand
+            className={`w-5 h-5 ${isUserInterested ? 'text-orange-500' : ''}`}
+            strokeWidth={1.5}
+            fill={isUserInterested ? 'currentColor' : 'none'}
+            aria-hidden
+          />
+          <UIText>
+            {isUserInterested ? 'Interested' : `Show interest to ${openCallAuthorDisplayName}`}
+          </UIText>
+        </Button>
+      )}
+    </div>
+  ) : undefined
+
+  const useOpenCallLayout = isOpenCall && !isCollageView
+
   const cardContent = (
     <>
-      {/* Header - Owner and Date (hidden in collage view) - moved to top */}
-      {!isCollageView && (
+      {/* Open call layout: header, title, authors (inside card) - same in feed and note view */}
+      {useOpenCallLayout ? (
+        <div className="px-3 pt-3 text-left">
+          <div className="mb-3">{openCallHeader}</div>
+          {(note.metadata as { title?: string } | undefined)?.title && (
+            <Subtitle as="h3" className="mb-2 text-left line-clamp-2">
+              {(note.metadata as { title: string }).title}
+            </Subtitle>
+          )}
+          {/* Authors below title */}
+          <div className={`flex items-start justify-between ${isOpenCallPreview ? 'mb-1' : 'mb-2'}`}>
+            <div className="flex items-center gap-3 flex-wrap">
+              {loadingPortfolios ? (
+                <div className="flex items-center gap-2">
+                  <SkeletonAvatar size={32} />
+                  <SkeletonText lines={1} width={100} lineHeight={16} />
+                </div>
+              ) : authorIds.length <= 1 ? (
+                <Link
+                  href={`/portfolio/human/${note.owner_account_id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-2 hover:opacity-80 transition-colors"
+                >
+                  <UserAvatar userId={note.owner_account_id} name={ownerName} avatar={ownerBasic?.avatar} size={32} showLink={false} />
+                  <UIText as="span" className="hover:text-blue-600">{ownerName}</UIText>
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowAuthorsModal(true) }}
+                  className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+                  aria-label="View authors"
+                >
+                  <div className="flex -space-x-2 flex-shrink-0">
+                    {authorProfiles.slice(0, 5).map((author, index) => (
+                      <div key={author.id} className="relative" style={{ zIndex: authorProfiles.length - index }}>
+                        <UserAvatar userId={author.id} name={author.name} avatar={author.avatar} size={32} showLink={false} />
+                      </div>
+                    ))}
+                  </div>
+                  <UIText as="span" className="text-gray-700 whitespace-nowrap">{authorsLabel}</UIText>
+                </button>
+              )}
+              {!isOpenCallPreview && (
+                <UIButtonText as="span" className="text-gray-500">
+                  {ownerLocationText ? `${ownerLocationText} · ${formatRelativeTime(note.created_at)}` : formatRelativeTime(note.created_at)}
+                </UIButtonText>
+              )}
+              {isOpenCallPreview && (() => {
+                const projectPortfolio = assignedProjects.find((p) => !isHumanPortfolio(p))
+                if (!projectPortfolio) return null
+                const basic = getPortfolioBasic(projectPortfolio)
+                const meta = projectPortfolio.metadata as any
+                return (
+                  <Link
+                    href={getPortfolioUrl(projectPortfolio.type, projectPortfolio.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center gap-2 hover:opacity-80 transition-colors flex-shrink-0"
+                  >
+                    <StickerAvatar
+                      src={basic.avatar}
+                      alt={basic.name}
+                      type={projectPortfolio.type}
+                      size={34}
+                      emoji={meta?.basic?.emoji}
+                      name={basic.name}
+                      variant="mini"
+                      normalizeScale={1.0}
+                    />
+                    <UIText as="span" className="text-gray-600">{basic.name}</UIText>
+                  </Link>
+                )
+              })()}
+            </div>
+            {!isOpenCallPreview && (isOwner || isCollaborator) && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {isPrivate && <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />}
+                {(isMembersOnly || isFriendsOnly) && (
+                  <UsersRound
+                    className="w-4 h-4 text-gray-500 flex-shrink-0"
+                    aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
+                  />
+                )}
+                <NoteActions
+                  note={note}
+                  portfolioId={portfolioId}
+                  currentUserId={currentUserId}
+                  isCollaborator={isCollaborator}
+                  isOpenCall={isOpenCall}
+                  onDelete={onDeleted}
+                  onRemoveFromPortfolio={onRemovedFromPortfolio}
+                  onLeftCollaboration={onLeftCollaboration}
+                  onVisibilityChange={setLocalVisibility}
+                  onOpenEditCollaborators={isOwner ? () => setShowEditCollaboratorsModal(true) : undefined}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+      /* Regular layout: Header - Owner and Date (hidden in collage view) */
+      !isCollageView && (
         <div className="px-3 pt-3">
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-3 flex-wrap">
@@ -1280,7 +1640,7 @@ export function NoteCard({
                   <SkeletonAvatar size={32} />
                   <SkeletonText lines={1} width={100} lineHeight={16} />
                 </div>
-              ) : (
+              ) : authorIds.length <= 1 ? (
                 <Link
                   href={`/portfolio/human/${note.owner_account_id}`}
                   onClick={(e) => e.stopPropagation()}
@@ -1297,6 +1657,38 @@ export function NoteCard({
                     {ownerName}
                   </UIText>
                 </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setShowAuthorsModal(true)
+                  }}
+                  className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
+                  aria-label="View authors"
+                >
+                  <div className="flex -space-x-2 flex-shrink-0">
+                    {authorProfiles.slice(0, 5).map((author, index) => (
+                      <div
+                        key={author.id}
+                        className="relative"
+                        style={{ zIndex: authorProfiles.length - index }}
+                      >
+                        <UserAvatar
+                          userId={author.id}
+                          name={author.name}
+                          avatar={author.avatar}
+                          size={32}
+                          showLink={false}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <UIText as="span" className="text-gray-700 whitespace-nowrap">
+                    {authorsLabel}
+                  </UIText>
+                </button>
               )}
               <UIButtonText as="span" className="text-gray-500">
                 {ownerLocationText
@@ -1316,68 +1708,58 @@ export function NoteCard({
             {/* View Mode Actions (and private lock to the left when in view mode) */}
             {isViewMode && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {isOwner && isPrivate && (
-                  <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
+                {isPrivate && <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />}
+                {(isMembersOnly || isFriendsOnly) && (
+                  <UsersRound
+                    className="w-4 h-4 text-gray-500 flex-shrink-0"
+                    aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
+                  />
                 )}
-                {/* Talk to Author Button */}
-                {currentUserId && currentUserId !== note.owner_account_id && (
-                  <Button
-                    variant="text"
-                    size="sm"
-                    onClick={handleTalkToAuthor}
-                    disabled={isSendingToAuthor}
-                    className="flex items-center gap-1.5"
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                      />
-                    </svg>
-                    <UIText>{isSendingToAuthor ? 'Opening...' : 'Talk to Author'}</UIText>
-                  </Button>
-                )}
-                
                 {/* More Menu */}
-                {isOwner && (
+                {(isOwner || isCollaborator) && (
                   <NoteActions
                     note={note}
                     portfolioId={portfolioId}
                     currentUserId={currentUserId}
+                    isCollaborator={isCollaborator}
+                    isOpenCall={isOpenCall}
                     onDelete={onDeleted}
                     onRemoveFromPortfolio={onRemovedFromPortfolio}
+                    onLeftCollaboration={onLeftCollaboration}
                     onVisibilityChange={setLocalVisibility}
+                    onOpenEditCollaborators={isOwner ? () => setShowEditCollaboratorsModal(true) : undefined}
                   />
                 )}
               </div>
             )}
           </div>
         </div>
-      )}
+      ))}
 
       {/* Top media section (images + URL previews) with tighter padding - after user row */}
-      {!isCollageView && (
+      {!isCollageView && !isOpenCallPreview && (
         <div className="px-1">
           {renderReferencesSection()}
         </div>
       )}
 
       {/* Main body with more generous padding */}
-      <div className={`px-4 pb-4 ${
+      <div className={`px-4 ${isOpenCallPreview ? 'pb-3' : 'pb-4'} ${
         hasMediaInDefaultView 
           ? 'pt-0' 
           : hasReferences 
             ? 'pt-4' 
             : 'pt-2'
       }`}>
-        {/* Text content */}
+        {/* Open call title from metadata - only when not using open call layout (title is in header) */}
+        {isOpenCall && !useOpenCallLayout && (note.metadata as { title?: string } | undefined)?.title && (
+          <Subtitle as="h3" className="mb-2">
+            {(note.metadata as { title: string }).title}
+          </Subtitle>
+        )}
+
+        {/* Text content - hidden in open call preview */}
+        {!isOpenCallPreview && (
         <div 
           className={isTextOnly ? 'mb-2' : 'mb-4'}
           style={isTextOnly ? {
@@ -1425,6 +1807,7 @@ export function NoteCard({
             </button>
           )}
         </div>
+        )}
 
         {/* References preview - show all references (excluding first image in collage view) - only for collage view */}
         {isCollageView && note.references && note.references.length > 0 && (
@@ -1448,11 +1831,16 @@ export function NoteCard({
           </div>
         )}
 
-        {/* Project banner at the end of the main card (not in collage view) */}
-        {!isCollageView && projectBanner}
+        {/* Project banner at the end of the main card (not in collage view, hidden in open call preview) */}
+        {!isCollageView && !isOpenCallPreview && projectBanner}
 
-        {/* Reactions & comments row (icons + like pill) */}
-        {!isCollageView && (
+        {/* Open call footer (Interested + Talk to author buttons) - hidden in preview */}
+        {useOpenCallLayout && openCallFooter && !isOpenCallPreview && (
+          <div className="mt-4">{openCallFooter}</div>
+        )}
+
+        {/* Reactions & comments row (icons + like pill) - hidden for open call */}
+        {!isCollageView && !isOpenCall && (
           <div className="mt-3 flex items-center justify-between gap-3">
             {/* Left: like + comment icons */}
             <div className="flex items-center gap-2">
@@ -1498,7 +1886,11 @@ export function NoteCard({
                 </button>
               ) : (
                 <Link
-                  href={currentUserId ? `/notes/${note.id}#comments` : '/login'}
+                  href={
+                    currentUserId
+                      ? `/notes/${note.id}#comments`
+                      : buildLoginHref({ returnTo: `/notes/${note.id}#comments` })
+                  }
                   onClick={(e) => e.stopPropagation()}
                   className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
                   aria-label="Comment"
@@ -1506,6 +1898,25 @@ export function NoteCard({
                 >
                   <MessageCircle className="w-5 h-5" strokeWidth={1.5} />
                 </Link>
+              )}
+              {!isOpenCall && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!currentUserId) {
+                      router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
+                      return
+                    }
+                    setShowSendModal(true)
+                  }}
+                  className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                  aria-label="Send"
+                  title="Send"
+                >
+                  <Send className="w-5 h-5" strokeWidth={1.5} />
+                </button>
               )}
             </div>
 
@@ -1556,7 +1967,7 @@ export function NoteCard({
         )}
 
         {/* Comment preview (feed view only, when enabled) */}
-        {showComments && !isViewMode && !isCollageView && commentCount !== null && commentCount > 0 && (
+        {showComments && !isViewMode && !isCollageView && !isOpenCall && commentCount !== null && commentCount > 0 && (
           <div className="mt-3 flex flex-col gap-2">
             {commentCount > 0 && (
               <>
@@ -1617,91 +2028,411 @@ export function NoteCard({
       </div>
 
       {/* Reactions popup modal */}
-      {showReactionsModal && (
-        <div
-          className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
-          onClick={() => setShowReactionsModal(false)}
-        >
+      {showReactionsModal &&
+        renderPortal(
           <div
-            className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowReactionsModal(false)
+            }}
           >
-            <div className="px-4 py-3 flex items-center justify-center">
-              <UIText>Reactions</UIText>
-            </div>
             <div
-              className="px-4 py-3 overflow-y-auto"
-              style={{ maxHeight: '60vh' }}
-              onScroll={(e) => {
-                const target = e.currentTarget
-                const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight
-                if (
-                  distanceToBottom < 64 &&
-                  !reactionsLoading &&
-                  reactionsTotalCount !== null &&
-                  reactionItems.length < reactionsTotalCount
-                ) {
-                  loadMoreReactions().catch(() => {})
-                }
-              }}
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
             >
-              {reactionItems.length === 0 && !reactionsLoading && (
-                <UIText className="text-center text-gray-500">No reactions yet.</UIText>
-              )}
-              {reactionItems.map((item) => {
-                const profile = likeLikerProfiles[item.userId]
-                const name = profile?.name ?? `User ${item.userId.slice(0, 8)}`
-                const avatar = profile?.avatar
-                return (
-                  <div key={item.id} className="flex items-center justify-between py-2 gap-3">
+              <div className="px-4 py-3 flex items-center justify-center">
+                <UIText>Reactions</UIText>
+              </div>
+              <div
+                className="px-4 py-3 overflow-y-auto"
+                style={{ maxHeight: '60vh' }}
+                onScroll={(e) => {
+                  const target = e.currentTarget
+                  const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight
+                  if (
+                    distanceToBottom < 64 &&
+                    !reactionsLoading &&
+                    reactionsTotalCount !== null &&
+                    reactionItems.length < reactionsTotalCount
+                  ) {
+                    loadMoreReactions().catch(() => {})
+                  }
+                }}
+              >
+                {reactionItems.length === 0 && !reactionsLoading && (
+                  <UIText className="text-center text-gray-500">No reactions yet.</UIText>
+                )}
+                {reactionItems.map((item) => {
+                  const profile = likeLikerProfiles[item.userId]
+                  const name = profile?.name ?? `User ${item.userId.slice(0, 8)}`
+                  const avatar = profile?.avatar
+                  return (
+                    <div key={item.id} className="flex items-center justify-between py-2 gap-3">
+                      <Link
+                        href={`/portfolio/human/${item.userId}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+                      >
+                        <UserAvatar
+                          userId={item.userId}
+                          name={name}
+                          avatar={avatar}
+                          size={32}
+                          showLink={false}
+                        />
+                        <UIText as="span">{name}</UIText>
+                      </Link>
+                      <div className="flex items-center justify-center">
+                        <Heart className="w-4 h-4 text-red-600" strokeWidth={1.5} fill="currentColor" />
+                      </div>
+                    </div>
+                  )
+                })}
+                {reactionsLoading && (
+                  <div className="py-2">
+                    <UIText className="text-center text-gray-500">Loading...</UIText>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* Interested popup modal (open call authors - same style as authors) */}
+      {showInterestedModal &&
+        isOpenCall &&
+        renderPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowInterestedModal(false)
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 flex items-center justify-center">
+                <UIText>Interested</UIText>
+              </div>
+              <div className="px-4 py-3 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+                {interestedProfilesList.map((p) => (
+                  <Link
+                    key={p.id}
+                    href={`/portfolio/human/${p.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-3 py-2 hover:opacity-80 transition-opacity"
+                  >
+                    <UserAvatar userId={p.id} name={p.name} avatar={p.avatar} size={32} showLink={false} />
+                    <UIText as="span">{p.name}</UIText>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* Authors popup modal (same style as reactions) */}
+      {showAuthorsModal &&
+        renderPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowAuthorsModal(false)
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 flex items-center justify-center">
+                <UIText>Authors</UIText>
+              </div>
+              <div className="px-4 py-3 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+                {authorProfiles.map((author) => (
+                  <Link
+                    key={author.id}
+                    href={`/portfolio/human/${author.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="flex items-center gap-3 py-2 hover:opacity-80 transition-opacity"
+                  >
+                    <UserAvatar
+                      userId={author.id}
+                      name={author.name}
+                      avatar={author.avatar}
+                      size={32}
+                      showLink={false}
+                    />
+                    <UIText as="span">{author.name}</UIText>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* Show interest popup (open call) */}
+      {showInterestPopup &&
+        isOpenCall &&
+        renderPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowInterestPopup(false)
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 border-b border-gray-100">
+                <UIText className="block mb-2">
+                  We will send {openCallAuthorDisplayName} your interest with the message below. This is only visible to
+                  authors.
+                </UIText>
+                <textarea
+                  value={showInterestMessage}
+                  onChange={(e) => setShowInterestMessage(e.target.value)}
+                  placeholder="I'm interested"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                />
+              </div>
+              <div className="px-4 py-3 flex gap-2 justify-end">
+                <Button
+                  variant="secondary"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setShowInterestPopup(false)
+                  }}
+                >
+                  <UIText>Cancel</UIText>
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={openCallInterestedLoading}
+                  onClick={async (e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!currentUserId || openCallInterestedLoading) return
+                    setOpenCallInterestedLoading(true)
+                    try {
+                      const res = await fetch(`/api/notes/${note.id}/show-interest`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          message: showInterestMessage.trim() || "I'm interested",
+                        }),
+                      })
+                      const data = res.ok ? await res.json() : null
+                      if (data?.success && Array.isArray(data.interested)) {
+                        setOpenCallInterested(data.interested)
+                        setShowInterestPopup(false)
+                      } else {
+                        const err = data?.error || 'Failed to send'
+                        alert(err)
+                      }
+                    } finally {
+                      setOpenCallInterestedLoading(false)
+                    }
+                  }}
+                >
+                  <UIText>{openCallInterestedLoading ? 'Sending...' : 'Send'}</UIText>
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* Edit collaborators popup modal (same style as reactions) */}
+      {showEditCollaboratorsModal &&
+        renderPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowEditCollaboratorsModal(false)
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 flex items-center justify-center border-b border-gray-100">
+                <UIText>Collaborators</UIText>
+              </div>
+              <div className="px-4 py-3 overflow-y-auto flex-1" style={{ maxHeight: '60vh' }}>
+                {authorProfiles.map((author, index) => (
+                  <div key={author.id} className="flex items-center justify-between gap-3 py-2">
                     <Link
-                      href={`/portfolio/human/${item.userId}`}
+                      href={`/portfolio/human/${author.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+                      className="flex items-center gap-3 hover:opacity-80 transition-opacity min-w-0"
                     >
                       <UserAvatar
-                        userId={item.userId}
-                        name={name}
-                        avatar={avatar}
+                        userId={author.id}
+                        name={author.name}
+                        avatar={author.avatar}
                         size={32}
                         showLink={false}
                       />
-                      <UIText as="span">{name}</UIText>
+                      <div className="min-w-0">
+                        <UIText as="span" className="block truncate">
+                          {author.name}
+                        </UIText>
+                        {index === 0 && (
+                          <UIText as="span" className="text-xs text-gray-500">
+                            Owner
+                          </UIText>
+                        )}
+                      </div>
                     </Link>
-                    <div className="flex items-center justify-center">
-                      <Heart className="w-4 h-4 text-red-600" strokeWidth={1.5} fill="currentColor" />
-                    </div>
+                    {index > 0 && (
+                      <button
+                        type="button"
+                        disabled={removingCollaboratorId === author.id}
+                        onClick={async (e) => {
+                          e.stopPropagation()
+                          setRemovingCollaboratorId(author.id)
+                          try {
+                            const nextIds = authorIds.filter((id) => id !== author.id).slice(1)
+                            const res = await fetch(`/api/notes/${note.id}/collaborators`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ collaborator_account_ids: nextIds }),
+                            })
+                            if (res.ok) {
+                              onCollaboratorsUpdated?.()
+                              setShowEditCollaboratorsModal(false)
+                            }
+                          } finally {
+                            setRemovingCollaboratorId(null)
+                          }
+                        }}
+                        className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                      >
+                        {removingCollaboratorId === author.id ? 'Removing...' : 'Remove'}
+                      </button>
+                    )}
                   </div>
-                )
-              })}
-              {reactionsLoading && (
-                <div className="py-2">
-                  <UIText className="text-center text-gray-500">Loading...</UIText>
+                ))}
+                <div className="border-t border-gray-100 pt-3 mt-2">
+                  <UIText as="p" className="text-xs text-gray-500 mb-2">
+                    Add collaborator (invite by message)
+                  </UIText>
+                  <input
+                    type="text"
+                    value={editCollabSearchQuery}
+                    onChange={(e) => setEditCollabSearchQuery(e.target.value)}
+                    placeholder="Search by username or name..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                  />
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {editCollabCandidatesLoading ? (
+                      <UIText className="text-gray-500 text-sm">Loading...</UIText>
+                    ) : (
+                      editCollabCandidates
+                        .filter((u) => !authorIds.includes(u.id))
+                        .map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            disabled={sendingInviteToId === u.id}
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              setSendingInviteToId(u.id)
+                              try {
+                                const res = await fetch(`/api/notes/${note.id}/collaborator-invites`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ invitee_id: u.id }),
+                                })
+                                const data = await res.json().catch(() => ({}))
+                                if (res.ok && data.success) {
+                                  setEditCollabSearchQuery('')
+                                  setEditCollabCandidates((prev) => prev.filter((c) => c.id !== u.id))
+                                }
+                              } finally {
+                                setSendingInviteToId(null)
+                              }
+                            }}
+                            className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 text-left text-sm"
+                          >
+                            <UserAvatar
+                              userId={u.id}
+                              name={u.name || u.username || ''}
+                              avatar={u.avatar}
+                              size={28}
+                              showLink={false}
+                            />
+                            <span className="flex-1 truncate">{u.name || u.username || u.id.slice(0, 8)}</span>
+                            {sendingInviteToId === u.id ? (
+                              <UIText className="text-gray-500 text-xs">Sending...</UIText>
+                            ) : (
+                              <UIText className="text-blue-600 text-xs">Invite</UIText>
+                            )}
+                          </button>
+                        ))
+                    )}
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      {showSendModal &&
+        !isOpenCall &&
+        renderPortal(
+          <SendItemModal
+            isOpen={showSendModal}
+            onClose={() => setShowSendModal(false)}
+            currentUserId={currentUserId || null}
+            authors={authorProfiles}
+            itemLabel="note"
+            copyLink={noteLink}
+            sendPayload={{ noteId: note.id }}
+          />
+        )}
     </>
   )
 
-  const wrappedContent = isViewMode ? (
+  const handleCardClick = (e: React.MouseEvent) => {
+    // Let inner links/buttons handle their own navigation
+    const target = e.target as HTMLElement
+    if (target.closest('a, button')) return
+    router.push(`/notes/${note.id}`)
+  }
+
+  const handleCardKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return
+    const target = e.target as HTMLElement
+    if (target.closest('a, button')) return
+    e.preventDefault()
+    router.push(`/notes/${note.id}`)
+  }
+
+  const wrappedContent = isViewMode || isOpenCallPreview ? (
     cardContent
   ) : (
-    <Link 
-      href={`/notes/${note.id}`} 
-      className="block cursor-pointer"
-      prefetch={true}
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+      className="block cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded-lg"
+      style={{ WebkitTapHighlightColor: 'transparent' }}
     >
       {cardContent}
-    </Link>
+    </div>
   )
 
   // In view mode the lock is in the header (left of more button). Otherwise use absolute top-right (portfolio/feed).
-  const privateLock = isOwner && isPrivate && !isViewMode ? (
-    <Lock className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none" aria-label="Private" />
-  ) : null
+  const privateLock = visibilityCornerIcon
 
   // Flat layout on mobile (no card), card layout on desktop
   if (flatOnMobile) {
@@ -1710,8 +2441,9 @@ export function NoteCard({
         {/* Mobile: flat layout
             - Feed: white background only, rely on internal padding
             - Note view: no extra padding (use original inner padding), background provided by page
+            - Popup: open call border when openCallBorder
         */}
-        <div className={`md:hidden relative ${isViewMode ? '' : 'bg-white'}`}>
+        <div className={`md:hidden relative ${isViewMode ? '' : 'bg-white'} ${useOrangeBorder ? 'rounded-xl border-2 border-orange-500' : ''}`}>
           {wrappedContent}
           {privateLock}
         </div>
@@ -1720,7 +2452,7 @@ export function NoteCard({
         <div className="hidden md:block relative">
           <Card
             variant="subtle"
-            className="relative overflow-hidden"
+            className={`relative overflow-hidden ${useOrangeBorder ? 'border-2 !border-orange-500' : ''}`}
             padding="none"
           >
             {wrappedContent}
@@ -1736,7 +2468,7 @@ export function NoteCard({
     <div ref={cardRef} className="w-full">
       <Card
         variant="subtle"
-        className="relative overflow-hidden"
+        className={`relative overflow-hidden ${useOrangeBorder ? 'border-2 !border-orange-500' : ''}`}
         padding="none"
       >
         {wrappedContent}

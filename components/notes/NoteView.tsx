@@ -12,7 +12,7 @@ import { AnnotationComposer } from './AnnotationComposer'
 import { CommentThread } from './CommentThread'
 import { createClient } from '@/lib/supabase/client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
-import Link from 'next/link'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 interface AnnotationWithReplies {
   annotation: Note
@@ -33,6 +33,8 @@ interface NoteViewProps {
    * annotation ID here so we can expand/scroll even if the hash is missing or changed.
    */
   initialAnnotationId?: string | null
+  /** When true, used inside popup/carousel - cleaner layout, no extra chrome */
+  embedInPopup?: boolean
 }
 
 export function NoteView({
@@ -45,6 +47,7 @@ export function NoteView({
   annotatePortfolioId,
   referencedNoteDeleted = false,
   initialAnnotationId,
+  embedInPopup = false,
 }: NoteViewProps) {
   const router = useRouter()
   const [isDeleting, setIsDeleting] = useState(false)
@@ -57,11 +60,30 @@ export function NoteView({
   const [repliesExpandedForCommentIds, setRepliesExpandedForCommentIds] = useState<Set<string>>(new Set())
   const [authorNames, setAuthorNames] = useState<Map<string, string>>(new Map())
   const [authorAvatars, setAuthorAvatars] = useState<Map<string, string | undefined>>(new Map())
+  const [pendingCollaboratorInviteId, setPendingCollaboratorInviteId] = useState<string | null>(null)
+  const [acceptingInvite, setAcceptingInvite] = useState(false)
+  const isOpenCall = note.type === 'open_call'
   const supabaseRef = useRef(createClient())
   const humanPortfoliosRef = useRef(humanPortfolios)
   humanPortfoliosRef.current = humanPortfolios
 
   const isOwner = currentUserId ? note.owner_account_id === currentUserId : false
+  const loginToCommentHref =
+    typeof window === 'undefined'
+      ? buildLoginHref({ returnTo: `/notes/${note.id}#comments` })
+      : buildLoginHref({
+          returnTo: `${window.location.pathname}${window.location.search}#comments`,
+        })
+
+  useEffect(() => {
+    if (!currentUserId) return
+    fetch(`/api/notes/${note.id}/collaborator-invites/me`)
+      .then((res) => (res.ok ? res.json() : { invite: null }))
+      .then((data) => {
+        if (data.invite?.id) setPendingCollaboratorInviteId(data.invite.id)
+      })
+      .catch(() => {})
+  }, [note.id, currentUserId])
 
   // Helper to process the current URL hash and expand/scroll to the correct annotation thread.
   // Accepts the current annotations snapshot explicitly so we don't rely on
@@ -407,7 +429,55 @@ export function NoteView({
   }
 
   return (
-    <div className={`bg-white md:bg-transparent space-y-6 md:py-10 md:space-y-8 md:px-10 ${isMobile ? 'pb-72' : ''}`}>
+    <div className={`${embedInPopup ? '' : 'bg-white md:bg-transparent'} space-y-6 ${embedInPopup ? '' : 'md:py-10 md:space-y-8 md:px-10'} ${isMobile && !embedInPopup ? 'pb-72' : ''}`}>
+      {/* Pending collaboration invite banner */}
+      {pendingCollaboratorInviteId && (
+        <Card variant="subtle" className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <UIText>You&apos;ve been invited to collaborate on this note.</UIText>
+          <div className="flex gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={acceptingInvite}
+              onClick={async () => {
+                setAcceptingInvite(true)
+                try {
+                  const res = await fetch(
+                    `/api/notes/${note.id}/collaborator-invites/${pendingCollaboratorInviteId}/accept`,
+                    { method: 'POST' }
+                  )
+                  if (res.ok) {
+                    setPendingCollaboratorInviteId(null)
+                    router.refresh()
+                  }
+                } finally {
+                  setAcceptingInvite(false)
+                }
+              }}
+            >
+              <UIText>{acceptingInvite ? 'Accepting...' : 'Accept'}</UIText>
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={acceptingInvite}
+              onClick={async () => {
+                if (!pendingCollaboratorInviteId) return
+                try {
+                  await fetch(
+                    `/api/notes/${note.id}/collaborator-invites/${pendingCollaboratorInviteId}/reject`,
+                    { method: 'POST' }
+                  )
+                } catch (_) {}
+                setPendingCollaboratorInviteId(null)
+              }}
+            >
+              <UIText>Decline</UIText>
+            </Button>
+          </div>
+        </Card>
+      )}
+
       {/* Note Card */}
       <NoteCard
         note={note}
@@ -416,6 +486,7 @@ export function NoteView({
         isViewMode={true}
         flatOnMobile={true}
         onDeleted={handleDelete}
+        onLeftCollaboration={() => router.push('/main')}
         onCommentClick={() => {
           const el = document.getElementById('comments')
           if (el) {
@@ -424,19 +495,26 @@ export function NoteView({
         }}
       />
 
-      {/* Comment bar + comments section (scroll target for #comments from feed) */}
+      {/* Comment bar + comments section (scroll target for #comments from feed) - hidden for open call */}
+      {!isOpenCall && (
       <div id="comments" className="w-full">
         {/* Annotation Composer - Desktop (inline); same Card as comments section */}
         {!isMobile && (
           <Card variant="subtle" className="p-6">
-            <AnnotationComposer
-              parentNoteId={note.id}
-              onSuccess={handleAnnotationSuccess}
-              disabled={!canAnnotate || !currentUserId}
-              currentUserId={currentUserId}
-              isMobile={false}
-              embedInCard
-            />
+            {!currentUserId ? (
+              <Button variant="primary" fullWidth onClick={() => router.push(loginToCommentHref)}>
+                <UIText>Log in to comment</UIText>
+              </Button>
+            ) : (
+              <AnnotationComposer
+                parentNoteId={note.id}
+                onSuccess={handleAnnotationSuccess}
+                disabled={!canAnnotate || !currentUserId}
+                currentUserId={currentUserId}
+                isMobile={false}
+                embedInCard
+              />
+            )}
           </Card>
         )}
 
@@ -492,20 +570,29 @@ export function NoteView({
           )
         })()}
       </div>
+      )}
 
-      {/* Annotation Composer - Mobile (fixed at bottom) */}
-      {isMobile && (
-        <AnnotationComposer
-          parentNoteId={note.id}
-          parentAnnotationId={replyingTo?.commentId}
-          replyToName={replyingTo?.authorName}
-          replyToCommentPreview={replyingTo?.commentPreview}
-          onSuccess={handleAnnotationSuccess}
-          onCancel={replyingTo ? () => setReplyingTo(null) : undefined}
-          disabled={!canAnnotate || !currentUserId}
-          currentUserId={currentUserId}
-          isMobile={true}
-        />
+      {/* Annotation Composer - Mobile (fixed at bottom) - hidden for open call */}
+      {isMobile && !isOpenCall && (
+        !currentUserId ? (
+          <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-50">
+            <Button variant="primary" fullWidth onClick={() => router.push(loginToCommentHref)}>
+              <UIText>Log in to comment</UIText>
+            </Button>
+          </div>
+        ) : (
+          <AnnotationComposer
+            parentNoteId={note.id}
+            parentAnnotationId={replyingTo?.commentId}
+            replyToName={replyingTo?.authorName}
+            replyToCommentPreview={replyingTo?.commentPreview}
+            onSuccess={handleAnnotationSuccess}
+            onCancel={replyingTo ? () => setReplyingTo(null) : undefined}
+            disabled={!canAnnotate || !currentUserId}
+            currentUserId={currentUserId}
+            isMobile={true}
+          />
+        )
       )}
     </div>
   )

@@ -105,9 +105,14 @@ export function NotePageClient({
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
-    
-    // Always cache the server data (which is fresh)
-    setCachedNote(noteId, serverNote)
+
+    // Preserve preloaded author_profiles from feed when merging with server data
+    const noteToCache: Note = cachedNote?.author_profiles && cachedNote.author_profiles.length > 0 && !serverNote.author_profiles?.length
+      ? { ...serverNote, author_profiles: cachedNote.author_profiles }
+      : serverNote
+
+    // Always cache the server data (which is fresh), with preloaded author_profiles if from feed
+    setCachedNote(noteId, noteToCache)
     
     // Cache portfolio data from server if available
     if (serverHumanPortfolios && serverHumanPortfolios.length > 0) {
@@ -137,13 +142,11 @@ export function NotePageClient({
       })
     }
     
-    // If we used cached data, update with server data after render
-    // Use requestAnimationFrame for smoother update (runs after paint)
+    // If we used cached data, update with server data after render (preserving preloaded author_profiles)
     if (cachedNote && cachedNote.id === serverNote.id) {
-      // Only update if IDs match (same note)
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          setNote(serverNote)
+          setNote(noteToCache)
         })
       })
     }

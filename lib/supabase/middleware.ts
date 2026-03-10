@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { lookupCityLocationFromIp } from '@/lib/geoip'
+import { buildLoginHref, getReturnToFromUrl } from '@/lib/auth/login-redirect'
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -68,7 +69,13 @@ export async function updateSession(request: NextRequest) {
   // - logged-in users  -> main feed
   if (request.nextUrl.pathname === '/') {
     const url = request.nextUrl.clone()
-    url.pathname = user ? '/main' : '/login'
+    if (user) {
+      url.pathname = '/main'
+    } else {
+      const loginHref = buildLoginHref({ returnTo: getReturnToFromUrl(request.nextUrl) })
+      url.pathname = '/login'
+      url.search = loginHref.includes('?') ? loginHref.slice(loginHref.indexOf('?')) : ''
+    }
     // Create redirect response and copy all cookies from supabaseResponse
     const redirectResponse = NextResponse.redirect(url)
     // Copy all cookies that were set during session refresh
@@ -87,6 +94,7 @@ export async function updateSession(request: NextRequest) {
     if (!user) {
       const url = request.nextUrl.clone()
       url.pathname = '/login'
+      url.search = `?returnTo=${encodeURIComponent(getReturnToFromUrl(request.nextUrl))}`
       const redirectResponse = NextResponse.redirect(url)
       supabaseResponse.cookies.getAll().forEach((cookie) => {
         redirectResponse.cookies.set(cookie.name, cookie.value)
@@ -139,8 +147,12 @@ export async function updateSession(request: NextRequest) {
     // Blocked users can only access login/signup pages
     if (isBlocked && !isPublicRoute && !isAdminRoute) {
       const url = request.nextUrl.clone()
+      const loginHref = buildLoginHref({
+        returnTo: getReturnToFromUrl(request.nextUrl),
+        blocked: true,
+      })
       url.pathname = '/login'
-      url.searchParams.set('blocked', 'true')
+      url.search = loginHref.includes('?') ? loginHref.slice(loginHref.indexOf('?')) : ''
       const redirectResponse = NextResponse.redirect(url)
       supabaseResponse.cookies.getAll().forEach((cookie) => {
         redirectResponse.cookies.set(cookie.name, cookie.value)
@@ -153,7 +165,9 @@ export async function updateSession(request: NextRequest) {
   // Public routes can be viewed without authentication
   if (!user && requiresAuthRoute) {
     const url = request.nextUrl.clone()
+    const loginHref = buildLoginHref({ returnTo: getReturnToFromUrl(request.nextUrl) })
     url.pathname = '/login'
+    url.search = loginHref.includes('?') ? loginHref.slice(loginHref.indexOf('?')) : ''
     // Create redirect response and copy all cookies from supabaseResponse
     // This ensures session refresh cookies are preserved
     const redirectResponse = NextResponse.redirect(url)

@@ -3,6 +3,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Button, Title, Content, UIText } from '@/components/ui'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 function isValidEmail(email: string): boolean {
   const trimmed = email.trim()
@@ -16,6 +17,12 @@ export default function InviteAcceptPage() {
   const router = useRouter()
   const params = useParams()
   const token = typeof params?.token === 'string' ? params.token : ''
+  const loginHref =
+    typeof window === 'undefined'
+      ? '/login'
+      : buildLoginHref({
+          returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+        })
 
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -125,7 +132,7 @@ export default function InviteAcceptPage() {
           Invite problem
         </Title>
         <Content className="mb-4">{loadError}</Content>
-        <Button variant="primary" asLink href="/login">
+        <Button variant="primary" asLink href={loginHref}>
           <UIText>Go to login</UIText>
         </Button>
       </div>
@@ -203,7 +210,7 @@ export default function InviteAcceptPage() {
           <Button
             type="button"
             variant="text"
-            onClick={() => router.push('/login')}
+            onClick={() => router.push(loginHref)}
             disabled={isSubmitting}
           >
             <UIText>Cancel</UIText>

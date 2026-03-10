@@ -3,26 +3,44 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Note } from '@/types/note'
 import { NoteCard } from '@/components/notes/NoteCard'
+import { OpenCallStack } from '@/components/notes/OpenCallStack'
 import type { FeedType } from './FeedTabs'
 import { Button, Title, Content, UIText } from '@/components/ui'
 import { LazyLoad } from '@/components/ui/LazyLoad'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 import { useDataCache } from '@/lib/cache/useDataCache'
 import Link from 'next/link'
+import type { FeedItem } from '@/app/main/actions'
+import { PortfolioCreatedCard } from '@/components/main/PortfolioCreatedCard'
+import type { DailyMatchHighlightMeta } from '@/app/explore/actions'
+import { getExploreActivityHighlights } from '@/app/explore/actions'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
+import { Rss } from 'lucide-react'
 
 interface FeedViewProps {
   currentUserId?: string
+  apiPath?: string
+  openCallContext?: 'feed' | 'human' | 'portfolio'
+  openCallPortfolioId?: string
+  showOpenCallStack?: boolean
 }
 
-export function FeedView({ currentUserId }: FeedViewProps) {
+export function FeedView({
+  currentUserId,
+  apiPath = '/api/feed',
+  openCallContext = 'feed',
+  openCallPortfolioId,
+  showOpenCallStack = true,
+}: FeedViewProps) {
   const { setCachedNote } = useDataCache()
   const [activeFeed, setActiveFeed] = useState<FeedType>('all')
   const [activeCommunityId, setActiveCommunityId] = useState<string | null>(null)
-  const [notes, setNotes] = useState<Note[]>([])
+  const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activityHighlights, setActivityHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
   const observerTarget = useRef<HTMLDivElement>(null)
   const offsetRef = useRef(0)
   const loadedNoteIdsRef = useRef<Set<string>>(new Set())
@@ -59,7 +77,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
           params.append('communityId', activeCommunityId)
         }
 
-        const url = `/api/feed?${params.toString()}`
+        const url = `${apiPath}?${params.toString()}`
 
         const response = await fetch(url)
 
@@ -68,38 +86,63 @@ export function FeedView({ currentUserId }: FeedViewProps) {
         }
 
         const data = await response.json()
-        const newNotes: Note[] = data.notes || []
+        const newItems: FeedItem[] = data.items || []
         const newHasMore = data.hasMore ?? false
 
         if (reset) {
-          setNotes(newNotes)
+          setItems(newItems)
         } else {
           // Filter out duplicates using functional update
-          setNotes((prev) => {
-            const existingIds = new Set(prev.map((n) => n.id))
-            const uniqueNewNotes = newNotes.filter((n) => !existingIds.has(n.id))
-
-            return [...prev, ...uniqueNewNotes]
+          setItems((prev) => {
+            const existingKeys = new Set(
+              prev.map((i) => (i.kind === 'note' ? `note:${i.note.id}` : `portfolio:${i.portfolio.id}`))
+            )
+            const uniqueNewItems = newItems.filter((i) => {
+              const key = i.kind === 'note' ? `note:${i.note.id}` : `portfolio:${i.portfolio.id}`
+              return !existingKeys.has(key)
+            })
+            return [...prev, ...uniqueNewItems]
           })
         }
 
         // Track loaded note IDs and cache notes
-        newNotes.forEach((note) => {
-          loadedNoteIdsRef.current.add(note.id)
-          setCachedNote(note.id, note)
+        newItems.forEach((item) => {
+          if (item.kind !== 'note') return
+          loadedNoteIdsRef.current.add(item.note.id)
+          setCachedNote(item.note.id, item.note)
         })
 
+        // Load dynamic activity highlights for any activity portfolios in this batch
+        if (currentUserId) {
+          const activityIds = newItems
+            .filter((i): i is FeedItem & { kind: 'portfolio_created' } => i.kind === 'portfolio_created')
+            .filter((i) => (i.portfolio as any)?.type === 'activities')
+            .map((i) => i.portfolio.id)
+          if (activityIds.length > 0) {
+            try {
+              const result = await getExploreActivityHighlights(currentUserId, activityIds)
+              if (result.success && result.highlights) {
+                setActivityHighlights((prev) => ({ ...prev, ...result.highlights }))
+              }
+            } catch (e) {
+              console.error('Failed to load activity highlights for feed:', e)
+            }
+          }
+        }
+
         // Mark notes as seen (only for logged-in users)
-        if (currentUserId && newNotes.length > 0) {
-          const noteIds = newNotes.map((n) => n.id)
+        if (currentUserId) {
+          const noteIds = newItems.filter((i) => i.kind === 'note').map((i: any) => i.note.id)
           try {
-            await fetch('/api/feed/seen', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ noteIds }),
-            })
+            if (noteIds.length > 0) {
+              await fetch('/api/feed/seen', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ noteIds }),
+              })
+            }
           } catch (err) {
             // Don't fail if marking as seen fails
             console.error('Failed to mark notes as seen:', err)
@@ -107,7 +150,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
         }
 
         setHasMore(newHasMore)
-        offsetRef.current += newNotes.length
+        offsetRef.current += newItems.length
       } catch (err: any) {
         console.error('Error loading feed:', err)
         setError(err.message || 'Failed to load feed')
@@ -117,7 +160,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
         inFlightRef.current = false
       }
     },
-    [activeFeed, activeCommunityId, currentUserId]
+    [activeFeed, activeCommunityId, currentUserId, apiPath]
   )
 
   // Keep loadNotes ref up to date
@@ -164,22 +207,39 @@ export function FeedView({ currentUserId }: FeedViewProps) {
     }
   }, [currentUserId, hasMore, loadingMore, loading])
 
-  if (loading && notes.length === 0) {
-    return (
-      <>
-        <div className="text-center py-12">
-          <UIText>Loading feed...</UIText>
-        </div>
-      </>
-    )
-  }
-
   const isLoggedOut = !currentUserId
+  const isMainFeed = apiPath === '/api/feed' && openCallContext === 'feed'
+  const loginHref =
+    typeof window === 'undefined'
+      ? '/login'
+      : buildLoginHref({
+          returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+        })
 
   return (
     <>
       <div className="md:px-10">
-          {error ? (
+          {showOpenCallStack && currentUserId && (
+            <div className={isMainFeed ? 'mt-4' : ''}>
+              <OpenCallStack
+                context={openCallContext}
+                portfolioId={openCallPortfolioId}
+                currentUserId={currentUserId}
+              />
+            </div>
+          )}
+
+          {isMainFeed && (
+            <div className="mt-6 mb-4 flex items-center gap-2 px-3 md:px-0">
+              <Rss className="w-5 h-5 text-gray-600" strokeWidth={1.5} aria-hidden />
+              <UIText>All feeds</UIText>
+            </div>
+          )}
+          {loading && items.length === 0 ? (
+            <div className="text-center py-12">
+              <UIText>Loading feed...</UIText>
+            </div>
+          ) : error ? (
             <div className="text-center py-12">
               <UIText className="text-red-500">{error}</UIText>
               <Button
@@ -190,33 +250,51 @@ export function FeedView({ currentUserId }: FeedViewProps) {
                 <UIText>Retry</UIText>
               </Button>
             </div>
-          ) : notes.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className="text-center py-12">
               <UIText>No posts yet.</UIText>
             </div>
           ) : (
             <>
               <div className="divide-y divide-gray-200 md:divide-y-0 md:space-y-4">
-                {notes.map((note, index) => (
-                  <div key={note.id} id={`note-${note.id}`}>
-                    <LazyLoad
-                      rootMargin="200px"
-                      fallback={
-                        <div className="w-full">
-                          <SkeletonCard showAvatar={true} showBanner={true} />
-                        </div>
-                      }
-                      eager={index < 3} // Load first 3 cards immediately
-                    >
-                      <NoteCard
-                        note={note}
-                        currentUserId={currentUserId}
-                        flatOnMobile={true}
-                        showComments={true}
-                      />
-                    </LazyLoad>
-                  </div>
-                ))}
+                {items.map((item, index) => {
+                  const key =
+                    item.kind === 'note' ? `note-${item.note.id}` : `portfolio-${item.portfolio.id}`
+                  return (
+                    <div key={key} id={item.kind === 'note' ? `note-${item.note.id}` : undefined}>
+                      <LazyLoad
+                        rootMargin="200px"
+                        fallback={
+                          <div className="w-full">
+                            <SkeletonCard showAvatar={true} showBanner={true} />
+                          </div>
+                        }
+                        eager={index < 3}
+                      >
+                        {item.kind === 'note' ? (
+                          <NoteCard
+                            note={item.note}
+                            currentUserId={currentUserId}
+                            flatOnMobile={true}
+                            showComments={true}
+                            onLeftCollaboration={() => loadNotes(true)}
+                          />
+                        ) : (
+                          <PortfolioCreatedCard
+                            portfolio={item.portfolio}
+                            creator={item.creator_profile}
+                            flatOnMobile={true}
+                            highlight={
+                              (item.portfolio as any)?.type === 'activities'
+                                ? activityHighlights[item.portfolio.id]
+                                : undefined
+                            }
+                          />
+                        )}
+                      </LazyLoad>
+                    </div>
+                  )
+                })}
               </div>
 
               {/* Login/Signup prompt for logged-out users */}
@@ -228,7 +306,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
                       Sign in or create an account to see more posts and connect with others.
                     </Content>
                     <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                      <Link href="/login">
+                      <Link href={loginHref}>
                         <Button variant="primary">
                           <UIText>Log In</UIText>
                         </Button>
@@ -254,7 +332,7 @@ export function FeedView({ currentUserId }: FeedViewProps) {
               )}
 
               {/* No more posts indicator */}
-              {currentUserId && !hasMore && notes.length > 0 && (
+              {currentUserId && !hasMore && items.length > 0 && (
                 <div className="text-center py-8">
                   <UIText>No more posts to load.</UIText>
                 </div>

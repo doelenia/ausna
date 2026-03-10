@@ -7,14 +7,22 @@ import { createClient } from '@/lib/supabase/client'
 import { addToPinned, removeFromPinned } from '@/app/portfolio/[type]/[id]/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { UIText } from '@/components/ui'
+import type { NoteVisibility } from '@/types/note'
 
 interface NoteActionsProps {
   note: Note
   portfolioId?: string
   currentUserId?: string
+  /** When true, user is collaborator (not owner): only Pin and Leave collaboration are shown */
+  isCollaborator?: boolean
+  /** When true (open call), only show: edit visibility, edit collaborators, delete */
+  isOpenCall?: boolean
   onDelete?: () => void
   onRemoveFromPortfolio?: () => void
-  onVisibilityChange?: (visibility: 'public' | 'private') => void
+  onVisibilityChange?: (visibility: NoteVisibility) => void
+  onLeftCollaboration?: () => void
+  /** Owner only: opens edit collaborators modal in parent */
+  onOpenEditCollaborators?: () => void
   isDeleting?: boolean
   isRemoving?: boolean
 }
@@ -31,9 +39,13 @@ export function NoteActions({
   note,
   portfolioId,
   currentUserId,
+  isCollaborator = false,
+  isOpenCall = false,
   onDelete,
   onRemoveFromPortfolio,
   onVisibilityChange,
+  onLeftCollaboration,
+  onOpenEditCollaborators,
   isDeleting = false,
   isRemoving = false,
 }: NoteActionsProps) {
@@ -43,17 +55,16 @@ export function NoteActions({
   const [pinOptions, setPinOptions] = useState<PinOption[]>([])
   const [loadingPins, setLoadingPins] = useState(true)
   const [pinning, setPinning] = useState<string | null>(null)
+  const [leavingCollaboration, setLeavingCollaboration] = useState(false)
   const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([])
   const [noteCollectionIds, setNoteCollectionIds] = useState<string[]>([])
   const [loadingCollections, setLoadingCollections] = useState(true)
   const [updatingCollections, setUpdatingCollections] = useState(false)
-  const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone' | null>(null)
-  const [loadingPrivacy, setLoadingPrivacy] = useState(true)
-  const [updatingPrivacy, setUpdatingPrivacy] = useState(false)
-  const [visibility, setVisibility] = useState<'public' | 'private'>(
-    note.visibility === 'private' ? 'private' : 'public'
+  const [visibility, setVisibility] = useState<NoteVisibility>(
+    (note.visibility as NoteVisibility) || 'public'
   )
   const [updatingVisibility, setUpdatingVisibility] = useState(false)
+  const [assignedPortfolioName, setAssignedPortfolioName] = useState<string | null>(null)
 
   // Fetch pin options (user's human portfolio and assigned portfolios)
   useEffect(() => {
@@ -66,6 +77,7 @@ export function NoteActions({
       try {
         const supabase = createClient()
         const options: PinOption[] = []
+        let primaryAssignedName: string | null = null
 
         // Get user's human portfolio
         const { data: humanPortfolio } = await supabase
@@ -109,6 +121,10 @@ export function NoteActions({
               const pinCount = pinnedArray.length
               const basic = getPortfolioBasic(portfolio)
 
+              if (note.assigned_portfolios?.[0] === portfolio.id) {
+                primaryAssignedName = basic.name || null
+              }
+
               options.push({
                 portfolioId: portfolio.id,
                 portfolioName: basic.name,
@@ -121,6 +137,7 @@ export function NoteActions({
         }
 
         setPinOptions(options)
+        setAssignedPortfolioName(primaryAssignedName)
       } catch (error) {
         console.error('Error fetching pin options:', error)
       } finally {
@@ -171,63 +188,7 @@ export function NoteActions({
     fetchCollections()
   }, [note.id, portfolioId, note.assigned_portfolios])
 
-  // Fetch annotation privacy setting
-  useEffect(() => {
-    const fetchPrivacy = async () => {
-      setLoadingPrivacy(true)
-      try {
-        // Get privacy from note prop if available, otherwise fetch
-        if (note.annotation_privacy) {
-          setAnnotationPrivacy(note.annotation_privacy)
-        } else {
-          const response = await fetch(`/api/notes/${note.id}`)
-          if (response.ok) {
-            const data = await response.json()
-            if (data.success && data.note) {
-              setAnnotationPrivacy(data.note.annotation_privacy || 'everyone')
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error fetching annotation privacy:', error)
-      } finally {
-        setLoadingPrivacy(false)
-      }
-    }
-
-    fetchPrivacy()
-  }, [note.id, note.annotation_privacy])
-
-  const handlePrivacyChange = async (privacy: 'authors' | 'friends' | 'everyone') => {
-    if (updatingPrivacy || privacy === annotationPrivacy) return
-
-    setUpdatingPrivacy(true)
-    try {
-      const response = await fetch(`/api/notes/${note.id}/annotation-privacy`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ annotation_privacy: privacy }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        if (data.success) {
-          setAnnotationPrivacy(privacy)
-        } else {
-          alert(data.error || 'Failed to update annotation privacy')
-        }
-      } else {
-        const data = await response.json()
-        alert(data.error || 'Failed to update annotation privacy')
-      }
-    } catch (error: any) {
-      console.error('Error updating annotation privacy:', error)
-      alert(error.message || 'Failed to update annotation privacy')
-    } finally {
-      setUpdatingPrivacy(false)
-      setIsOpen(false)
-    }
-  }
+  // Note: "Who can comment" setting is intentionally hidden in UI.
 
   const handlePinToggle = async (option: PinOption) => {
     if (pinning) return
@@ -303,7 +264,7 @@ export function NoteActions({
     }
   }
 
-  const handleVisibilityChange = async (next: 'public' | 'private') => {
+  const handleVisibilityChange = async (next: NoteVisibility) => {
     if (updatingVisibility || visibility === next) return
     setUpdatingVisibility(true)
     try {
@@ -339,6 +300,25 @@ export function NoteActions({
       })
     }
     setIsOpen(!isOpen)
+  }
+
+  const handleLeaveCollaboration = async () => {
+    if (leavingCollaboration || !currentUserId) return
+    setLeavingCollaboration(true)
+    try {
+      const res = await fetch(`/api/notes/${note.id}/leave-collaboration`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.success) {
+        setIsOpen(false)
+        onLeftCollaboration?.()
+      } else {
+        alert(data.error || 'Failed to leave collaboration')
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to leave collaboration')
+    } finally {
+      setLeavingCollaboration(false)
+    }
   }
 
   // Update position on scroll/resize when open
@@ -401,8 +381,8 @@ export function NoteActions({
             }}
           >
             <div className="py-1">
-              {/* Pin options */}
-              {!loadingPins && pinOptions.length > 0 && (
+              {/* Pin options - hidden for open call */}
+              {!isOpenCall && !loadingPins && pinOptions.length > 0 && (
                 <>
                   {pinOptions.map((option) => (
                     <button
@@ -428,7 +408,36 @@ export function NoteActions({
                   {pinOptions.length > 0 && <div className="border-t border-gray-200 my-1" />}
                 </>
               )}
-              {onDelete && (
+              {isCollaborator && !isOpenCall && (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsOpen(false)
+                      handleLeaveCollaboration()
+                    }}
+                    disabled={leavingCollaboration}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {leavingCollaboration ? 'Leaving...' : 'Leave collaboration'}
+                  </button>
+                  <div className="border-t border-gray-200 my-1" />
+                </>
+              )}
+              {onOpenEditCollaborators && (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsOpen(false)
+                      onOpenEditCollaborators()
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Edit collaborators
+                  </button>
+                  <div className="border-t border-gray-200 my-1" />
+                </>
+              )}
+              {onDelete && !isCollaborator && (
                 <button
                   onClick={() => {
                     setIsOpen(false)
@@ -440,7 +449,7 @@ export function NoteActions({
                   {isDeleting ? 'Deleting...' : 'Delete Note'}
                 </button>
               )}
-              {onRemoveFromPortfolio && portfolioId && (
+              {!isOpenCall && onRemoveFromPortfolio && portfolioId && !isCollaborator && (
                 <button
                   onClick={() => {
                     setIsOpen(false)
@@ -453,77 +462,87 @@ export function NoteActions({
                 </button>
               )}
               
-              {/* Visibility - only owner can change */}
-              {currentUserId === note.owner_account_id && (
+              {/* Visibility - only owner can change (not collaborators); for open call show to owner */}
+              {(currentUserId === note.owner_account_id && !isCollaborator) && (
                 <>
                   <div className="border-t border-gray-200 my-1" />
                   <div className="px-4 py-2">
                     <UIText className="text-xs font-medium text-gray-500 mb-2">Visibility</UIText>
                     <div className="space-y-1">
-                      <button
-                        onClick={() => handleVisibilityChange('public')}
-                        disabled={updatingVisibility}
-                        className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
-                          visibility === 'public'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        {visibility === 'public' ? '✓ ' : ''}
-                        Public
-                      </button>
-                      <button
-                        onClick={() => handleVisibilityChange('private')}
-                        disabled={updatingVisibility}
-                        className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
-                          visibility === 'private'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        {visibility === 'private' ? '✓ ' : ''}
-                        Private
-                      </button>
+                      {note.assigned_portfolios && note.assigned_portfolios.length > 0 ? (
+                        <>
+                          <button
+                            onClick={() => handleVisibilityChange('public')}
+                            disabled={updatingVisibility}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              visibility === 'public'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {visibility === 'public' ? '✓ ' : ''}
+                            Public
+                          </button>
+                          <button
+                            onClick={() => handleVisibilityChange('members')}
+                            disabled={updatingVisibility}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              visibility === 'members'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {visibility === 'members' ? '✓ ' : ''}
+                            {assignedPortfolioName ? `Members of ${assignedPortfolioName}` : 'Members'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleVisibilityChange('public')}
+                            disabled={updatingVisibility}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              visibility === 'public'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {visibility === 'public' ? '✓ ' : ''}
+                            Public
+                          </button>
+                          <button
+                            onClick={() => handleVisibilityChange('friends')}
+                            disabled={updatingVisibility}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              visibility === 'friends'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {visibility === 'friends' ? '✓ ' : ''}
+                            Friends
+                          </button>
+                          <button
+                            onClick={() => handleVisibilityChange('private')}
+                            disabled={updatingVisibility}
+                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
+                              visibility === 'private'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {visibility === 'private' ? '✓ ' : ''}
+                            Private
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </>
               )}
               
-              {/* Annotation Privacy - only show for note owner */}
-              {currentUserId === note.owner_account_id && (
-                <>
-                  <div className="border-t border-gray-200 my-1" />
-                  <div className="px-4 py-2">
-                    <UIText className="text-xs font-medium text-gray-500 mb-2">Who can comment</UIText>
-                    {loadingPrivacy ? (
-                      <UIText className="text-xs text-gray-500">Loading...</UIText>
-                    ) : (
-                      <div className="space-y-1">
-                        {(['everyone', 'friends', 'authors'] as const).map((privacy) => (
-                          <button
-                            key={privacy}
-                            onClick={() => handlePrivacyChange(privacy)}
-                            disabled={updatingPrivacy}
-                            className={`w-full text-left px-2 py-1 text-xs rounded transition-colors disabled:opacity-50 ${
-                              annotationPrivacy === privacy
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-700 hover:bg-gray-50'
-                            }`}
-                          >
-                            {annotationPrivacy === privacy ? '✓ ' : ''}
-                            {privacy === 'everyone' && 'Everyone'}
-                            {privacy === 'friends' && 'Friends only'}
-                            {privacy === 'authors' && 'Authors only'}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {/* Collection assignment - only show if there are collections or if we're still loading */}
-              {(loadingCollections || collections.length > 0) && (
+              {/* Collection assignment - only for owner; collaborators cannot change collections; hidden for open call */}
+              {!isOpenCall && !isCollaborator && (loadingCollections || collections.length > 0) && (
                 <>
                   <div className="border-t border-gray-200 my-1" />
                   <div className="px-4 py-2">

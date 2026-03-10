@@ -10,6 +10,7 @@ import {
   getMyHumanPortfolioForOnboarding,
   saveOnboardingProfile,
   saveOnboardingAvailabilitySchedule,
+  completeOpenCallsOnboarding,
 } from '@/app/onboarding/actions'
 import { applyToCommunityJoin } from '@/app/portfolio/[type]/[id]/actions'
 import type { HumanAvailabilitySchedule } from '@/types/portfolio'
@@ -17,6 +18,20 @@ import { Title, Content, UIText, Button, Card, UIButtonText, UserAvatar } from '
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { DoorOpen } from 'lucide-react'
 import Link from 'next/link'
+import {
+  addDays,
+  addMonths,
+  startOfMonth,
+  endOfMonth,
+  eachDayOfInterval,
+  startOfWeek,
+  endOfWeek,
+  isSameMonth,
+  isSameDay,
+  format,
+  isBefore,
+  startOfDay,
+} from 'date-fns'
 
 const HUMAN_AVAILABILITY_DAYS: Array<keyof HumanAvailabilitySchedule> = [
   'monday',
@@ -37,6 +52,8 @@ const HUMAN_AVAILABILITY_DAY_LABELS: Record<keyof HumanAvailabilitySchedule, str
   saturday: 'Sat',
   sunday: 'Sun',
 }
+
+const OPEN_CALL_NEVER_ENDS_WARNING = 'Setting never ends might lower the priority for broadcasting.'
 
 function createDefaultAvailabilitySchedule(): HumanAvailabilitySchedule {
   const schedule: HumanAvailabilitySchedule = {}
@@ -210,10 +227,293 @@ export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
             {currentStepId === 'join_community' && (
               <OnboardingJoinCommunityStep onComplete={refetch} />
             )}
+            {currentStepId === 'open_calls' && (
+              <OnboardingOpenCallsStep onComplete={refetch} />
+            )}
           </>
         )}
       </div>
     </div>
+  )
+}
+
+function OnboardingOpenCallsStep({ onComplete }: { onComplete: () => void }) {
+  const [title, setTitle] = useState('Coffee chat with me! Online and In-person are welcomed!')
+  const [description, setDescription] = useState(
+    'Hi, I would love to talk with amazing people. Let me know if you wanna have a coffee chat wherever you are and whenever you need.'
+  )
+  const [openCallEndDate, setOpenCallEndDate] = useState<Date | null>(null)
+  const [showEndDatePopup, setShowEndDatePopup] = useState(false)
+  const [openCallCalendarMonth, setOpenCallCalendarMonth] = useState<Date>(() => startOfDay(new Date()))
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await completeOpenCallsOnboarding({
+        title,
+        description,
+        endDate: openCallEndDate ? openCallEndDate.toISOString() : null,
+      })
+      if (!result.success) {
+        setError(result.error ?? 'Failed to save open call.')
+        setLoading(false)
+        return
+      }
+      onComplete()
+    } catch (err) {
+      setError('An unexpected error occurred.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Card variant="spacious" className="max-w-xl mx-auto">
+      <Title as="h1" className="mb-2">
+        Setup your open calls
+      </Title>
+      <Content className="mb-4">
+        Open calls help your friends help or engage with you in the most meaningful ways. You can add or edit open calls
+        later.
+      </Content>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="rounded-xl border-2 border-orange-500 bg-white overflow-hidden">
+          <div className="px-4 pt-4 pb-3">
+            <textarea
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Open call title"
+              rows={2}
+              className="w-full resize-none bg-transparent outline-none text-gray-900 placeholder:text-gray-400 text-xl font-normal"
+              required
+            />
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe your open call..."
+              rows={4}
+              className="mt-3 w-full resize-none bg-transparent outline-none text-gray-900 placeholder:text-gray-400"
+              required
+            />
+          </div>
+          <div className="px-4 py-3 border-t border-orange-100 bg-orange-50/40">
+            <div>
+              <UIText as="label" className="block text-sm font-medium text-gray-700 mb-1">
+                End date
+              </UIText>
+              <button
+                type="button"
+                onClick={() => setShowEndDatePopup(true)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 text-left"
+              >
+                <span className="text-gray-900">
+                  {openCallEndDate === null
+                    ? 'Never ends'
+                    : (() => {
+                        const now = new Date()
+                        now.setHours(0, 0, 0, 0)
+                        const end = new Date(openCallEndDate)
+                        end.setHours(0, 0, 0, 0)
+                        const daysLeft = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+                        if (daysLeft <= 0) return 'Ended'
+                        if (daysLeft === 1) return 'Ends in 1 day'
+                        if (daysLeft < 30) return `Ends in ${daysLeft} days`
+                        return `Ends on ${end.toLocaleDateString()}`
+                      })()}
+                </span>
+                <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {openCallEndDate === null && (
+                <UIText as="p" className="mt-1.5 text-xs text-amber-700">
+                  {OPEN_CALL_NEVER_ENDS_WARNING}
+                </UIText>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {showEndDatePopup && (
+          <div
+            className="fixed inset-0 z-[101] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={() => setShowEndDatePopup(false)}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <UIText as="h3" className="font-medium text-gray-900 mb-3">
+                Set end date
+              </UIText>
+              <div className="space-y-3">
+                {openCallEndDate === null ? (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      className="w-full px-3 py-2 rounded-lg text-sm text-left bg-amber-100 text-amber-900 border border-amber-300"
+                    >
+                      Never ends (selected)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = addDays(startOfDay(new Date()), 7)
+                        setOpenCallEndDate(d)
+                        setOpenCallCalendarMonth(d)
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-sm text-left bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    >
+                      End in X days
+                    </button>
+                    <UIText as="p" className="text-xs text-amber-700">
+                      {OPEN_CALL_NEVER_ENDS_WARNING}
+                    </UIText>
+                  </div>
+                ) : (
+                  <>
+                    {(() => {
+                      const today = startOfDay(new Date())
+                      const end = startOfDay(openCallEndDate)
+                      const daysVal = Math.max(
+                        1,
+                        Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+                      )
+                      return (
+                        <div className="flex items-center gap-2">
+                          <UIText as="span" className="text-sm text-gray-700">
+                            End in
+                          </UIText>
+                          <input
+                            type="number"
+                            min={1}
+                            value={daysVal}
+                            onChange={(e) => {
+                              const n = parseInt(e.target.value, 10)
+                              if (!Number.isNaN(n) && n >= 1) {
+                                const d = addDays(startOfDay(new Date()), n)
+                                setOpenCallEndDate(d)
+                                setOpenCallCalendarMonth(d)
+                              }
+                            }}
+                            className="w-16 px-2 py-1.5 border border-gray-300 rounded-md text-sm text-center"
+                          />
+                          <UIText as="span" className="text-sm text-gray-700">
+                            day{daysVal !== 1 ? 's' : ''}
+                          </UIText>
+                        </div>
+                      )
+                    })()}
+
+                    {(() => {
+                      const monthStart = startOfMonth(openCallCalendarMonth)
+                      const monthEnd = endOfMonth(monthStart)
+                      const calendarStart = startOfWeek(monthStart)
+                      const calendarEnd = endOfWeek(monthEnd)
+                      const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd })
+                      const today = startOfDay(new Date())
+                      return (
+                        <div className="mt-2">
+                          <div className="flex items-center justify-between mb-2">
+                            <button
+                              type="button"
+                              onClick={() => setOpenCallCalendarMonth(addMonths(openCallCalendarMonth, -1))}
+                              className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                              aria-label="Previous month"
+                            >
+                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                              </svg>
+                            </button>
+                            <UIText as="span" className="text-sm font-medium text-gray-900">
+                              {format(openCallCalendarMonth, 'MMMM yyyy')}
+                            </UIText>
+                            <button
+                              type="button"
+                              onClick={() => setOpenCallCalendarMonth(addMonths(openCallCalendarMonth, 1))}
+                              className="p-1 rounded hover:bg-gray-100 text-gray-600"
+                              aria-label="Next month"
+                            >
+                              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-7 gap-0.5 text-center text-xs">
+                            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+                              <div key={d} className="py-1 text-gray-500 font-medium">
+                                {d}
+                              </div>
+                            ))}
+                            {days.map((day) => {
+                              const isPast = isBefore(day, today)
+                              const isSelected = openCallEndDate && isSameDay(day, openCallEndDate)
+                              const isCurrentMonth = isSameMonth(day, monthStart)
+                              return (
+                                <button
+                                  key={day.toISOString()}
+                                  type="button"
+                                  disabled={isPast}
+                                  onClick={() => {
+                                    if (isPast) return
+                                    setOpenCallEndDate(day)
+                                  }}
+                                  className={`p-1.5 rounded text-sm ${
+                                    isPast
+                                      ? 'text-gray-300 cursor-not-allowed'
+                                      : isSelected
+                                        ? 'bg-blue-600 text-white'
+                                        : isCurrentMonth
+                                          ? 'text-gray-900 hover:bg-gray-100'
+                                          : 'text-gray-400 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  {format(day, 'd')}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })()}
+
+                    <button
+                      type="button"
+                      onClick={() => setOpenCallEndDate(null)}
+                      className="w-full px-3 py-2 rounded-lg text-sm text-left bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    >
+                      Never ends
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="secondary" onClick={() => setShowEndDatePopup(false)}>
+                  <UIText>Cancel</UIText>
+                </Button>
+                <Button variant="primary" onClick={() => setShowEndDatePopup(false)}>
+                  <UIText>Done</UIText>
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
+            <UIText className="text-red-700">{error}</UIText>
+          </div>
+        )}
+        <Button type="submit" variant="primary" disabled={loading}>
+          <UIText>{loading ? 'Saving...' : 'Next'}</UIText>
+        </Button>
+      </form>
+    </Card>
   )
 }
 

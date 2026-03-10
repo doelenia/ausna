@@ -79,6 +79,7 @@ export function PortfolioAllView({
                 portfolioId={portfolio.id}
                 currentUserId={currentUserId}
                 canCreateNote={canCreateNote}
+                isHumanPortfolio={isHumanPortfolio(portfolio)}
               />
             ) : (
               <SubPortfoliosTab

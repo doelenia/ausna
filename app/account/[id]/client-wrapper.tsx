@@ -12,6 +12,7 @@ import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { InterestTags } from '@/components/portfolio/InterestTags'
 import { Topic } from '@/types/indexing'
 import { Title, UIText, Button } from '@/components/ui'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 interface ClientAccountPageProps {
   userId: string
@@ -48,7 +49,11 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
       } = await supabase.auth.getUser()
 
       if (!user) {
-        router.push('/login')
+        const returnTo =
+          typeof window === 'undefined'
+            ? '/account'
+            : `${window.location.pathname}${window.location.search}${window.location.hash}`
+        router.push(buildLoginHref({ returnTo }))
         return
       }
 
@@ -130,7 +135,11 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
       if (!session?.user) {
-        router.push('/login')
+        const returnTo =
+          typeof window === 'undefined'
+            ? '/account'
+            : `${window.location.pathname}${window.location.search}${window.location.hash}`
+        router.push(buildLoginHref({ returnTo }))
       } else {
         setUser(session.user)
       }
