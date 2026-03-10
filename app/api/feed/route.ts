@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getFeedNotes } from '@/app/main/actions'
+import { getFeedItems } from '@/app/main/actions'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const result = await getFeedNotes(
+    const result = await getFeedItems(
       feedType,
       communityId,
       offset,
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      notes: result.notes || [],
+      items: result.items || [],
       hasMore: result.hasMore ?? false,
     })
   } catch (error: any) {

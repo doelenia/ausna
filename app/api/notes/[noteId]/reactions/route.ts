@@ -125,6 +125,28 @@ export async function GET(
 
     const supabase = await createClient()
 
+    // Open call notes do not support likes
+    const { data: targetNote } = await supabase
+      .from('notes')
+      .select('id, type')
+      .eq('id', noteId)
+      .maybeSingle()
+    if (targetNote?.type === 'open_call') {
+      if (view === 'list') {
+        return NextResponse.json({
+          success: true,
+          reactions: [],
+          totalCount: 0,
+        })
+      }
+      return NextResponse.json({
+        success: true,
+        likers: [],
+        hasReacted: false,
+        totalCount: 0,
+      })
+    }
+
     // Detailed list for reactions popup
     if (view === 'list') {
       const limit = Math.min(Math.max(parseInt(limitRaw || '10', 10) || 10, 1), 50)
@@ -229,7 +251,7 @@ export async function POST(
     // Ensure the target note exists and is not deleted
     const { data: targetNote, error: noteError } = await supabase
       .from('notes')
-      .select('id, assigned_portfolios, parent_note_id, mentioned_note_id, annotation_privacy, owner_account_id, deleted_at')
+      .select('id, type, assigned_portfolios, parent_note_id, mentioned_note_id, annotation_privacy, owner_account_id, deleted_at')
       .eq('id', noteId)
       .maybeSingle()
 
@@ -237,6 +259,13 @@ export async function POST(
       return NextResponse.json(
         { error: 'Note not found' },
         { status: 404 }
+      )
+    }
+
+    if (targetNote.type === 'open_call') {
+      return NextResponse.json(
+        { error: 'Likes are not available for open calls' },
+        { status: 400 }
       )
     }
 

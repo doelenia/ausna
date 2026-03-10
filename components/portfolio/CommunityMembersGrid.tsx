@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { UserAvatar } from '@/components/ui'
 import { Content, UIText } from '@/components/ui'
 import Link from 'next/link'
-import { Crown, Shield, BadgeCheck } from 'lucide-react'
+import { Crown, Shield } from 'lucide-react'
 
 interface CommunityMember {
   id: string
@@ -268,7 +268,7 @@ export function CommunityMembersGrid({
               
               {/* Text content */}
               <div className="flex flex-col items-center gap-1.5 w-full">
-                {/* First line: Name + Verified badge (grouped and centered together) */}
+                {/* First line: Name */}
                 <div className="flex items-center justify-center gap-1 w-full">
                   <div className="flex items-center justify-center gap-1 max-w-full">
                     <Content
@@ -277,13 +277,6 @@ export function CommunityMembersGrid({
                     >
                       {member.name || 'Unknown'}
                     </Content>
-                    {member.isApproved && (
-                      <BadgeCheck
-                        aria-label="Verified user"
-                        className="w-4 h-4 text-blue-500 flex-shrink-0"
-                        strokeWidth={2}
-                      />
-                    )}
                   </div>
                 </div>
                 

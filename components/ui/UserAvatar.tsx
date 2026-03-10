@@ -83,6 +83,8 @@ export function UserAvatar({
           src={avatarUrl}
           alt={name || `User ${userId.slice(0, 8)}`}
           className="w-full h-full rounded-full object-cover"
+          loading="eager"
+          decoding="async"
           onError={(e) => {
             // Hide image and show initials on error
             const target = e.target as HTMLImageElement

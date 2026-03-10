@@ -1,8 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
+import { buildLoginHref, getReturnToFromReferer } from '@/lib/auth/login-redirect'
 
-export async function requireAuth() {
+export async function requireAuth(returnTo?: string | null) {
   // Debug: Check what cookies are available
   const cookieStore = await cookies()
   const allCookies = cookieStore.getAll()
@@ -40,7 +41,9 @@ export async function requireAuth() {
       authCookieNames: authCookies.map(c => c.name).join(', '),
       allCookieNames: allCookies.map(c => c.name).join(', ') || 'NONE',
     })
-    redirect('/login')
+    const referer = (await headers()).get('referer')
+    const effectiveReturnTo = returnTo ?? getReturnToFromReferer(referer)
+    redirect(buildLoginHref({ returnTo: effectiveReturnTo }))
   }
 
   return { user, supabase }

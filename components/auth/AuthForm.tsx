@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button, Title, Content, UIText } from '@/components/ui'
 import { getAuthCallbackUrl } from '@/lib/utils/site-url'
+import { sanitizeReturnTo } from '@/lib/auth/login-redirect'
 
 type AuthStep = 'enterEmail' | 'loginExisting' | 'registerNew'
 
@@ -26,7 +27,9 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
   const [termsVersion, setTermsVersion] = useState<number | null>(null)
   const [privacyVersion, setPrivacyVersion] = useState<number | null>(null)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  const returnTo = sanitizeReturnTo(searchParams.get('returnTo'))
 
   // Once we've determined whether the email belongs to an existing user or a new user,
   // lock the email field to prevent browser autofill from silently swapping it.
@@ -131,7 +134,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
         email,
         password,
         options: {
-          emailRedirectTo: getAuthCallbackUrl(),
+          emailRedirectTo: `${getAuthCallbackUrl()}?returnTo=${encodeURIComponent(returnTo)}`,
           data: {
             username: username.toLowerCase() || undefined,
           },
@@ -170,7 +173,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
         // immediately sign the user in and redirect to main.
         if (data.session) {
           // Use full page reload to ensure auth cookies are properly set
-          window.location.href = '/main'
+          window.location.href = returnTo
           return
         }
 
@@ -178,7 +181,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
         // status to decide whether to redirect or show the "check your email" UI.
         if (data.user.email_confirmed_at) {
           // Email already confirmed (e.g., OAuth or auto-confirm), redirect to main
-          router.push('/main')
+          router.push(returnTo)
         } else {
           // Email confirmation required
           console.log('Email confirmation required, showing email sent message')
@@ -239,7 +242,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
           // Session is automatically set in cookies by Supabase client
           // Use window.location.href for full page reload to ensure cookies are set
           // This is critical for server actions to work properly
-          window.location.href = '/main'
+          window.location.href = returnTo
         } else {
           setError('Failed to establish session. Please try again.')
           setLoading(false)

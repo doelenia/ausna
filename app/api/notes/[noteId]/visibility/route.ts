@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import { createClient } from '@/lib/supabase/server'
+import type { NoteVisibility } from '@/types/note'
 
 export async function POST(
   request: NextRequest,
@@ -19,9 +20,9 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({}))
-    const visibility = body.visibility as 'public' | 'private' | undefined
+    const visibility = body.visibility as NoteVisibility | undefined
 
-    if (visibility !== 'public' && visibility !== 'private') {
+    if (visibility !== 'public' && visibility !== 'friends' && visibility !== 'private' && visibility !== 'members') {
       return NextResponse.json(
         { success: false, error: 'Invalid visibility value' },
         { status: 400 }
@@ -31,7 +32,7 @@ export async function POST(
     // Ensure the requester owns the note
     const { data: note, error: noteError } = await supabase
       .from('notes')
-      .select('owner_account_id')
+      .select('owner_account_id, assigned_portfolios')
       .eq('id', noteId)
       .single()
 
@@ -46,6 +47,16 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: 'You do not have permission to update this note' },
         { status: 403 }
+      )
+    }
+
+    const assignedCount = Array.isArray(note.assigned_portfolios) ? note.assigned_portfolios.length : 0
+    const allowed: NoteVisibility[] =
+      assignedCount === 1 ? ['public', 'members'] : ['public', 'friends', 'private']
+    if (!allowed.includes(visibility)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid visibility for this note' },
+        { status: 400 }
       )
     }
 

@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
+import { sanitizeReturnTo } from '@/lib/auth/login-redirect'
 
 /**
  * Auth callback: session cookies are set on the redirect response explicitly
@@ -14,7 +15,8 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const code = requestUrl.searchParams.get('code')
   const origin = requestUrl.origin
-  const redirectTo = `${origin}/main`
+  const returnTo = sanitizeReturnTo(requestUrl.searchParams.get('returnTo'))
+  const redirectTo = `${origin}${returnTo}`
 
   const redirectResponse = NextResponse.redirect(redirectTo)
 

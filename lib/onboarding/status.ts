@@ -2,7 +2,7 @@ import { hasUserAgreedToCurrent } from '@/lib/legal/documents'
 import { getHumanPortfolio } from '@/lib/portfolio/human'
 import type { HumanPortfolioMetadata, HumanAvailabilitySchedule } from '@/types/portfolio'
 
-export const ONBOARDING_STEP_IDS = ['legal', 'profile', 'availabilities', 'join_community'] as const
+export const ONBOARDING_STEP_IDS = ['legal', 'profile', 'availabilities', 'join_community', 'open_calls'] as const
 export type OnboardingStepId = (typeof ONBOARDING_STEP_IDS)[number]
 
 export interface OnboardingStep {
@@ -21,6 +21,7 @@ const STEP_LABELS: Record<OnboardingStepId, string> = {
   profile: 'Profile',
   availabilities: 'Availabilities',
   join_community: 'Join community',
+  open_calls: 'Open calls',
 }
 
 function hasAvailabilityEnabled(schedule: HumanAvailabilitySchedule | undefined): boolean {
@@ -69,12 +70,14 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
   const availabilitiesComplete =
     onboarding?.availabilities_complete === true || hasAvailabilityEnabled(schedule)
   const joinCommunitySeen = onboarding?.join_community_seen === true
+  const openCallsSetupComplete = onboarding?.open_calls_setup_complete === true
 
   const steps: OnboardingStep[] = [
     { id: 'legal', label: STEP_LABELS.legal, complete: legalComplete },
     { id: 'profile', label: STEP_LABELS.profile, complete: profileComplete },
     { id: 'availabilities', label: STEP_LABELS.availabilities, complete: availabilitiesComplete },
     { id: 'join_community', label: STEP_LABELS.join_community, complete: joinCommunitySeen },
+    { id: 'open_calls', label: STEP_LABELS.open_calls, complete: openCallsSetupComplete },
   ]
 
   const incompleteStepIds = steps.filter((s) => !s.complete).map((s) => s.id)

@@ -9,6 +9,8 @@ import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitat
 import { ActivityUpdateCard } from '@/components/portfolio/ActivityUpdateCard'
 import { Portfolio } from '@/types/portfolio'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
+import { MessagePortfolioCard } from '@/components/messages/MessagePortfolioCard'
+import { NoteCollaborationInvitationCard } from '@/components/notes/NoteCollaborationInvitationCard'
 import { CommentPreviewCard } from '@/components/notes/CommentPreviewCard'
 import { Content, UIText, UIButtonText, Button, Dropdown, Card } from '@/components/ui'
 import { Archive } from 'lucide-react'
@@ -46,6 +48,13 @@ function ConversationViewContent() {
     invitation_type?: string
   }>>(new Map())
   const [portfolioDetails, setPortfolioDetails] = useState<Map<string, any>>(new Map())
+  const [noteCollaborationInvites, setNoteCollaborationInvites] = useState<Map<string, {
+    id: string
+    note_id: string
+    inviter_id: string
+    invitee_id: string
+    status: string
+  }>>(new Map())
   const [isCompleting, setIsCompleting] = useState(false)
   const [conversationStatus, setConversationStatus] = useState<{
     my_side_active: boolean
@@ -167,6 +176,7 @@ function ConversationViewContent() {
     loadMessages(false)
     loadFriendStatus()
     loadPortfolioInvitations()
+    loadNoteCollaborationInvites()
     loadConversationStatus()
     loadPartnerInfo()
 
@@ -252,10 +262,26 @@ function ConversationViewContent() {
       )
       .subscribe()
 
+    const noteInvitesChannel = supabase
+      .channel(`note-collab-invites:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'note_collaboration_invites',
+        },
+        () => {
+          loadNoteCollaborationInvites()
+        }
+      )
+      .subscribe()
+
     return () => {
       channel.unsubscribe()
       conversationChannel.unsubscribe()
       invitationsChannel.unsubscribe()
+      noteInvitesChannel.unsubscribe()
     }
   }, [userId])
 
@@ -378,6 +404,46 @@ function ConversationViewContent() {
     }
   }
 
+  const loadNoteCollaborationInvites = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      const { data: invites, error } = await supabase
+        .from('note_collaboration_invites')
+        .select('id, note_id, inviter_id, invitee_id, status')
+        .eq('invitee_id', user.id)
+        .eq('inviter_id', userId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error loading note collaboration invites:', error)
+        return
+      }
+
+      const inviteMap = new Map<string, {
+        id: string
+        note_id: string
+        inviter_id: string
+        invitee_id: string
+        status: string
+      }>()
+      invites?.forEach((inv: any) => {
+        inviteMap.set(inv.note_id, {
+          id: inv.id,
+          note_id: inv.note_id,
+          inviter_id: inv.inviter_id,
+          invitee_id: inv.invitee_id,
+          status: inv.status,
+        })
+      })
+      setNoteCollaborationInvites(inviteMap)
+    } catch (error) {
+      console.error('Error loading note collaboration invites:', error)
+    }
+  }
+
   const loadMessages = async (loadOlder: boolean = false) => {
     try {
       if (loadOlder) {
@@ -463,7 +529,7 @@ function ConversationViewContent() {
         setIsInitialLoad(false)
       })
     }
-  }, [messages.length, loading, loadingMore, scrollToBottomStable, portfolioInvitations.size, portfolioDetails.size])
+  }, [messages.length, loading, loadingMore, scrollToBottomStable, portfolioInvitations.size, portfolioDetails.size, noteCollaborationInvites.size])
 
   useEffect(() => {
     const container = messagesContainerRef.current
@@ -488,7 +554,7 @@ function ConversationViewContent() {
         }
       })
     }
-  }, [messages, loading, loadingMore, isInitialLoad, portfolioInvitations.size, portfolioDetails.size])
+  }, [messages, loading, loadingMore, isInitialLoad, portfolioInvitations.size, portfolioDetails.size, noteCollaborationInvites.size])
 
   useEffect(() => {
     if (messages.length > 0 && !loadingMore && !loading && !isInitialLoad) {
@@ -613,6 +679,7 @@ function ConversationViewContent() {
 
       loadFriendStatus()
       loadPortfolioInvitations()
+      loadNoteCollaborationInvites()
       loadConversationStatus()
       window.dispatchEvent(new CustomEvent('messagesMarkedAsRead'))
     } catch (error) {
@@ -687,6 +754,44 @@ function ConversationViewContent() {
     } catch (error) {
       console.error('Error accepting portfolio invitation:', error)
       alert('Failed to accept invitation')
+    }
+  }
+
+  const handleAcceptNoteCollaborationInvite = async (noteId: string, inviteId: string) => {
+    try {
+      const response = await fetch(`/api/notes/${noteId}/collaborator-invites/${inviteId}/accept`, {
+        method: 'POST',
+      })
+      if (response.ok) {
+        await loadNoteCollaborationInvites()
+        await loadMessages()
+        window.dispatchEvent(new CustomEvent('messagesMarkedAsRead'))
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to accept invite')
+      }
+    } catch (error) {
+      console.error('Error accepting note collaboration invite:', error)
+      alert('Failed to accept invite')
+    }
+  }
+
+  const handleDeclineNoteCollaborationInvite = async (noteId: string, inviteId: string) => {
+    try {
+      const response = await fetch(`/api/notes/${noteId}/collaborator-invites/${inviteId}/reject`, {
+        method: 'POST',
+      })
+      if (response.ok) {
+        await loadNoteCollaborationInvites()
+        await loadMessages()
+        window.dispatchEvent(new CustomEvent('messagesMarkedAsRead'))
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to decline invite')
+      }
+    } catch (error) {
+      console.error('Error declining note collaboration invite:', error)
+      alert('Failed to decline invite')
     }
   }
 
@@ -843,11 +948,19 @@ function ConversationViewContent() {
                 : null
               const applyToJoinActivityName = applyToJoinMatch ? applyToJoinMatch[1].trim() : null
               const applyToJoinReviewPath = applyToJoinMatch ? applyToJoinMatch[2].trim() : null
+              const isNoteCollaborationInviteMessage = message.text?.includes('invited you to collaborate') && !!message.note_id
+              const noteCollaborationInvite = isNoteCollaborationInviteMessage && message.note_id
+                ? noteCollaborationInvites.get(message.note_id)
+                : null
               const isInviteMessage = message.text.includes('invited you to join') || message.text.includes('invited you to become a manager')
               const isManagerInviteMessage = message.text.includes('invited you to become a manager')
               const isAcceptMessage = message.text.includes('accepted your invitation to join') || message.text.includes('accepted your invitation to become a manager')
               const isManagerAcceptMessage = message.text.includes('accepted your invitation to become a manager')
               const isPortfolioInvitationMessage = isInviteMessage || isAcceptMessage
+              const isPortfolioShareMessage = message.message_type === 'portfolio_share'
+              const portfolioShareMatch = message.text?.match(/View details:\s*(\/portfolio\/([a-z-]+)\/([^\s]+))/i)
+              const sharedPortfolioType = (portfolioShareMatch?.[2] || null) as Portfolio['type'] | null
+              const sharedPortfolioIdentifier = portfolioShareMatch?.[3] || null
 
               const activityUpdateMatch = message.text.match(
                 /updated the (?:time and location|time|location) for (.+?) \(activity\)\. View details: \/portfolio\/activities\/([a-f0-9-]+)/i
@@ -937,6 +1050,20 @@ function ConversationViewContent() {
                         currentUserId={currentUserId}
                       />
                     </div>
+                  ) : message.note_id && isNoteCollaborationInviteMessage ? (
+                    <div className={`mb-1 max-w-xs lg:max-w-md`}>
+                      <NoteCollaborationInvitationCard
+                        noteId={message.note_id}
+                        isSent={isSent}
+                        currentUserId={currentUserId}
+                        invite={noteCollaborationInvite ?? undefined}
+                        onAccept={handleAcceptNoteCollaborationInvite}
+                        onDecline={handleDeclineNoteCollaborationInvite}
+                      />
+                      <UIButtonText as="p" className="text-xs mt-1 text-gray-500">
+                        {new Date(message.created_at).toLocaleTimeString()}
+                      </UIButtonText>
+                    </div>
                   ) : message.note_id ? (
                     <div className={`mb-1 max-w-xs lg:max-w-md`}>
                       <MessageNoteCard 
@@ -961,8 +1088,18 @@ function ConversationViewContent() {
                       <ActivityUpdateCard portfolio={activityUpdatePortfolio as Portfolio} />
                     </div>
                   )}
+
+                  {isPortfolioShareMessage && sharedPortfolioType && sharedPortfolioIdentifier && (
+                    <div className={`mb-1 max-w-xs lg:max-w-md`}>
+                      <MessagePortfolioCard
+                        portfolioType={sharedPortfolioType}
+                        portfolioIdentifier={sharedPortfolioIdentifier}
+                        isSent={isSent}
+                      />
+                    </div>
+                  )}
                   
-                  {message.text && message.text.trim() && (
+                  {message.text && message.text.trim() && !isNoteCollaborationInviteMessage && !isPortfolioShareMessage && (
                     <div
                       className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                         isSent

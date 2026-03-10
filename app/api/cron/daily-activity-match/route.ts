@@ -60,6 +60,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Temporarily disabled: daily auto run top match session for activities
+  console.log('[daily-activity-match] SKIP (temporarily disabled)')
+  return NextResponse.json({ ok: true, skipped: true, reason: 'temporarily disabled' })
+
   try {
   const supabase = createServiceClient()
   const siteUrl = getSiteUrl()
@@ -85,22 +89,24 @@ export async function GET(request: NextRequest) {
       console.error('[daily-activity-match] Failed to load human portfolios batch', {
         offset,
         pageSize,
-        error: error.message,
+        error: error?.message ?? 'Unknown error',
       })
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ error: error?.message ?? 'Failed to load portfolios' }, { status: 500 })
     }
 
-    if (!humans || humans.length === 0) {
+    const humansList = humans ?? []
+
+    if (humansList.length === 0) {
       console.log('[daily-activity-match] No more humans to scan', { offset })
       break
     }
 
     console.log('[daily-activity-match] Loaded humans batch', {
       offset,
-      batchSize: humans.length,
+      batchSize: humansList.length,
     })
 
-    for (const row of humans as any[]) {
+    for (const row of humansList as any[]) {
       scanned += 1
       const userId = row.user_id as string
       const meta = row.metadata as any
@@ -115,10 +121,11 @@ export async function GET(request: NextRequest) {
             userId,
             timezone: tz,
             usedDefaultTz,
-            reason: eightAmCheck.reason,
+            reason: (eightAmCheck as { reason?: string }).reason,
           })
           continue
         }
+        const eightAmLocalDate = (eightAmCheck as { localDate: string }).localDate
 
         if (meta?.properties?.daily_explore_match?.unsubscribed === true) {
           console.log('[daily-activity-match] Skip user; unsubscribed', { userId })
@@ -128,7 +135,7 @@ export async function GET(request: NextRequest) {
         const lastRanAtIso = meta?.properties?.daily_explore_match?.ran_at
         if (typeof lastRanAtIso === 'string') {
           const lastRanLocal = localDateForIso(lastRanAtIso, tz)
-          if (lastRanLocal && lastRanLocal === eightAmCheck.localDate) {
+          if (lastRanLocal && lastRanLocal === eightAmLocalDate) {
             console.log('[daily-activity-match] Skip user; already ran today', {
               userId,
               lastRanAtIso,
@@ -217,6 +224,7 @@ export async function GET(request: NextRequest) {
         errors.push({ userId, error: 'No email address found for user' })
         continue
       }
+      const toEmailStr = toEmail as string
 
       const introText =
         (daily.introText || '').trim() ||
@@ -230,12 +238,12 @@ export async function GET(request: NextRequest) {
 
       console.log('[daily-activity-match] Sending email', {
         userId,
-        toEmail: toEmail.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
+        toEmail: toEmailStr.replace(/^(.{2}).*(@.*)$/, '$1***$2'),
         activityCount: daily.activities.length,
       })
 
       const sendResult = await sendDailyActivityMatchEmail({
-        toEmail,
+        toEmail: toEmailStr,
         exploreUrl,
         unsubscribeUrl,
         introText,
@@ -275,11 +283,12 @@ export async function GET(request: NextRequest) {
       })
 
       if (!sendResult.success) {
+        const sendError = (sendResult as { error: string }).error
         console.error('[daily-activity-match] Send email failed', {
           userId,
-          error: sendResult.error,
+          error: sendError,
         })
-        errors.push({ userId, error: sendResult.error })
+        errors.push({ userId, error: sendError })
         continue
       }
 

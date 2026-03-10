@@ -14,6 +14,8 @@ interface NotesMasonryProps {
   canAnnotate?: boolean
   onNoteDeleted?: () => void
   onNoteRemovedFromPortfolio?: () => void
+  onNoteLeftCollaboration?: () => void
+  onCollaboratorsUpdated?: () => void
 }
 
 // Minimum card width in pixels
@@ -36,6 +38,8 @@ export function NotesMasonry({
   canAnnotate = false,
   onNoteDeleted,
   onNoteRemovedFromPortfolio,
+  onNoteLeftCollaboration,
+  onCollaboratorsUpdated,
 }: NotesMasonryProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -244,6 +248,8 @@ export function NotesMasonry({
                 viewMode="collage"
                 onDeleted={onNoteDeleted}
                 onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
+                onLeftCollaboration={onNoteLeftCollaboration}
+                onCollaboratorsUpdated={onCollaboratorsUpdated}
               />
             </LazyLoad>
           </div>

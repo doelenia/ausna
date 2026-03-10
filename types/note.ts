@@ -1,5 +1,4 @@
 import { Json } from './supabase'
-import type { PortfolioVisibility } from './portfolio'
 
 /**
  * Image reference in a note
@@ -30,6 +29,18 @@ export type NoteReference = ImageReference | UrlReference
 import { IndexingStatus } from './indexing'
 
 /**
+ * Metadata shape for open_call notes (stored in note.metadata).
+ */
+export interface OpenCallMetadata {
+  title?: string
+  interested?: string[]
+  begin_date?: string
+  end_date?: string
+  /** User IDs who have viewed this open call */
+  viewed_by?: string[]
+}
+
+/**
  * Note interface matching database structure
  */
 export interface Note {
@@ -39,9 +50,19 @@ export interface Note {
    * - 'post': regular top-level note
    * - 'annotation': comment/annotation on another note
    * - 'reaction': lightweight reaction (e.g. like) on another note
+   * - 'open_call': open call (no comments/likes; has metadata title, interested, dates)
    */
-  type: 'post' | 'annotation' | 'reaction'
+  type: 'post' | 'annotation' | 'reaction' | 'open_call'
   owner_account_id: string
+  /**
+   * Extra structural data per note type. For open_call: title, interested, begin_date, end_date.
+   */
+  metadata?: Record<string, unknown> | OpenCallMetadata
+  /**
+   * User IDs of collaborators. They appear as creator in feed and human portfolio,
+   * can pin to portfolio and leave collaboration, but have no extra rights.
+   */
+  collaborator_account_ids?: string[]
   text: string
   references: NoteReference[]
   assigned_portfolios: string[]
@@ -72,19 +93,25 @@ export interface Note {
   topics?: string[] // Array of topic IDs
   intentions?: string[] // Array of intention IDs
   indexing_status?: IndexingStatus
-  visibility?: PortfolioVisibility
+  visibility?: NoteVisibility
+  /** Pre-populated by feed/notes API for immediate avatar display (avoids client fetch delay) */
+  author_profiles?: Array<{ id: string; name: string; avatar?: string | null }>
 }
+
+export type NoteVisibility = 'public' | 'friends' | 'private' | 'members'
 
 /**
  * Input for creating a new note
  */
 export interface CreateNoteInput {
   text: string
-  type?: 'post' | 'annotation' | 'reaction'
+  type?: 'post' | 'annotation' | 'reaction' | 'open_call'
   references?: NoteReference[]
   assigned_portfolios?: string[]
+  collaborator_account_ids?: string[]
   mentioned_note_id?: string | null
-  visibility?: PortfolioVisibility
+  visibility?: NoteVisibility
+  metadata?: Record<string, unknown>
 }
 
 /**
@@ -92,11 +119,13 @@ export interface CreateNoteInput {
  */
 export interface UpdateNoteInput {
   text?: string
-  type?: 'post' | 'annotation' | 'reaction'
+  type?: 'post' | 'annotation' | 'reaction' | 'open_call'
   references?: NoteReference[]
   assigned_portfolios?: string[]
+  collaborator_account_ids?: string[]
   mentioned_note_id?: string | null
-  visibility?: PortfolioVisibility
+  visibility?: NoteVisibility
+  metadata?: Record<string, unknown>
 }
 
 /**
