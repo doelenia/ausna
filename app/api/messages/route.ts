@@ -73,6 +73,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Receiver not found' }, { status: 404 })
     }
 
+    // Normalize message type:
+    // - If a non-empty string is provided, use its trimmed value
+    // - Otherwise, default to 'text' for regular messages
+    const normalizedMessageType =
+      typeof message_type === 'string' && message_type.trim()
+        ? message_type.trim()
+        : 'text'
+
     // Insert message
     const { data: message, error } = await supabase
       .from('messages')
@@ -81,8 +89,8 @@ export async function POST(request: NextRequest) {
         receiver_id,
         text: text ? text.trim() : '', // Allow empty string if note_id is provided
         note_id: note_id || null,
-        // Optional message type (e.g. comment previews, portfolio shares)
-        message_type: typeof message_type === 'string' && message_type.trim() ? message_type.trim() : null,
+        // Message type (e.g. text, comment previews, portfolio shares)
+        message_type: normalizedMessageType,
       })
       .select()
       .single()
