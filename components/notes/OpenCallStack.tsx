@@ -101,7 +101,10 @@ export function OpenCallStack({ context, portfolioId, currentUserId }: OpenCallS
           }
         })
 
-        return sortOpenCallsForUser(updated, currentUserId)
+        // Do not re-sort while the popup is open to avoid
+        // changing the order mid-browsing. The order will be
+        // refreshed (and re-sorted) the next time the stack is fetched.
+        return updated
       })
     },
     [currentUserId]
