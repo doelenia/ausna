@@ -20,7 +20,9 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
   const [username, setUsername] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [legalAgreementsError, setLegalAgreementsError] = useState<string | null>(null)
   const [emailSent, setEmailSent] = useState(false)
+  const [pseudoActivatedNotice, setPseudoActivatedNotice] = useState<string | null>(null)
   const [authStep, setAuthStep] = useState<AuthStep>('enterEmail')
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const [agreedToPrivacy, setAgreedToPrivacy] = useState(false)
@@ -93,6 +95,8 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
 
     setLoading(true)
     setError(null)
+    setPseudoActivatedNotice(null)
+    setLegalAgreementsError(null)
 
     try {
 
@@ -150,7 +154,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
         // Record legal agreements using service-side API if versions are available
         if (termsVersion && privacyVersion) {
           try {
-            await fetch('/api/legal/agreement', {
+            const agreementRes = await fetch('/api/legal/agreement', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -163,7 +167,20 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
                 ],
               }),
             })
-          } catch (agreementError) {
+            if (!agreementRes.ok) {
+              const agreementJson = await agreementRes.json().catch(() => ({}))
+              const agreementMsg =
+                typeof agreementJson?.error === 'string'
+                  ? agreementJson.error
+                  : 'Failed to record legal agreements.'
+              setLegalAgreementsError(agreementMsg)
+            }
+          } catch (agreementError: any) {
+            const agreementMsg =
+              agreementError?.message && typeof agreementError.message === 'string'
+                ? agreementError.message
+                : 'Failed to record legal agreements.'
+            setLegalAgreementsError(agreementMsg)
             console.error('Failed to record legal agreements:', agreementError)
           }
         }
@@ -218,7 +235,18 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
           throw new Error(data.error || 'Failed to check email. Please try again.')
         }
 
-        const data = (await response.json()) as { status: 'existing_user' | 'new_or_pseudo' }
+        const data = (await response.json()) as
+          | { status: 'existing_user' }
+          | { status: 'new_user' }
+          | { status: 'pseudo_activated'; message: string }
+
+        if (data.status === 'pseudo_activated') {
+          setPseudoActivatedNotice(
+            data.message ||
+              'Your account already exists and is now activated. Please check your email for the password reset link.'
+          )
+          return
+        }
 
         if (data.status === 'existing_user') {
           setAuthStep('loginExisting')
@@ -263,6 +291,49 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
   }
 
   // Show email confirmation message after signup
+  if (pseudoActivatedNotice) {
+    return (
+      <div className="w-full max-w-md mx-auto">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+          <div className="mb-4">
+            <svg
+              className="mx-auto h-12 w-12 text-green-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+              />
+            </svg>
+          </div>
+          <Title as="h3" className="mb-2">Check your email!</Title>
+          <UIText className="mb-4">{pseudoActivatedNotice}</UIText>
+          <UIText as="p" className="mb-4 text-xs text-gray-500">
+            If you do not see the reset email, check your spam folder and then request a new reset link from
+            Forgot your password.
+          </UIText>
+          <Button
+            variant="text"
+            type="button"
+            onClick={() => {
+              setPseudoActivatedNotice(null)
+              setAuthStep('enterEmail')
+              setPassword('')
+              setUsername('')
+            }}
+            className="underline"
+          >
+            <UIText>Use another email</UIText>
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (emailSent) {
     return (
       <div className="w-full max-w-md mx-auto">
@@ -303,6 +374,11 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
               <UIText>try again</UIText>
             </Button>
           </UIText>
+          {legalAgreementsError && (
+            <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-md">
+              <UIText>{legalAgreementsError}</UIText>
+            </div>
+          )}
         </div>
       </div>
     )

@@ -4,6 +4,7 @@
 -- profile_complete: true if basic.name, basic.description, and basic.avatar are all non-empty (trimmed).
 -- availabilities_complete: true if properties.availability_schedule has at least one day with enabled = true.
 -- join_community_seen: true if this user is already owner or member of at least one community; false otherwise.
+-- open_calls_setup_complete: preserve existing value when present.
 
 WITH human_portfolios AS (
   SELECT id, user_id, metadata
@@ -44,10 +45,11 @@ UPDATE portfolios p
 SET metadata = jsonb_set(
   COALESCE(p.metadata, '{}'::jsonb),
   '{onboarding}',
-  jsonb_build_object(
+  COALESCE(p.metadata->'onboarding', '{}'::jsonb) || jsonb_build_object(
     'profile_complete', COALESCE(c.profile_complete, false),
     'availabilities_complete', COALESCE(c.availabilities_complete, false),
-    'join_community_seen', COALESCE(c.join_community_seen, false)
+    'join_community_seen', COALESCE(c.join_community_seen, false),
+    'open_calls_setup_complete', COALESCE((p.metadata->'onboarding'->>'open_calls_setup_complete')::boolean, false)
   )
 )
 FROM computed c

@@ -1500,9 +1500,12 @@ export function NoteCard({
         /* Non-authors see "Show interest to [author]" button */
         <Button
           variant="primary"
+          disabled={isUserInterested}
+          aria-disabled={isUserInterested}
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
+            if (isUserInterested) return
             if (!currentUserId) {
               router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
               return

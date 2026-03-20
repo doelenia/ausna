@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { normalizeExternalLink } from '@/lib/portfolio/normalizeExternalLink'
 
+export const dynamic = 'force-dynamic'
+
 /**
  * GET /api/activities/find-by-external-link?url=...
  * Returns existing external activity if one with the same normalized link exists.
