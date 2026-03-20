@@ -258,6 +258,7 @@ function OnboardingOpenCallsStep({ onComplete }: { onComplete: () => void }) {
         description,
         endDate: openCallEndDate ? openCallEndDate.toISOString() : null,
       })
+
       if (!result.success) {
         setError(result.error ?? 'Failed to save open call.')
         setLoading(false)

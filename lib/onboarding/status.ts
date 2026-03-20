@@ -63,6 +63,13 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
   const legalComplete = legalTermsOk && legalPrivacyOk
   const meta = (portfolio?.metadata ?? null) as HumanPortfolioMetadata | null
   const onboarding = meta?.onboarding
+  const rawOpenCallsSetupComplete = onboarding?.open_calls_setup_complete ?? null
+  const onboardingFlagOpenCallsComplete = rawOpenCallsSetupComplete === true
+
+  // Your desired behavior:
+  // - open_calls_setup_complete === true => complete
+  // - open_calls_setup_complete is false or missing/undefined => incomplete
+  const openCallsSetupComplete = onboardingFlagOpenCallsComplete
 
   const profileComplete =
     onboarding?.profile_complete === true || isProfileFilled(meta)
@@ -70,8 +77,6 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
   const availabilitiesComplete =
     onboarding?.availabilities_complete === true || hasAvailabilityEnabled(schedule)
   const joinCommunitySeen = onboarding?.join_community_seen === true
-  const openCallsSetupComplete = onboarding?.open_calls_setup_complete === true
-
   const steps: OnboardingStep[] = [
     { id: 'legal', label: STEP_LABELS.legal, complete: legalComplete },
     { id: 'profile', label: STEP_LABELS.profile, complete: profileComplete },

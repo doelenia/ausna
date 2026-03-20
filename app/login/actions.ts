@@ -4,7 +4,8 @@ import { createServiceClient } from '@/lib/supabase/service'
 
 export type CheckEmailStatusResult =
   | { status: 'existing_user' }
-  | { status: 'new_or_pseudo' }
+  | { status: 'new_user' }
+  | { status: 'pseudo_activated'; message: string }
 
 type AdminUserSummary = { id: string; email: string | null }
 
@@ -61,7 +62,7 @@ export async function checkEmailStatus(email: string): Promise<CheckEmailStatusR
   const normalizedEmail = email.trim().toLowerCase()
 
   if (!normalizedEmail) {
-    return { status: 'new_or_pseudo' }
+    return { status: 'new_user' }
   }
 
   const serviceClient = createServiceClient()
@@ -71,43 +72,63 @@ export async function checkEmailStatus(email: string): Promise<CheckEmailStatusR
   const authUser = await findAuthUserByEmailNormalized(serviceClient, normalizedEmail)
 
   if (!authUser) {
-    return { status: 'new_or_pseudo' }
+    return { status: 'new_user' }
   }
 
-  // Auth user exists for this email – only treat as existing_user if they have at least one
-  // non-pseudo human portfolio (verified account). Pseudo or no human portfolio → sign up flow.
+  // Auth user exists for this email.
   const userId = authUser.id
   if (!userId) {
-    return { status: 'new_or_pseudo' }
+    return { status: 'new_user' }
   }
 
-  const { data: humanPortfolios, error: portfolioError } = await serviceClient
+  const { data: userHumanPortfolios, error: portfolioError } = await serviceClient
     .from('portfolios')
-    .select('id, is_pseudo, metadata')
+    .select('id, is_pseudo')
     .eq('type', 'human')
-    .limit(200)
-
-  const isPseudoValues = Array.isArray(humanPortfolios)
-    ? (humanPortfolios as { is_pseudo?: boolean; metadata?: any }[]).map((p) => p.is_pseudo)
-    : []
-
-  // Determine non-pseudo status based on human portfolio where metadata.email matches this email.
-  const hasNonPseudoHuman =
-    Array.isArray(humanPortfolios) &&
-    (humanPortfolios as { is_pseudo?: boolean; metadata?: any }[]).some((p) => {
-      if (p.is_pseudo) return false
-      const metadata = (p.metadata || {}) as any
-      const emailMeta = (metadata.email as string | undefined)?.toLowerCase() || ''
-      return emailMeta === normalizedEmail
-    })
+    .eq('user_id', userId)
+    .limit(10)
 
   if (portfolioError) {
     console.error('Error checking human portfolio for login:', portfolioError)
-    return { status: 'new_or_pseudo' }
+    return { status: 'existing_user' }
   }
 
-  const status: CheckEmailStatusResult['status'] = hasNonPseudoHuman ? 'existing_user' : 'new_or_pseudo'
+  const portfolios = (userHumanPortfolios ?? []) as Array<{ id: string; is_pseudo?: boolean | null }>
+  const hasNonPseudoHuman = portfolios.some((p) => p.is_pseudo !== true)
+  const pseudoHumanPortfolioIds = portfolios.filter((p) => p.is_pseudo === true).map((p) => p.id)
 
-  return { status }
+  if (hasNonPseudoHuman) {
+    return { status: 'existing_user' }
+  }
+
+  if (pseudoHumanPortfolioIds.length > 0) {
+    const { error: updatePseudoError } = await serviceClient
+      .from('portfolios')
+      .update({ is_pseudo: false })
+      .in('id', pseudoHumanPortfolioIds)
+
+    if (updatePseudoError) {
+      console.error('Error converting pseudo portfolio to non-pseudo:', updatePseudoError)
+      return { status: 'existing_user' }
+    }
+
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
+    const redirectTo = `${siteUrl}/reset-password`
+    const { error: resetError } = await serviceClient.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo,
+    })
+
+    if (resetError) {
+      return { status: 'existing_user' }
+    }
+
+    return {
+      status: 'pseudo_activated',
+      message:
+        'Your account already exists and is now activated. We sent a password reset email so you can set your password and sign in.',
+    }
+  }
+
+  return { status: 'existing_user' }
 }
 

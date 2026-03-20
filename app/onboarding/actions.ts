@@ -134,6 +134,7 @@ export async function completeOpenCallsOnboarding(input: {
     }
 
     const flagged = await setOnboardingFlag('open_calls_setup_complete', true)
+
     if (!flagged.success) {
       return { success: false, error: flagged.error ?? 'Failed to update onboarding' }
     }

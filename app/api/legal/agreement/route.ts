@@ -32,10 +32,39 @@ export async function POST(request: NextRequest) {
       ip_address: ipAddress,
     }))
 
-    const { error } = await supabase.from('user_legal_agreements').insert(rows)
+    const isUserMissingFkViolation = (err: any) => {
+      if (!err) return false
+      const code = err.code
+      const details = err.details ?? ''
+      const message = err.message ?? ''
+      // We only retry on the FK class; the message/constraint text can vary slightly.
+      return (
+        code === '23503' &&
+        (String(details).includes('user_id') || String(message).includes('user_id')) &&
+        (String(details).includes('is not present') || String(details).includes('users'))
+      )
+    }
 
-    if (error) {
-      console.error('Error inserting user legal agreements:', error)
+    let lastError: any = null
+    const maxAttempts = 5
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { error } = await supabase.from('user_legal_agreements').insert(rows)
+      if (!error) {
+        return NextResponse.json({ success: true })
+      }
+
+      lastError = error
+
+      if (isUserMissingFkViolation(error) && attempt < maxAttempts) {
+        continue
+      }
+
+      break
+    }
+
+    if (lastError) {
+      console.error('Error inserting user legal agreements:', lastError)
+
       return NextResponse.json({ error: 'Failed to record agreements' }, { status: 500 })
     }
 
