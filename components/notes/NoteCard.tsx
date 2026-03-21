@@ -1526,6 +1526,23 @@ export function NoteCard({
           </UIText>
         </Button>
       )}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          if (!currentUserId) {
+            router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
+            return
+          }
+          setShowSendModal(true)
+        }}
+        className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+        aria-label="Send"
+        title="Send"
+      >
+        <Send className="w-5 h-5" strokeWidth={1.5} />
+      </button>
     </div>
   ) : undefined
 
@@ -2389,7 +2406,6 @@ export function NoteCard({
           </div>
         )}
       {showSendModal &&
-        !isOpenCall &&
         renderPortal(
           <SendItemModal
             isOpen={showSendModal}

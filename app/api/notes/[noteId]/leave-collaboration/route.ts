@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +55,11 @@ export async function POST(
 
     const nextCollaborators = collaborators.filter((id) => id !== user.id)
 
-    const { error: updateError } = await supabase
+    // RLS UPDATE policy requires auth.uid() in collaborator_account_ids on the *new* row.
+    // After leaving, the user is no longer in that array, so WITH CHECK fails on the user-scoped client.
+    // Same pattern as accept invite: apply only this field via service role after session checks.
+    const serviceClient = createServiceClient()
+    const { error: updateError } = await serviceClient
       .from('notes')
       .update({ collaborator_account_ids: nextCollaborators })
       .eq('id', noteId)

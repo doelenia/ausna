@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Note } from '@/types/note'
 import { Portfolio } from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
@@ -15,7 +16,7 @@ interface NoteActionsProps {
   currentUserId?: string
   /** When true, user is collaborator (not owner): only Pin and Leave collaboration are shown */
   isCollaborator?: boolean
-  /** When true (open call), only show: edit visibility, edit collaborators, delete */
+  /** When true (open call), hide pin/collections/remove-from-portfolio; collaborators can still leave collaboration */
   isOpenCall?: boolean
   onDelete?: () => void
   onRemoveFromPortfolio?: () => void
@@ -35,6 +36,12 @@ interface PinOption {
   pinCount: number
 }
 
+const DROPDOWN_GAP = 8
+const DROPDOWN_MIN_EDGE = 8
+/** w-56 */
+const DROPDOWN_WIDTH_FALLBACK = 224
+const DROPDOWN_HEIGHT_FALLBACK = 320
+
 export function NoteActions({
   note,
   portfolioId,
@@ -52,6 +59,7 @@ export function NoteActions({
   const [isOpen, setIsOpen] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; right: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [pinOptions, setPinOptions] = useState<PinOption[]>([])
   const [loadingPins, setLoadingPins] = useState(true)
   const [pinning, setPinning] = useState<string | null>(null)
@@ -290,16 +298,67 @@ export function NoteActions({
     }
   }
 
-  // Calculate dropdown position when opening
-  const handleToggle = () => {
-    if (!isOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect()
-      setDropdownPosition({
-        top: rect.bottom + 8, // 8px = mt-2 equivalent
-        right: window.innerWidth - rect.right,
-      })
+  /**
+   * Menu uses position:fixed in a portal to document.body so coordinates match getBoundingClientRect.
+   * (Inside transformed ancestors — e.g. open-call carousel translateX — fixed would use the wrong containing block.)
+   */
+  const syncDropdownPosition = useCallback(() => {
+    const btn = buttonRef.current
+    if (!btn) return
+
+    const rect = btn.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const menuEl = menuRef.current
+    const menuW = menuEl?.offsetWidth ?? DROPDOWN_WIDTH_FALLBACK
+    const menuH = menuEl?.offsetHeight ?? DROPDOWN_HEIGHT_FALLBACK
+
+    let top = rect.bottom + DROPDOWN_GAP
+    if (top + menuH > vh - DROPDOWN_MIN_EDGE) {
+      const aboveTop = rect.top - menuH - DROPDOWN_GAP
+      if (aboveTop >= DROPDOWN_MIN_EDGE) {
+        top = aboveTop
+      } else {
+        top = Math.max(DROPDOWN_MIN_EDGE, Math.min(top, vh - menuH - DROPDOWN_MIN_EDGE))
+      }
     }
-    setIsOpen(!isOpen)
+
+    let right = vw - rect.right
+    const menuLeft = vw - right - menuW
+    if (menuLeft < DROPDOWN_MIN_EDGE) {
+      right = vw - menuW - DROPDOWN_MIN_EDGE
+    }
+    if (right < DROPDOWN_MIN_EDGE) {
+      right = DROPDOWN_MIN_EDGE
+    }
+
+    setDropdownPosition((prev) => {
+      if (
+        prev &&
+        Math.abs(prev.top - top) < 0.5 &&
+        Math.abs(prev.right - right) < 0.5
+      ) {
+        return prev
+      }
+      return { top, right }
+    })
+  }, [])
+
+  const handleToggle = () => {
+    setIsOpen((open) => {
+      if (!open) {
+        if (buttonRef.current) {
+          const rect = buttonRef.current.getBoundingClientRect()
+          setDropdownPosition({
+            top: rect.bottom + DROPDOWN_GAP,
+            right: window.innerWidth - rect.right,
+          })
+        }
+      } else {
+        setDropdownPosition(null)
+      }
+      return !open
+    })
   }
 
   const handleLeaveCollaboration = async () => {
@@ -321,28 +380,45 @@ export function NoteActions({
     }
   }
 
-  // Update position on scroll/resize when open
+  useLayoutEffect(() => {
+    if (!isOpen) return
+    syncDropdownPosition()
+  }, [isOpen, syncDropdownPosition])
+
   useEffect(() => {
-    if (isOpen && buttonRef.current) {
-      const updatePosition = () => {
-        if (buttonRef.current) {
-          const rect = buttonRef.current.getBoundingClientRect()
-          setDropdownPosition({
-            top: rect.bottom + 8,
-            right: window.innerWidth - rect.right,
-          })
-        }
-      }
+    if (!isOpen) return
 
-      window.addEventListener('scroll', updatePosition, true)
-      window.addEventListener('resize', updatePosition)
+    syncDropdownPosition()
 
-      return () => {
-        window.removeEventListener('scroll', updatePosition, true)
-        window.removeEventListener('resize', updatePosition)
-      }
+    const onScrollOrResize = () => syncDropdownPosition()
+    document.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize)
+    window.visualViewport?.addEventListener('resize', onScrollOrResize)
+    window.visualViewport?.addEventListener('scroll', onScrollOrResize)
+
+    let raf = 0
+    const loop = () => {
+      syncDropdownPosition()
+      raf = requestAnimationFrame(loop)
     }
-  }, [isOpen])
+    raf = requestAnimationFrame(loop)
+
+    const menuEl = menuRef.current
+    const ro =
+      menuEl && typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => syncDropdownPosition())
+        : null
+    if (menuEl && ro) ro.observe(menuEl)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      document.removeEventListener('scroll', onScrollOrResize, true)
+      window.removeEventListener('resize', onScrollOrResize)
+      window.visualViewport?.removeEventListener('resize', onScrollOrResize)
+      window.visualViewport?.removeEventListener('scroll', onScrollOrResize)
+      ro?.disconnect()
+    }
+  }, [isOpen, syncDropdownPosition])
 
   return (
     <div className="relative">
@@ -367,19 +443,23 @@ export function NoteActions({
         </svg>
       </button>
 
-      {isOpen && dropdownPosition && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            onClick={() => setIsOpen(false)}
-          />
-          <div 
-            className="fixed w-56 bg-white rounded-md shadow-lg z-50 border border-gray-200"
-            style={{
-              top: `${dropdownPosition.top}px`,
-              right: `${dropdownPosition.right}px`,
-            }}
-          >
+      {isOpen &&
+        dropdownPosition &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[118]"
+              onClick={() => setIsOpen(false)}
+              aria-hidden
+            />
+            <div
+              ref={menuRef}
+              className="fixed w-56 max-h-[min(70vh,32rem)] overflow-y-auto bg-white rounded-md shadow-lg z-[120] border border-gray-200"
+              style={{
+                top: `${dropdownPosition.top}px`,
+                right: `${dropdownPosition.right}px`,
+              }}
+            >
             <div className="py-1">
               {/* Pin options - hidden for open call */}
               {!isOpenCall && !loadingPins && pinOptions.length > 0 && (
@@ -408,7 +488,7 @@ export function NoteActions({
                   {pinOptions.length > 0 && <div className="border-t border-gray-200 my-1" />}
                 </>
               )}
-              {isCollaborator && !isOpenCall && (
+              {isCollaborator && (
                 <>
                   <button
                     onClick={() => {
@@ -577,8 +657,9 @@ export function NoteActions({
               )}
             </div>
           </div>
-        </>
-      )}
+          </>,
+          document.body
+        )}
     </div>
   )
 }

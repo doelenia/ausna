@@ -8,7 +8,7 @@ import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo } from '@/lib/notes/url-helpers'
-import { NoteReference, ImageReference, UrlReference } from '@/types/note'
+import { NoteReference, ImageReference, UrlReference, OpenCallMetadata } from '@/types/note'
 import { UIButtonText } from '@/components/ui'
 
 interface MessageNoteCardProps {
@@ -150,6 +150,10 @@ export function MessageNoteCard({ noteId, isSent, currentUserId }: MessageNoteCa
   const ownerName = (currentUserId && note.owner_account_id === currentUserId)
     ? 'You'
     : (ownerBasic?.name || `User ${note.owner_account_id.slice(0, 8)}`)
+  const openCallTitle =
+    note.type === 'open_call'
+      ? ((note.metadata as OpenCallMetadata | undefined)?.title || '').trim()
+      : ''
 
   return (
     <div className={`max-w-xs lg:max-w-md border rounded-lg overflow-hidden ${
@@ -167,6 +171,17 @@ export function MessageNoteCard({ noteId, isSent, currentUserId }: MessageNoteCa
             {new Date(note.created_at).toLocaleDateString()}
           </UIButtonText>
         </div>
+
+        {/* Open call title (if present) */}
+        {openCallTitle && (
+          <div className="mb-2">
+            <p className={`text-sm font-semibold line-clamp-2 ${
+              isSent ? 'text-gray-900' : 'text-gray-900'
+            }`}>
+              {openCallTitle}
+            </p>
+          </div>
+        )}
 
         {/* Text content - truncated */}
         <div className="mb-2">
