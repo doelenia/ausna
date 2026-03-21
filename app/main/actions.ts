@@ -451,22 +451,22 @@ export async function getFeedNotes(
     const rangeStart = Math.max(0, offset)
     const rangeEnd = rangeStart + limit // inclusive: yields limit+1 rows when available
 
-    // Base query for logged-in users; feeds should only surface PUBLIC notes.
+    // Base query for logged-in users.
+    // Visibility is enforced by RLS so friends/members visibility works consistently.
     let notesQuery = supabase
       .from('notes')
       .select('*')
       .is('deleted_at', null)
       .is('mentioned_note_id', null) // Exclude annotations
-      .eq('visibility', 'public')
       .order('created_at', { ascending: false })
       .range(rangeStart, rangeEnd)
 
     if (feedType === 'friends') {
       // Get notes from friends (owner in friendIds) or where current user is collaborator
       const friendIds = await getFriendIds(user.id, supabase)
-      // Fetch in three parts:
-      // - notes by friends (public + friends-only)
-      // - notes by current user (so authors can see their own friends-only notes)
+      // Fetch in three parts and rely on RLS visibility checks.
+      // - notes by friends
+      // - notes by current user
       // - notes where current user is a collaborator
       const [byOwner, bySelf, byCollaborator] = await Promise.all([
         friendIds.length > 0
@@ -475,7 +475,6 @@ export async function getFeedNotes(
               .select('*')
               .is('deleted_at', null)
               .is('mentioned_note_id', null)
-              .in('visibility', ['public', 'friends'])
               .in('owner_account_id', friendIds)
               .order('created_at', { ascending: false })
               .range(rangeStart, rangeEnd)
@@ -485,7 +484,6 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
-          .in('visibility', ['public', 'friends'])
           .eq('owner_account_id', user.id)
           .order('created_at', { ascending: false })
           .range(rangeStart, rangeEnd),
@@ -494,7 +492,6 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
-          .eq('visibility', 'public')
           .contains('collaborator_account_ids', [user.id])
           .order('created_at', { ascending: false })
           .limit(rangeEnd - rangeStart + 1),
@@ -568,7 +565,7 @@ export async function getFeedNotes(
       const poolTarget = offset + limit + 1
       const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
-      // Fetch user-based notes (friends/community members) - PUBLIC only
+      // Fetch user-based notes (friends/community members); visibility via RLS
       let userNotes: any[] = []
       let userNotesMaybeMore = false
       if (allUserIds.length > 0) {
@@ -577,7 +574,6 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
-          .eq('visibility', 'public')
           .in('owner_account_id', allUserIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit)
@@ -600,13 +596,12 @@ export async function getFeedNotes(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
-        .eq('visibility', 'public')
         .contains('collaborator_account_ids', [user.id])
         .order('created_at', { ascending: false })
         .limit(poolLimit)
       collaboratorNotes = collabNotesData || []
 
-      // Also fetch notes assigned to portfolios - PUBLIC only
+      // Also fetch notes assigned to portfolios; visibility via RLS
       let portfolioNotes: any[] = []
       let portfolioNotesMaybeMore = false
       if (allPortfolioIds.length > 0) {
@@ -617,7 +612,6 @@ export async function getFeedNotes(
             .select('*')
             .is('deleted_at', null)
             .is('mentioned_note_id', null) // Exclude annotations
-            .eq('visibility', 'public')
             .order('created_at', { ascending: false })
             .limit(poolLimit)
 
@@ -812,7 +806,6 @@ export async function getFeedItems(
               .select('*')
               .is('deleted_at', null)
               .is('mentioned_note_id', null)
-              .eq('visibility', 'public')
               .in('owner_account_id', friendIds)
               .order('created_at', { ascending: false })
               .limit(poolLimit)
@@ -822,7 +815,6 @@ export async function getFeedItems(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
-          .eq('visibility', 'public')
           .contains('collaborator_account_ids', [user.id])
           .order('created_at', { ascending: false })
           .limit(poolLimit),
@@ -885,7 +877,6 @@ export async function getFeedItems(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
-          .eq('visibility', 'public')
           .in('owner_account_id', memberIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit),
@@ -949,7 +940,6 @@ export async function getFeedItems(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
-        .eq('visibility', 'public')
         .in('owner_account_id', allUserIds)
         .order('created_at', { ascending: false })
         .limit(poolLimit)
@@ -962,7 +952,6 @@ export async function getFeedItems(
       .select('*')
       .is('deleted_at', null)
       .is('mentioned_note_id', null)
-      .eq('visibility', 'public')
       .contains('collaborator_account_ids', [user.id])
       .order('created_at', { ascending: false })
       .limit(poolLimit)
@@ -976,7 +965,6 @@ export async function getFeedItems(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
-        .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(poolLimit)
       if (!portfolioError && portfolioNotesData) {

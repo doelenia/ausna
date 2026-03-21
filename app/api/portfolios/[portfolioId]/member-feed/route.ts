@@ -15,6 +15,25 @@ function isPublicPortfolio(p: any) {
   return v === undefined || v === null || v === 'public'
 }
 
+function isActivityHostedByPortfolio(activityPortfolio: any, hostPortfolioType: string, hostPortfolioId: string) {
+  if (activityPortfolio?.type !== 'activities') return false
+  const props = ((activityPortfolio?.metadata as any)?.properties as any) || {}
+  const hostProjectIds = Array.isArray(props.host_project_ids) ? props.host_project_ids : []
+  const hostCommunityIds = Array.isArray(props.host_community_ids) ? props.host_community_ids : []
+
+  if (hostPortfolioType === 'projects') {
+    return hostProjectIds.includes(hostPortfolioId)
+  }
+  if (hostPortfolioType === 'community') {
+    return hostCommunityIds.includes(hostPortfolioId)
+  }
+  if (hostPortfolioType === 'activities') {
+    // Defensive fallback: if activities become valid hosts, support either host bucket.
+    return hostProjectIds.includes(hostPortfolioId) || hostCommunityIds.includes(hostPortfolioId)
+  }
+  return false
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { portfolioId: string } }
@@ -152,23 +171,11 @@ export async function GET(
     })
 
     let rawPortfolios = (portfoliosRes.data || []).filter(isPublicPortfolio)
-    // For project and community: only show portfolio creations (activities) hosted by this portfolio
-    if (type === 'projects') {
-      rawPortfolios = rawPortfolios.filter((p: any) => {
-        if (p.type !== 'activities') return false
-        const hostIds = Array.isArray((p.metadata as any)?.properties?.host_project_ids)
-          ? (p.metadata as any).properties.host_project_ids
-          : []
-        return hostIds.includes(portfolioId)
-      })
-    } else if (type === 'community') {
-      rawPortfolios = rawPortfolios.filter((p: any) => {
-        if (p.type !== 'activities') return false
-        const hostIds = Array.isArray((p.metadata as any)?.properties?.host_community_ids)
-          ? (p.metadata as any).properties.host_community_ids
-          : []
-        return hostIds.includes(portfolioId)
-      })
+    // For portfolio feeds: only show created activity portfolios hosted by this portfolio.
+    if (['projects', 'community', 'activities'].includes(type)) {
+      rawPortfolios = rawPortfolios.filter((p: any) =>
+        isActivityHostedByPortfolio(p, type, portfolioId)
+      )
     }
     const portfolioItems: FeedItem[] = rawPortfolios.map((p: any) => {
       const uid = String(p.user_id)

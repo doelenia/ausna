@@ -149,7 +149,6 @@ export async function GET(request: NextRequest) {
         .eq('type', 'open_call')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
-        .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(limit * 5) // Fetch more to allow filtering to feed-visible sources
 
