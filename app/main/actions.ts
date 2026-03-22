@@ -740,53 +740,18 @@ export async function getFeedNotes(
 }
 
 /**
- * Get feed items (notes + portfolio creations) based on feed type.
- * Items are sorted by created_at desc and paginated over the merged stream.
+ * Get feed items for a specific authenticated user (same merged stream as getFeedItems when logged in).
+ * Use with the server user session client or a service-role client for cron jobs.
  */
-export async function getFeedItems(
+export async function getFeedItemsForUserId(
+  supabase: any,
+  userId: string,
   feedType: FeedType,
   communityId: string | null = null,
   offset: number = 0,
   limit: number = 10
 ): Promise<GetFeedItemsResult> {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    // Logged-out users: keep existing behavior (public notes only)
-    if (!user) {
-      const publicLimit = 5
-      const { data: notes, error } = await supabase
-        .from('notes')
-        .select('*')
-        .is('deleted_at', null)
-        .is('mentioned_note_id', null)
-        .eq('visibility', 'public')
-        .order('created_at', { ascending: false })
-        .limit(publicLimit)
-
-      if (error) {
-        return { success: false, error: error.message || 'Failed to fetch notes' }
-      }
-
-      const normalized: Note[] = (notes || []).map((note: any) => ({
-        ...note,
-        references: Array.isArray(note.references) ? note.references : [],
-      }))
-      const enriched = await enrichNotesWithAuthorProfiles(normalized, supabase, null)
-      return {
-        success: true,
-        items: (enriched || []).map((note: any) => ({
-          kind: 'note' as const,
-          created_at: note.created_at,
-          note,
-        })),
-        hasMore: false,
-      }
-    }
-
     const poolTarget = offset + limit + 1
     const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
@@ -797,7 +762,7 @@ export async function getFeedItems(
     ]
 
     if (feedType === 'friends') {
-      const friendIds = await getFriendIds(user.id, supabase)
+      const friendIds = await getFriendIds(userId, supabase)
 
       const [byOwner, byCollaborator, portfoliosRes] = await Promise.all([
         friendIds.length > 0
@@ -815,7 +780,7 @@ export async function getFeedItems(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
-          .contains('collaborator_account_ids', [user.id])
+          .contains('collaborator_account_ids', [userId])
           .order('created_at', { ascending: false })
           .limit(poolLimit),
         friendIds.length > 0
@@ -838,10 +803,10 @@ export async function getFeedItems(
         references: Array.isArray(note.references) ? note.references : [],
       })) as Note[]
 
-      const enrichedNotes = await enrichNotesWithAuthorProfiles(notesList, supabase, user.id)
+      const enrichedNotes = await enrichNotesWithAuthorProfiles(notesList, supabase, userId)
 
       const rawPortfolios = ((portfoliosRes as any)?.data || []).filter(portfolioIsPublicOrNull)
-      const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, user.id)
+      const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, userId)
 
       const merged: FeedItem[] = [
         ...((enrichedNotes || []) as any[]).map((note: any) => ({
@@ -893,10 +858,10 @@ export async function getFeedItems(
         ...note,
         references: Array.isArray(note.references) ? note.references : [],
       }))
-      const enrichedNotes = await enrichNotesWithAuthorProfiles(notesList, supabase, user.id)
+      const enrichedNotes = await enrichNotesWithAuthorProfiles(notesList, supabase, userId)
 
       const rawPortfolios = ((portfoliosRes as any)?.data || []).filter(portfolioIsPublicOrNull)
-      const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, user.id)
+      const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, userId)
 
       const merged: FeedItem[] = [
         ...((enrichedNotes || []) as any[]).map((note: any) => ({
@@ -918,20 +883,19 @@ export async function getFeedItems(
     }
 
     // "all" feed: reuse existing visibility logic for notes; add portfolio creations by friends/community members.
-    const friendIds = await getFriendIds(user.id, supabase)
-    const communitiesMap = await getUserCommunitiesMap(user.id, supabase)
-    const communityMemberIds = await getAllCommunityMemberIds(user.id, supabase)
-    const subscribedPortfolioIds = await getSubscribedPortfolioIds(user.id, supabase)
-    const memberPortfolioIds = await getMemberPortfolioIds(user.id, supabase)
+    const friendIds = await getFriendIds(userId, supabase)
+    const communitiesMap = await getUserCommunitiesMap(userId, supabase)
+    const communityMemberIds = await getAllCommunityMemberIds(userId, supabase)
+    const subscribedPortfolioIds = await getSubscribedPortfolioIds(userId, supabase)
+    const memberPortfolioIds = await getMemberPortfolioIds(userId, supabase)
 
-    const allUserIds = Array.from(new Set([user.id, ...friendIds, ...communityMemberIds]))
+    const allUserIds = Array.from(new Set([userId, ...friendIds, ...communityMemberIds]))
     const allPortfolioIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds]))
 
     if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
       return { success: true, items: [], hasMore: false }
     }
 
-    // Notes pool
     let userNotes: any[] = []
     let userNotesMaybeMore = false
     if (allUserIds.length > 0) {
@@ -952,7 +916,7 @@ export async function getFeedItems(
       .select('*')
       .is('deleted_at', null)
       .is('mentioned_note_id', null)
-      .contains('collaborator_account_ids', [user.id])
+      .contains('collaborator_account_ids', [userId])
       .order('created_at', { ascending: false })
       .limit(poolLimit)
     const collaboratorNotes = collabNotesData || []
@@ -985,7 +949,7 @@ export async function getFeedItems(
       const noteOwnerId = note.owner_account_id
       const assignedPortfolios = note.assigned_portfolios || []
       const collaboratorIds = (note.collaborator_account_ids || []) as string[]
-      const isCollaborator = collaboratorIds.includes(user.id)
+      const isCollaborator = collaboratorIds.includes(userId)
       const isOwnerVisible = allUserIds.includes(noteOwnerId)
       const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) => allPortfolioIds.includes(pid))
       return isOwnerVisible || isAssignedToVisiblePortfolio || isCollaborator
@@ -995,7 +959,6 @@ export async function getFeedItems(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
 
-    // Portfolios created by visible users
     const { data: portfoliosData } = await supabase
       .from('portfolios')
       .select('*')
@@ -1004,9 +967,8 @@ export async function getFeedItems(
       .order('created_at', { ascending: false })
       .limit(poolLimit)
     const rawPortfolios = (portfoliosData || []).filter(portfolioIsPublicOrNull)
-    const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, user.id)
+    const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, userId)
 
-    // Merge pools
     const mergedPool: FeedItem[] = [
       ...sortedNotesPool.map((note: any) => ({
         kind: 'note' as const,
@@ -1026,13 +988,12 @@ export async function getFeedItems(
 
     const page = mergedPool.slice(offset, offset + limit)
 
-    // Enrich only notes in the final page (author profiles + source)
     const pageNotes = page.filter((i) => i.kind === 'note').map((i: any) => i.note)
     const notesWithSource = await Promise.all(
       pageNotes.map(async (note: any) => {
         const source = await determineNoteSource(
           note,
-          user.id,
+          userId,
           friendIds,
           communitiesMap,
           subscribedPortfolioIds,
@@ -1041,7 +1002,7 @@ export async function getFeedItems(
         return { ...note, feedSource: source }
       })
     )
-    const enrichedNotes = await enrichNotesWithAuthorProfiles(notesWithSource, supabase, user.id)
+    const enrichedNotes = await enrichNotesWithAuthorProfiles(notesWithSource, supabase, userId)
     const enrichedById = new Map<string, any>()
     ;(enrichedNotes || []).forEach((n: any) => enrichedById.set(n.id, n))
 
@@ -1057,6 +1018,59 @@ export async function getFeedItems(
       portfolioNotesMaybeMore
 
     return { success: true, items: finalPage, hasMore }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'An unexpected error occurred' }
+  }
+}
+
+/**
+ * Get feed items (notes + portfolio creations) based on feed type.
+ * Items are sorted by created_at desc and paginated over the merged stream.
+ */
+export async function getFeedItems(
+  feedType: FeedType,
+  communityId: string | null = null,
+  offset: number = 0,
+  limit: number = 10
+): Promise<GetFeedItemsResult> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      const publicLimit = 5
+      const { data: notes, error } = await supabase
+        .from('notes')
+        .select('*')
+        .is('deleted_at', null)
+        .is('mentioned_note_id', null)
+        .eq('visibility', 'public')
+        .order('created_at', { ascending: false })
+        .limit(publicLimit)
+
+      if (error) {
+        return { success: false, error: error.message || 'Failed to fetch notes' }
+      }
+
+      const normalized: Note[] = (notes || []).map((note: any) => ({
+        ...note,
+        references: Array.isArray(note.references) ? note.references : [],
+      }))
+      const enriched = await enrichNotesWithAuthorProfiles(normalized, supabase, null)
+      return {
+        success: true,
+        items: (enriched || []).map((note: any) => ({
+          kind: 'note' as const,
+          created_at: note.created_at,
+          note,
+        })),
+        hasMore: false,
+      }
+    }
+
+    return await getFeedItemsForUserId(supabase, user.id, feedType, communityId, offset, limit)
   } catch (error: any) {
     return { success: false, error: error.message || 'An unexpected error occurred' }
   }

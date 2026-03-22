@@ -16,6 +16,14 @@ export function getResendFromEmail(): string {
 
 let _resend: Resend | null = null
 
+/** RFC 8058 headers for Resend when a one-click unsubscribe URL is available */
+export function listUnsubscribeMailHeaders(unsubscribeUrl: string): Record<string, string> {
+  return {
+    'List-Unsubscribe': `<${unsubscribeUrl}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  }
+}
+
 export function getResendClient(): Resend {
   if (_resend) return _resend
   const key = process.env.RESEND_API_KEY

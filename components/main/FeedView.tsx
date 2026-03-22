@@ -23,6 +23,8 @@ interface FeedViewProps {
   openCallContext?: 'feed' | 'human' | 'portfolio'
   openCallPortfolioId?: string
   showOpenCallStack?: boolean
+  /** From e.g. /main?showOpenCalls=1 — opens the open-call carousel once data is ready */
+  initialOpenCallsPopup?: boolean
 }
 
 export function FeedView({
@@ -31,6 +33,7 @@ export function FeedView({
   openCallContext = 'feed',
   openCallPortfolioId,
   showOpenCallStack = true,
+  initialOpenCallsPopup = false,
 }: FeedViewProps) {
   const { setCachedNote } = useDataCache()
   const [activeFeed, setActiveFeed] = useState<FeedType>('all')
@@ -225,6 +228,7 @@ export function FeedView({
                 context={openCallContext}
                 portfolioId={openCallPortfolioId}
                 currentUserId={currentUserId}
+                autoOpenPopup={initialOpenCallsPopup}
               />
             </div>
           )}
