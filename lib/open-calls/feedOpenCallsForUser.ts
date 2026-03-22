@@ -1,8 +1,11 @@
 import type { Note } from '@/types/note'
 import { enrichNotesWithAuthorProfiles } from '@/app/main/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
+import type { NoteWithDigestPortfolio } from '@/lib/email/digestAssignedPortfolio'
+import { attachDigestPortfoliosToNotes } from '@/lib/email/digestAssignedPortfolio'
 
-export type FeedOpenCallNote = Note & { first_project_name?: string }
+/** `first_project_name` kept for API/clients; prefer `digestAssignedPortfolio` when present. */
+export type FeedOpenCallNote = NoteWithDigestPortfolio & { first_project_name?: string }
 
 async function getFriendIds(userId: string, supabase: any): Promise<string[]> {
   const { data: friendships } = await supabase
@@ -212,37 +215,11 @@ export async function getFeedOpenCallsForUserId(
   }))
 
   const enrichedNotes = await enrichNotesWithAuthorProfiles(normalizedNotes, supabase, userId)
-
-  const portfolioIds = new Set<string>()
-  enrichedNotes.forEach((n: any) => {
-    if (Array.isArray(n.assigned_portfolios)) {
-      n.assigned_portfolios.forEach((id: string) => portfolioIds.add(id))
-    }
-  })
-  const portfolioIdList = Array.from(portfolioIds)
-  let portfolioMap = new Map<string, string>()
-  if (portfolioIdList.length > 0) {
-    const { data: portfolios } = await supabase
-      .from('portfolios')
-      .select('id, type, metadata')
-      .in('id', portfolioIdList)
-    ;(portfolios || []).forEach((p: any) => {
-      if (p.type !== 'human') {
-        const basic = getPortfolioBasic(p)
-        portfolioMap.set(p.id, basic.name)
-      }
-    })
-  }
-
-  const openCalls: FeedOpenCallNote[] = enrichedNotes.map((n: any) => {
-    const firstProjectId = Array.isArray(n.assigned_portfolios)
-      ? n.assigned_portfolios.find((id: string) => portfolioMap.has(id))
-      : undefined
-    return {
-      ...n,
-      first_project_name: firstProjectId ? portfolioMap.get(firstProjectId) : undefined,
-    }
-  })
+  const withBanners = await attachDigestPortfoliosToNotes(supabase, enrichedNotes)
+  const openCalls: FeedOpenCallNote[] = withBanners.map((n) => ({
+    ...n,
+    first_project_name: n.digestAssignedPortfolio?.name,
+  }))
 
   return { openCalls, totalMatching, hasMore }
 }

@@ -1,3 +1,4 @@
+import { renderDigestAssignedPortfolioBannerHtml } from '@/lib/email/digestAssignedPortfolio'
 import { escapeHtml, renderDigestEmailShell } from '@/lib/email/templates/digestEmailShell'
 import type { FeedOpenCallNote } from '@/lib/open-calls/feedOpenCallsForUser'
 import type { OpenCallMetadata } from '@/types/note'
@@ -43,12 +44,6 @@ function avatarCell(siteUrl: string, avatarUrl: string | null | undefined): stri
 function renderOpenCallAuthorRow(siteUrl: string, note: FeedOpenCallNote): string {
   const profiles = Array.isArray((note as any).author_profiles) ? (note as any).author_profiles : []
   const timeStr = formatFeedTime(note.created_at)
-  const project = (note as any).first_project_name
-  const projectHtml = project
-    ? `<span style="display:inline-block; margin-left:10px; padding:2px 8px; border-radius:999px; background:#f3f4f6; font-size:12px; color:#374151; vertical-align:middle;">${escapeHtml(
-        project
-      )}</span>`
-    : ''
 
   if (profiles.length <= 1) {
     const p = profiles[0]
@@ -59,7 +54,7 @@ function renderOpenCallAuthorRow(siteUrl: string, note: FeedOpenCallNote): strin
         <tr>
           <td valign="middle" style="width:32px; padding:0 12px 0 0; line-height:0;">${left}</td>
           <td valign="middle" style="padding:0;">
-            <span style="font-size:14px; font-weight:600; color:#111827; line-height:1.4;">${escapeHtml(name)}</span><span style="font-size:13px; color:#6b7280; line-height:1.4; margin-left:10px; white-space:nowrap;">${escapeHtml(timeStr)}</span>${projectHtml}
+            <span style="font-size:14px; font-weight:600; color:#111827; line-height:1.4;">${escapeHtml(name)}</span><span style="font-size:13px; color:#6b7280; line-height:1.4; margin-left:10px; white-space:nowrap;">${escapeHtml(timeStr)}</span>
           </td>
         </tr>
       </table>`
@@ -85,7 +80,7 @@ function renderOpenCallAuthorRow(siteUrl: string, note: FeedOpenCallNote): strin
           <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>${avatarsRow}</tr></table>
         </td>
         <td valign="middle" style="padding:0;">
-          <span style="font-size:14px; font-weight:600; color:#111827; line-height:1.4;">${escapeHtml(label)}</span><span style="font-size:13px; color:#6b7280; line-height:1.4; margin-left:10px; white-space:nowrap;">${escapeHtml(timeStr)}</span>${projectHtml}
+          <span style="font-size:14px; font-weight:600; color:#111827; line-height:1.4;">${escapeHtml(label)}</span><span style="font-size:13px; color:#6b7280; line-height:1.4; margin-left:10px; white-space:nowrap;">${escapeHtml(timeStr)}</span>
         </td>
       </tr>
     </table>`
@@ -107,9 +102,11 @@ function renderOpenCallCard(siteUrl: string, note: FeedOpenCallNote): string {
       note.text.length > 400 ? note.text.slice(0, 399).trimEnd() + '…' : note.text
     )}</div>`
 
+  const portfolioBanner = renderDigestAssignedPortfolioBannerHtml(siteUrl, note.digestAssignedPortfolio)
+
   return `
-    <a href="${escapeHtml(href)}" style="text-decoration:none; color:inherit;">
-      <div style="display:block; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#ffffff; margin-bottom:8px;">
+    <div style="display:block; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#ffffff; margin-bottom:8px;">
+      <a href="${escapeHtml(href)}" style="text-decoration:none; color:inherit;">
         <div style="font-size:14px; font-weight:600; color:#ea580c; margin-bottom:8px;">
           Open call${ends}
         </div>
@@ -118,8 +115,9 @@ function renderOpenCallCard(siteUrl: string, note: FeedOpenCallNote): string {
         </div>
         ${renderOpenCallAuthorRow(siteUrl, note)}
         ${text || ''}
-      </div>
-    </a>`
+      </a>
+      ${portfolioBanner}
+    </div>`
 }
 
 export function renderOpenCallDigestEmail(input: {

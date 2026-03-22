@@ -1,5 +1,6 @@
 import type { FeedItem } from '@/app/main/actions'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { renderDigestAssignedPortfolioBannerHtml } from '@/lib/email/digestAssignedPortfolio'
 import { escapeHtml, renderDigestEmailShell } from '@/lib/email/templates/digestEmailShell'
 import { formatActivityLocation } from '@/lib/formatActivityLocation'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
@@ -126,6 +127,10 @@ function renderNoteCard(siteUrl: string, item: FeedItem & { kind: 'note' }): str
   const note = item.note
   const href = toAbsoluteUrl(siteUrl, `/notes/${note.id}`)
   const sourceLabel = feedSourceLabel((note as any).feedSource)
+  const portfolioBanner = renderDigestAssignedPortfolioBannerHtml(
+    siteUrl,
+    (note as any).digestAssignedPortfolio
+  )
 
   if (note.type === 'open_call') {
     const meta = note.metadata as OpenCallMetadata | undefined
@@ -137,8 +142,8 @@ function renderNoteCard(siteUrl: string, item: FeedItem & { kind: 'note' }): str
         : ''
 
     return `
-      <a href="${escapeHtml(href)}" style="text-decoration:none; color:inherit;">
-        <div style="display:block; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#ffffff; margin-bottom:8px;">
+      <div style="display:block; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#ffffff; margin-bottom:8px;">
+        <a href="${escapeHtml(href)}" style="text-decoration:none; color:inherit;">
           <div style="font-size:14px; font-weight:600; color:#ea580c; margin-bottom:8px;">
             Open call${ends}
           </div>
@@ -153,8 +158,9 @@ function renderNoteCard(siteUrl: string, item: FeedItem & { kind: 'note' }): str
                 )}</div>`
               : ''
           }
-        </div>
-      </a>`
+        </a>
+        ${portfolioBanner}
+      </div>`
   }
 
   const refs = Array.isArray(note.references) ? note.references : []
@@ -173,13 +179,14 @@ function renderNoteCard(siteUrl: string, item: FeedItem & { kind: 'note' }): str
     )}</div>`
 
   return `
-    <a href="${escapeHtml(href)}" style="text-decoration:none; color:inherit;">
-      <div style="display:block; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#ffffff; margin-bottom:8px;">
+    <div style="display:block; padding:10px 12px; border-radius:12px; border:1px solid #e5e7eb; background:#ffffff; margin-bottom:8px;">
+      <a href="${escapeHtml(href)}" style="text-decoration:none; color:inherit;">
         ${renderAuthorRow(siteUrl, note as any, note.created_at, sourceLabel)}
         ${imgHtml}
         ${body || ''}
-      </div>
-    </a>`
+      </a>
+      ${portfolioBanner}
+    </div>`
 }
 
 function renderPortfolioCreatedCard(siteUrl: string, item: FeedItem & { kind: 'portfolio_created' }): string {

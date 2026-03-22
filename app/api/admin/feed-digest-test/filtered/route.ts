@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { getFeedItemsForUserId } from '@/app/main/actions'
+import { attachDigestPortfoliosToFeedItems } from '@/lib/email/digestAssignedPortfolio'
 import { sendFeedDigestEmail } from '@/lib/email/feedDigest'
 
 export const dynamic = 'force-dynamic'
@@ -85,7 +86,7 @@ export async function GET() {
       })
     }
 
-    const displayItems = newItems.slice(0, 3)
+    const displayItems = await attachDigestPortfoliosToFeedItems(supabase, newItems.slice(0, 3))
     const sendResult = await sendFeedDigestEmail({
       toEmail: admin.email!,
       userId: admin.id,
