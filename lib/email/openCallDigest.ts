@@ -4,33 +4,32 @@ import {
   getSiteUrl,
   listUnsubscribeMailHeaders,
 } from '@/lib/email/resend'
-import {
-  MessagesDigestConversationInput,
-  renderMessagesDigestEmail,
-} from '@/lib/email/templates/messagesDigestEmail'
+import type { FeedOpenCallNote } from '@/lib/open-calls/feedOpenCallsForUser'
+import { renderOpenCallDigestEmail } from '@/lib/email/templates/openCallDigestEmail'
 import { buildEmailUnsubscribeUrl } from '@/lib/email/buildUnsubscribeUrl'
 
-export async function sendMessagesDigestEmail(input: {
+export async function sendOpenCallDigestEmail(input: {
   toEmail: string
   userId: string
-  userName?: string
-  conversations: MessagesDigestConversationInput[]
+  displayNotes: FeedOpenCallNote[]
+  totalNew: number
 }): Promise<{ success: true; messageId: string } | { success: false; error: string }> {
   const to = input.toEmail.trim()
   if (!to) return { success: false, error: 'Missing recipient email' }
 
   const siteUrl = getSiteUrl()
-  const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
-  const unsubscribeUrl = buildEmailUnsubscribeUrl(input.userId, 'messages_digest')
+  const mainFeedUrl = `${siteUrl}/main?showOpenCalls=1&utm_source=open_call_digest_email&utm_medium=email`
+  const unsubscribeUrl = buildEmailUnsubscribeUrl(input.userId, 'open_call_digest')
 
-  const html = renderMessagesDigestEmail({
-    userName: input.userName,
-    conversations: input.conversations,
-    messagesUrl,
+  const html = renderOpenCallDigestEmail({
+    siteUrl,
+    displayNotes: input.displayNotes,
+    totalNew: input.totalNew,
+    mainFeedUrl,
     unsubscribeUrl,
   })
 
-  const subject = 'New messages from Ausna'
+  const subject = 'Open calls on Ausna'
 
   const headers = listUnsubscribeMailHeaders(unsubscribeUrl)
 
@@ -57,4 +56,3 @@ export async function sendMessagesDigestEmail(input: {
     return { success: false, error: e?.message ?? 'Failed to send email' }
   }
 }
-

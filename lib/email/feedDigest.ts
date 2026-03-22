@@ -4,33 +4,32 @@ import {
   getSiteUrl,
   listUnsubscribeMailHeaders,
 } from '@/lib/email/resend'
-import {
-  MessagesDigestConversationInput,
-  renderMessagesDigestEmail,
-} from '@/lib/email/templates/messagesDigestEmail'
+import type { FeedItem } from '@/app/main/actions'
+import { renderFeedDigestEmail } from '@/lib/email/templates/feedDigestEmail'
 import { buildEmailUnsubscribeUrl } from '@/lib/email/buildUnsubscribeUrl'
 
-export async function sendMessagesDigestEmail(input: {
+export async function sendFeedDigestEmail(input: {
   toEmail: string
   userId: string
-  userName?: string
-  conversations: MessagesDigestConversationInput[]
+  displayItems: FeedItem[]
+  totalNew: number
 }): Promise<{ success: true; messageId: string } | { success: false; error: string }> {
   const to = input.toEmail.trim()
   if (!to) return { success: false, error: 'Missing recipient email' }
 
   const siteUrl = getSiteUrl()
-  const messagesUrl = `${siteUrl}/messages?utm_source=messages_digest_email&utm_medium=email`
-  const unsubscribeUrl = buildEmailUnsubscribeUrl(input.userId, 'messages_digest')
+  const mainFeedUrl = `${siteUrl}/main?utm_source=feed_digest_email&utm_medium=email`
+  const unsubscribeUrl = buildEmailUnsubscribeUrl(input.userId, 'feed_digest')
 
-  const html = renderMessagesDigestEmail({
-    userName: input.userName,
-    conversations: input.conversations,
-    messagesUrl,
+  const html = renderFeedDigestEmail({
+    siteUrl,
+    displayItems: input.displayItems,
+    totalNew: input.totalNew,
+    mainFeedUrl,
     unsubscribeUrl,
   })
 
-  const subject = 'New messages from Ausna'
+  const subject = 'New feeds on Ausna'
 
   const headers = listUnsubscribeMailHeaders(unsubscribeUrl)
 
@@ -57,4 +56,3 @@ export async function sendMessagesDigestEmail(input: {
     return { success: false, error: e?.message ?? 'Failed to send email' }
   }
 }
-

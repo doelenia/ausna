@@ -211,6 +211,7 @@ export async function GET(request: NextRequest) {
 
         const sendResult = await sendMessagesDigestEmail({
           toEmail: authEmail,
+          userId,
           conversations: conversationsForEmail,
         })
 

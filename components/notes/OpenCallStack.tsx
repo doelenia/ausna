@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Note } from '@/types/note'
 import { OpenCallPreviewCard } from './OpenCallPreviewCard'
 import { OpenCallCarouselPopup } from './OpenCallCarouselPopup'
@@ -12,6 +12,8 @@ interface OpenCallStackProps {
   context: OpenCallsContext
   portfolioId?: string
   currentUserId?: string
+  /** Open carousel once after open calls load (e.g. deep link from email) */
+  autoOpenPopup?: boolean
 }
 
 function sortOpenCallsForUser(
@@ -48,11 +50,17 @@ function sortOpenCallsForUser(
   })
 }
 
-export function OpenCallStack({ context, portfolioId, currentUserId }: OpenCallStackProps) {
+export function OpenCallStack({
+  context,
+  portfolioId,
+  currentUserId,
+  autoOpenPopup = false,
+}: OpenCallStackProps) {
   const [openCalls, setOpenCalls] = useState<(Note & { first_project_name?: string })[]>([])
   const [loading, setLoading] = useState(true)
   const [popupOpen, setPopupOpen] = useState(false)
   const [initialIndex, setInitialIndex] = useState(0)
+  const autoOpenDoneRef = useRef(false)
 
   const fetchOpenCalls = useCallback(async () => {
     setLoading(true)
@@ -113,6 +121,15 @@ export function OpenCallStack({ context, portfolioId, currentUserId }: OpenCallS
   useEffect(() => {
     fetchOpenCalls()
   }, [fetchOpenCalls])
+
+  useEffect(() => {
+    if (!autoOpenPopup || !currentUserId || autoOpenDoneRef.current) return
+    if (loading) return
+    if (openCalls.length === 0) return
+    autoOpenDoneRef.current = true
+    setInitialIndex(0)
+    setPopupOpen(true)
+  }, [autoOpenPopup, currentUserId, loading, openCalls.length])
 
   const handleStackClick = () => {
     if (openCalls.length === 0) return
