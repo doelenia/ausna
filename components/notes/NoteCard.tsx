@@ -1275,7 +1275,7 @@ export function NoteCard({
             className="block relative w-full h-full cursor-pointer"
           >
           {/* Blurred and dimmed header image background */}
-          {firstUrlRef!.headerImage && (
+          {firstUrlRef!.headerImage ? (
             <div className="absolute inset-0 z-0">
               <img
                 src={firstUrlRef!.headerImage}
@@ -1287,6 +1287,20 @@ export function NoteCard({
                 }}
               />
             </div>
+          ) : displayHostIcon ? (
+            <div className="absolute inset-0 z-0">
+              <img
+                src={displayHostIcon}
+                alt=""
+                className="w-full h-full object-cover"
+                style={{
+                  filter: 'blur(20px) brightness(0.4)',
+                  transform: 'scale(1.1)', // Scale up to avoid blur edges
+                }}
+              />
+            </div>
+          ) : (
+            <div className="absolute inset-0 z-0 bg-gray-800" />
           )}
           
           {/* Content overlay */}
@@ -1333,7 +1347,7 @@ export function NoteCard({
             prefetch={true}
           >
             {/* Blurred and dimmed header image background */}
-            {firstUrlRef!.headerImage && (
+            {firstUrlRef!.headerImage ? (
               <div className="absolute inset-0 z-0">
                 <img
                   src={firstUrlRef!.headerImage}
@@ -1345,6 +1359,20 @@ export function NoteCard({
                   }}
                 />
               </div>
+            ) : displayHostIcon ? (
+              <div className="absolute inset-0 z-0">
+                <img
+                  src={displayHostIcon}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{
+                    filter: 'blur(20px) brightness(0.4)',
+                    transform: 'scale(1.1)', // Scale up to avoid blur edges
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="absolute inset-0 z-0 bg-gray-800" />
             )}
             
             {/* Content overlay */}

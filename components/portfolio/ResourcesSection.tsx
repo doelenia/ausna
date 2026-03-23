@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Folder } from 'lucide-react'
 import type { Note } from '@/types/note'
 import type { Portfolio } from '@/types/portfolio'
-import { ResourcesMasonry } from '@/components/notes/ResourcesMasonry'
+import { NotesMasonry } from '@/components/notes/NotesMasonry'
 import { OpenCallCarouselPopup } from '@/components/notes/OpenCallCarouselPopup'
 import { UIText } from '@/components/ui'
 
@@ -94,10 +94,11 @@ export function ResourcesSection({
         <UIText>Resources</UIText>
       </div>
 
-      <ResourcesMasonry
-        resources={resources}
+      <NotesMasonry
+        notes={resources}
         portfolioId={portfolioId}
         currentUserId={currentUserId}
+        pinnedNoteIds={new Set()}
         disableNavigation
         onNoteClick={openPopupAt}
         showPlaceholder={showPlaceholder}

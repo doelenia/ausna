@@ -4,7 +4,11 @@ import { Note } from '@/types/note'
 import { NoteCard } from './NoteCard'
 import { LazyLoad } from '@/components/ui/LazyLoad'
 import { SkeletonCard } from '@/components/ui/Skeleton'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { Card, UIText } from '@/components/ui'
+import Link from 'next/link'
+import { Plus } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 
 interface NotesMasonryProps {
   notes: Note[]
@@ -16,6 +20,20 @@ interface NotesMasonryProps {
   onNoteRemovedFromPortfolio?: () => void
   onNoteLeftCollaboration?: () => void
   onCollaboratorsUpdated?: () => void
+
+  /**
+   * When true, the collage card background won't navigate to `/notes/:id`
+   * (used for resource carousel popups).
+   */
+  disableNavigation?: boolean
+  /**
+   * Called when a note card is clicked (only when `disableNavigation=true`).
+   * Index is relative to the `notes` array (placeholders are not included).
+   */
+  onNoteClick?: (index: number) => void
+
+  showPlaceholder?: boolean
+  placeholderHref?: string
 }
 
 // Minimum card width in pixels
@@ -24,10 +42,36 @@ const MIN_CARD_WIDTH = 200
 const GAP = 16
 
 interface CardPosition {
-  noteId: string
+  itemId: string
   x: number
   y: number
   width: number
+}
+
+type NotesMasonryItem =
+  | { kind: 'note'; id: string; note: Note; index: number }
+  | { kind: 'placeholder'; id: string; href: string; label?: ReactNode; index: number }
+
+function PlaceholderCard({ href }: { href: string }) {
+  return (
+    <div className="w-full">
+      <Card variant="default" padding="none" className="relative overflow-hidden bg-gray-100">
+        <Link
+          href={href}
+          className="block w-full h-full cursor-pointer focus:outline-none rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors"
+          style={{ aspectRatio: '4 / 3', minHeight: '160px' }}
+          aria-label="Add resource"
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            <div className="flex items-center gap-2">
+              <Plus className="w-5 h-5" strokeWidth={2} aria-hidden />
+              <UIText>Add resource</UIText>
+            </div>
+          </div>
+        </Link>
+      </Card>
+    </div>
+  )
 }
 
 export function NotesMasonry({
@@ -40,11 +84,25 @@ export function NotesMasonry({
   onNoteRemovedFromPortfolio,
   onNoteLeftCollaboration,
   onCollaboratorsUpdated,
+  disableNavigation = false,
+  onNoteClick,
+  showPlaceholder = false,
+  placeholderHref,
 }: NotesMasonryProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [positions, setPositions] = useState<CardPosition[]>([])
   const [containerWidth, setContainerWidth] = useState(0)
+
+  const items: NotesMasonryItem[] = useMemo(
+    () => [
+      ...notes.map((note, index) => ({ kind: 'note' as const, id: note.id, note, index })),
+      ...(showPlaceholder && placeholderHref
+        ? [{ kind: 'placeholder' as const, id: 'resource-placeholder', href: placeholderHref, index: notes.length }]
+        : []),
+    ],
+    [notes, showPlaceholder, placeholderHref]
+  )
 
   // Calculate number of columns and card width
   const calculateLayout = useCallback(() => {
@@ -61,10 +119,9 @@ export function NotesMasonry({
     const columnHeights = new Array(numColumns).fill(0)
     const newPositions: CardPosition[] = []
 
-    // Process ALL notes in strict order to maintain row-first population
-    // This is critical: we must process notes in the exact order they appear
-    notes.forEach((note) => {
-      const cardElement = cardRefs.current.get(note.id)
+    // Process ALL items in strict order to maintain row-first population.
+    items.forEach((item) => {
+      const cardElement = cardRefs.current.get(item.id)
       
       // Skip if not measured yet - we'll recalculate when it's measured
       if (!cardElement || cardElement.offsetHeight === 0) {
@@ -97,7 +154,7 @@ export function NotesMasonry({
       const y = columnHeights[targetColumn]
 
       newPositions.push({
-        noteId: note.id,
+        itemId: item.id,
         x,
         y,
         width: cardWidth,
@@ -108,11 +165,11 @@ export function NotesMasonry({
     })
 
     setPositions(newPositions)
-  }, [notes])
+  }, [items])
 
   // Measure cards and recalculate layout
   useEffect(() => {
-    if (notes.length === 0) {
+    if (items.length === 0) {
       setPositions([])
       return
     }
@@ -126,8 +183,8 @@ export function NotesMasonry({
       attempts++
       
       // Check if all cards are mounted and have non-zero height
-      const allMounted = notes.every((note) => {
-        const card = cardRefs.current.get(note.id)
+      const allMounted = items.every((item) => {
+        const card = cardRefs.current.get(item.id)
         return card && card.offsetHeight > 0
       })
       
@@ -142,7 +199,7 @@ export function NotesMasonry({
     const timeoutId = setTimeout(checkAndCalculate, 100)
 
     return () => clearTimeout(timeoutId)
-  }, [notes, calculateLayout])
+  }, [items, calculateLayout])
 
   // Handle window resize
   useEffect(() => {
@@ -156,7 +213,7 @@ export function NotesMasonry({
 
   // Recalculate when card heights change (e.g., images load)
   useEffect(() => {
-    if (notes.length === 0) return
+    if (items.length === 0) return
 
     let debounceTimeout: NodeJS.Timeout | null = null
 
@@ -167,8 +224,8 @@ export function NotesMasonry({
       }
       debounceTimeout = setTimeout(() => {
         // Only recalculate if all cards are mounted and measured
-        const allMounted = notes.every((note) => {
-          const card = cardRefs.current.get(note.id)
+        const allMounted = items.every((item) => {
+          const card = cardRefs.current.get(item.id)
           return card && card.offsetHeight > 0
         })
         if (allMounted) {
@@ -188,19 +245,19 @@ export function NotesMasonry({
       }
       observer.disconnect()
     }
-  }, [notes, calculateLayout])
+  }, [items, calculateLayout])
 
-  if (notes.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="py-12 text-center">
-        <p className="text-gray-500">No notes yet.</p>
+        <UIText>No notes yet.</UIText>
       </div>
     )
   }
 
   // Calculate container height from positions
   const maxY = positions.reduce((max, pos) => {
-    const cardElement = cardRefs.current.get(pos.noteId)
+    const cardElement = cardRefs.current.get(pos.itemId)
     if (cardElement) {
       return Math.max(max, pos.y + cardElement.offsetHeight)
     }
@@ -209,19 +266,19 @@ export function NotesMasonry({
 
   return (
     <div ref={containerRef} className="w-full relative" style={{ minHeight: maxY > 0 ? `${maxY}px` : 'auto' }}>
-      {notes.map((note) => {
-        const position = positions.find((p) => p.noteId === note.id)
+      {items.map((item) => {
+        const position = positions.find((p) => p.itemId === item.id)
         const isPositioned = position !== undefined
 
         return (
           <div
-            key={note.id}
-            id={`note-${note.id}`}
+            key={item.id}
+            id={item.kind === 'note' ? `note-${item.note.id}` : item.id}
             ref={(el) => {
               if (el) {
-                cardRefs.current.set(note.id, el)
+                cardRefs.current.set(item.id, el)
               } else {
-                cardRefs.current.delete(note.id)
+                cardRefs.current.delete(item.id)
               }
             }}
             style={{
@@ -240,17 +297,25 @@ export function NotesMasonry({
                 </div>
               }
             >
-              <NoteCard
-                note={note}
-                portfolioId={portfolioId}
-                currentUserId={currentUserId}
-                isPinned={pinnedNoteIds.has(note.id)}
-                viewMode="collage"
-                onDeleted={onNoteDeleted}
-                onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
-                onLeftCollaboration={onNoteLeftCollaboration}
-                onCollaboratorsUpdated={onCollaboratorsUpdated}
-              />
+              {item.kind === 'note' ? (
+                <NoteCard
+                  note={item.note}
+                  portfolioId={portfolioId}
+                  currentUserId={currentUserId}
+                  isPinned={pinnedNoteIds.has(item.note.id)}
+                  viewMode="collage"
+                  disableNavigation={disableNavigation}
+                  onCardClick={
+                    disableNavigation && onNoteClick ? () => onNoteClick(item.index) : undefined
+                  }
+                  onDeleted={onNoteDeleted}
+                  onRemovedFromPortfolio={onNoteRemovedFromPortfolio}
+                  onLeftCollaboration={onNoteLeftCollaboration}
+                  onCollaboratorsUpdated={onCollaboratorsUpdated}
+                />
+              ) : (
+                <PlaceholderCard href={item.href} />
+              )}
             </LazyLoad>
           </div>
         )
