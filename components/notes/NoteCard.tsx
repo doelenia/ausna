@@ -19,7 +19,7 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
 import { useDataCache } from '@/lib/cache/useDataCache'
-import { MessageCircle, Heart, Lock, Megaphone, Hand, Send, UsersRound } from 'lucide-react'
+import { MessageCircle, Heart, Lock, Megaphone, Hand, Send, UsersRound, Folder } from 'lucide-react'
 import type { OpenCallMetadata } from '@/types/note'
 import { SendItemModal } from '@/components/messages/SendItemModal'
 import { buildLoginHref } from '@/lib/auth/login-redirect'
@@ -66,6 +66,13 @@ interface NoteCardProps {
    * When true, override the default card border styling (e.g. for special emphasis).
    */
   openCallBorder?: boolean
+
+  /**
+   * When true, clicking the card background will NOT navigate to `/notes/:id`.
+   * Instead, `onCardClick` will be called (used for resource carousel popup).
+   */
+  disableNavigation?: boolean
+  onCardClick?: () => void
 }
 
 export function NoteCard({
@@ -85,6 +92,8 @@ export function NoteCard({
   onCollaboratorsUpdated,
   isOpenCallPreview = false,
   openCallBorder = false,
+  disableNavigation = false,
+  onCardClick,
 }: NoteCardProps) {
   const useOrangeBorder = openCallBorder
   const isBrowser = typeof window !== 'undefined'
@@ -437,11 +446,12 @@ export function NoteCard({
   }, [showEditCollaboratorsModal, note.assigned_portfolios, editCollabSearchQuery])
 
   const isOpenCall = note.type === 'open_call'
+  const isResource = note.type === 'resource'
   const noteLink = typeof window !== 'undefined' ? `${window.location.origin}/notes/${note.id}` : `/notes/${note.id}`
 
   // Lazy load comments when showComments=true and card is in viewport (skip for open call)
   useEffect(() => {
-    if (isOpenCall || !showComments || commentsLoaded || isViewMode) return
+    if (isOpenCall || isResource || !showComments || commentsLoaded || isViewMode) return
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -464,11 +474,11 @@ export function NoteCard({
         observer.unobserve(cardRef.current)
       }
     }
-  }, [isOpenCall, showComments, commentsLoaded, isViewMode, note.id])
+  }, [isOpenCall, isResource, showComments, commentsLoaded, isViewMode, note.id])
 
   // Load like reactions (top 5) when note changes (skip for open call)
   useEffect(() => {
-    if (isOpenCall) return
+    if (isOpenCall || isResource) return
     let cancelled = false
     const loadReactions = async () => {
       try {
@@ -491,7 +501,7 @@ export function NoteCard({
     return () => {
       cancelled = true
     }
-  }, [note.id, isOpenCall])
+  }, [note.id, isOpenCall, isResource])
 
   const loadMoreReactions = async () => {
     if (reactionsLoading) return
@@ -596,6 +606,7 @@ export function NoteCard({
   const handleToggleLike = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (isResource) return
     if (!currentUserId) {
       router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
       return
@@ -1253,11 +1264,16 @@ export function NoteCard({
         className="bg-white border border-gray-200 rounded-xl relative overflow-hidden" 
         style={{ aspectRatio: '1 / 1', minHeight: '200px' }}
       >
-        <Link 
-          href={`/notes/${note.id}`} 
-          className="block relative w-full h-full cursor-pointer"
-          prefetch={true}
-        >
+        {disableNavigation ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onCardClick?.()
+            }}
+            className="block relative w-full h-full cursor-pointer"
+          >
           {/* Blurred and dimmed header image background */}
           {firstUrlRef!.headerImage && (
             <div className="absolute inset-0 z-0">
@@ -1309,7 +1325,66 @@ export function NoteCard({
               </div>
             </div>
           )}
-        </Link>
+          </button>
+        ) : (
+          <Link 
+            href={`/notes/${note.id}`} 
+            className="block relative w-full h-full cursor-pointer"
+            prefetch={true}
+          >
+            {/* Blurred and dimmed header image background */}
+            {firstUrlRef!.headerImage && (
+              <div className="absolute inset-0 z-0">
+                <img
+                  src={firstUrlRef!.headerImage}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  style={{
+                    filter: 'blur(20px) brightness(0.4)',
+                    transform: 'scale(1.1)', // Scale up to avoid blur edges
+                  }}
+                />
+              </div>
+            )}
+            
+            {/* Content overlay */}
+            <div className="relative z-10 h-full flex flex-col p-4">
+              {/* Top: Favicon and host name */}
+              <div className="flex items-center gap-2 mb-3">
+                <img
+                  src={displayHostIcon}
+                  alt={displayHostName}
+                  className="w-5 h-5 rounded flex-shrink-0"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement
+                    target.src = `https://www.google.com/s2/favicons?domain=${displayHostName}&sz=64`
+                  }}
+                />
+                <UIText as="span" className="text-white">
+                  {displayHostName}
+                </UIText>
+              </div>
+              
+              {/* Title */}
+              {firstUrlRef!.title && (
+                <Subtitle as="h3" className="text-white">
+                  {firstUrlRef!.title}
+                </Subtitle>
+              )}
+            </div>
+            
+            {/* Text label at bottom - positioned like image notes */}
+            {note.text && (
+              <div className="absolute bottom-0 left-0 right-0 p-2 z-10">
+                <div className="bg-white rounded-md px-2 py-1.5 w-fit max-w-full">
+                  <UIText as="p" className="line-clamp-2 whitespace-pre-wrap">
+                    {note.text}
+                  </UIText>
+                </div>
+              </div>
+            )}
+          </Link>
+        )}
         {visibilityCornerIcon}
       </div>
     )
@@ -1322,11 +1397,16 @@ export function NoteCard({
         className="bg-white border border-gray-200 rounded-xl relative overflow-hidden" 
         style={{ aspectRatio: getAspectRatio(), minHeight: '200px' }}
       >
-        <Link 
-          href={`/notes/${note.id}`} 
-          className="block relative w-full h-full cursor-pointer"
-          prefetch={true}
-        >
+        {disableNavigation ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onCardClick?.()
+            }}
+            className="block relative w-full h-full cursor-pointer"
+          >
           {/* Image fills the card */}
           <img
             ref={imageRef}
@@ -1345,7 +1425,33 @@ export function NoteCard({
               </div>
             </div>
           )}
-        </Link>
+          </button>
+        ) : (
+          <Link 
+            href={`/notes/${note.id}`} 
+            className="block relative w-full h-full cursor-pointer"
+            prefetch={true}
+          >
+            {/* Image fills the card */}
+            <img
+              ref={imageRef}
+              src={firstImage!.url}
+              alt={`Note image`}
+              className="absolute inset-0 w-full h-full object-cover"
+              onLoad={handleImageLoad}
+            />
+            {/* Text overlay at bottom */}
+            {note.text && (
+              <div className="absolute bottom-0 left-0 right-0 p-2 z-10">
+                <div className="bg-white rounded-md px-2 py-1.5 w-fit max-w-full">
+                  <UIText as="p" className="line-clamp-2 whitespace-pre-wrap">
+                    {note.text}
+                  </UIText>
+                </div>
+              </div>
+            )}
+          </Link>
+        )}
         {visibilityCornerIcon}
       </div>
     )
@@ -1653,6 +1759,13 @@ export function NoteCard({
       /* Regular layout: Header - Owner and Date (hidden in collage view) */
       !isCollageView && (
         <div className="px-3 pt-3">
+          {/* Resource header: place at top (matching Open Call header placement) */}
+          {isResource && (
+            <div className="mb-3 flex items-center gap-2">
+              <Folder className="w-5 h-5 text-gray-600" strokeWidth={1.5} aria-hidden />
+              <UIText as="span">Resource</UIText>
+            </div>
+          )}
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-3 flex-wrap">
               {loadingPortfolios ? (
@@ -1859,8 +1972,8 @@ export function NoteCard({
           <div className="mt-4">{openCallFooter}</div>
         )}
 
-        {/* Reactions & comments row (icons + like pill) - hidden for open call */}
-        {!isCollageView && !isOpenCall && (
+        {/* Reactions & comments row (icons + like pill) - hidden for open call and resources */}
+        {!isCollageView && !isOpenCall && !isResource && (
           <div className="mt-3 flex items-center justify-between gap-3">
             {/* Left: like + comment icons */}
             <div className="flex items-center gap-2">
@@ -1986,8 +2099,33 @@ export function NoteCard({
           </div>
         )}
 
+        {/* Resources: disable like/comment, but keep Send */}
+        {!isCollageView && !isOpenCall && isResource && (
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (!currentUserId) {
+                    router.push(buildLoginHref({ returnTo: getCurrentReturnTo() }))
+                    return
+                  }
+                  setShowSendModal(true)
+                }}
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+                aria-label="Send"
+                title="Send"
+              >
+                <Send className="w-5 h-5" strokeWidth={1.5} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Comment preview (feed view only, when enabled) */}
-        {showComments && !isViewMode && !isCollageView && !isOpenCall && commentCount !== null && commentCount > 0 && (
+        {showComments && !isViewMode && !isCollageView && !isOpenCall && !isResource && commentCount !== null && commentCount > 0 && (
           <div className="mt-3 flex flex-col gap-2">
             {commentCount > 0 && (
               <>
@@ -2424,6 +2562,10 @@ export function NoteCard({
     // Let inner links/buttons handle their own navigation
     const target = e.target as HTMLElement
     if (target.closest('a, button')) return
+    if (disableNavigation) {
+      onCardClick?.()
+      return
+    }
     router.push(`/notes/${note.id}`)
   }
 
@@ -2432,6 +2574,10 @@ export function NoteCard({
     const target = e.target as HTMLElement
     if (target.closest('a, button')) return
     e.preventDefault()
+    if (disableNavigation) {
+      onCardClick?.()
+      return
+    }
     router.push(`/notes/${note.id}`)
   }
 

@@ -71,11 +71,13 @@ export function OpenCallCarouselPopup({
 
   useEffect(() => {
     if (!currentUserId || !currentNote) return
+    // Only open_call notes support record-view / viewed_by tracking.
+    if (currentNote.type !== 'open_call') return
 
     fetch(`/api/notes/${currentNote.id}/record-view`, {
       method: 'POST',
     }).catch(() => {})
-  }, [currentNote?.id, currentUserId])
+  }, [currentNote?.id, currentUserId, currentNote?.type])
 
   useEffect(() => {
     if (!currentUserId || !currentNote) return
@@ -91,6 +93,7 @@ export function OpenCallCarouselPopup({
       if (!currentUserId) return
       const note = openCalls[index]
       if (!note) return
+      if (note.type !== 'open_call') return
       const meta = ((note.metadata as any) || {}) as any
       const viewedBy: string[] = Array.isArray(meta.viewed_by) ? meta.viewed_by : []
       const alreadyViewedOnServer = viewedBy.includes(currentUserId)

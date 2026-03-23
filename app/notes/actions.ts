@@ -7,7 +7,7 @@ import { requireAuth } from '@/lib/auth/requireAuth'
 import { Note, CreateNoteInput, NoteReference, UrlReference, type NoteVisibility } from '@/types/note'
 import { uploadNoteImage } from '@/lib/storage/note-images-server'
 import { fetchUrlMetadata } from '@/lib/notes/url-metadata'
-import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio, canAnnotateNote } from '@/lib/notes/helpers'
+import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio, canAnnotateNote, canCreateResourceInPortfolio } from '@/lib/notes/helpers'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
 import type { Portfolio } from '@/types/portfolio'
 
@@ -123,13 +123,18 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     // For new notes (not annotations or reactions), if a portfolio is assigned, user must be a member.
     const isAnnotation = !!mentionedNoteId && noteTypeRaw !== 'reaction'
     const isReaction = noteTypeRaw === 'reaction'
+    const isResourceRaw = noteTypeRaw === 'resource'
     if (portfolioIds.length === 1 && !isAnnotation && !isReaction) {
       const portfolioId = portfolioIds[0]
-      const canCreate = await canCreateNoteInPortfolio(portfolioId, user.id)
+      const canCreate = isResourceRaw
+        ? await canCreateResourceInPortfolio(portfolioId, user.id)
+        : await canCreateNoteInPortfolio(portfolioId, user.id)
       if (!canCreate) {
         return {
           success: false,
-          error: 'You must be a member of the portfolio to create notes',
+          error: isResourceRaw
+            ? 'You are not allowed to create resources in this portfolio'
+            : 'You must be a member of the portfolio to create notes',
         }
       }
     }
@@ -141,10 +146,10 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
         .select('id, type')
         .eq('id', mentionedNoteId)
         .maybeSingle()
-      if (parentNote?.type === 'open_call') {
+      if (parentNote?.type === 'open_call' || parentNote?.type === 'resource') {
         return {
           success: false,
-          error: 'Comments are not allowed on open calls',
+          error: 'Comments are not allowed on open calls/resources',
         }
       }
     }
@@ -190,8 +195,14 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     // - Explicit note_type from formData takes precedence (validated to the allowed set)
     // - Otherwise, infer 'annotation' when mentioning another note
     // - Fallback to 'post'
-    let noteType: 'post' | 'annotation' | 'reaction' | 'open_call' = 'post'
-    if (noteTypeRaw === 'post' || noteTypeRaw === 'annotation' || noteTypeRaw === 'reaction' || noteTypeRaw === 'open_call') {
+    let noteType: 'post' | 'annotation' | 'reaction' | 'open_call' | 'resource' = 'post'
+    if (
+      noteTypeRaw === 'post' ||
+      noteTypeRaw === 'annotation' ||
+      noteTypeRaw === 'reaction' ||
+      noteTypeRaw === 'open_call' ||
+      noteTypeRaw === 'resource'
+    ) {
       noteType = noteTypeRaw
     } else if (mentionedNoteId) {
       noteType = 'annotation'
@@ -199,6 +210,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
 
     // Open call: require title and build metadata (begin_date = post time, interested = [])
     const isOpenCall = noteType === 'open_call'
+    const isResource = noteType === 'resource'
     if (isOpenCall) {
       const openCallTitle = (formData.get('open_call_title') as string | null)?.trim()
       if (!openCallTitle) {
@@ -233,6 +245,64 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
+    // Resource limit enforcement:
+    // - Projects/activities/community: count resources assigned to that portfolio.
+    // - Human: count resources that are unassigned (assigned_portfolios is empty) and owned by the human user.
+    if (isResource) {
+      const RESOURCE_LIMIT = 6
+      let resourceCount = 0
+
+      if (portfolioIds.length === 1) {
+        const portfolioId = portfolioIds[0]
+        const { count, error } = await supabase
+          .from('notes')
+          .select('id', { count: 'exact', head: true })
+          .eq('type', 'resource')
+          .contains('assigned_portfolios', [portfolioId])
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+
+        if (!error && typeof count === 'number') {
+          resourceCount = count
+        }
+      } else {
+        // Human resources are counted when unassigned.
+        const { count, error } = await supabase
+          .from('notes')
+          .select('id', { count: 'exact', head: true })
+          .eq('type', 'resource')
+          .eq('owner_account_id', user.id)
+          .eq('assigned_portfolios', [])
+          .is('deleted_at', null)
+          .is('mentioned_note_id', null)
+
+        if (!error && typeof count === 'number') {
+          resourceCount = count
+        } else {
+          // Fallback (in case empty-array equality isn't supported in the current DB/client config).
+          const { data } = await supabase
+            .from('notes')
+            .select('assigned_portfolios')
+            .eq('type', 'resource')
+            .eq('owner_account_id', user.id)
+            .is('deleted_at', null)
+            .is('mentioned_note_id', null)
+            .limit(50)
+
+          resourceCount = (data || []).filter(
+            (n: any) => Array.isArray(n.assigned_portfolios) && n.assigned_portfolios.length === 0
+          ).length
+        }
+      }
+
+      if (resourceCount >= RESOURCE_LIMIT) {
+        return {
+          success: false,
+          error: `Resource limit reached (maximum ${RESOURCE_LIMIT} resources per portfolio).`,
+        }
+      }
+    }
+
     // Create note first (we need the ID for image uploads)
     const noteData: Omit<Note, 'id' | 'created_at' | 'updated_at'> = {
       type: noteType,
@@ -246,7 +316,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       annotations: [],
       deleted_at: null,
       primary_annotation: primaryAnnotation,
-      annotation_privacy: isOpenCall ? undefined : annotationPrivacy,
+      annotation_privacy: isOpenCall || isResource ? undefined : annotationPrivacy,
       visibility,
       ...(metadata ? { metadata } : {}),
     }
@@ -411,7 +481,8 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     }
 
     // Pin note if user requested it (only if user is owner and there's space)
-    if (shouldPin && portfolioIds.length > 0) {
+    // Resource notes are never pinned.
+    if (!isResource && shouldPin && portfolioIds.length > 0) {
       try {
         const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
         const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
@@ -1375,8 +1446,8 @@ export async function getAnnotationsByNote(
       .eq('id', noteId)
       .single()
 
-    // If the referenced note is deleted or is an open call, return empty
-    if (referencedNote && (referencedNote.deleted_at || referencedNote.type === 'open_call')) {
+    // If the referenced note is deleted or is an open call/resource (no comments), return empty
+    if (referencedNote && (referencedNote.deleted_at || referencedNote.type === 'open_call' || referencedNote.type === 'resource')) {
       return {
         success: true,
         annotations: [],

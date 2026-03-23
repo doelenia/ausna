@@ -262,9 +262,9 @@ export async function POST(
       )
     }
 
-    if (targetNote.type === 'open_call') {
+    if (targetNote.type === 'open_call' || targetNote.type === 'resource') {
       return NextResponse.json(
-        { error: 'Likes are not available for open calls' },
+        { error: 'Likes are not available for open calls/resources' },
         { status: 400 }
       )
     }

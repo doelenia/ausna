@@ -5,7 +5,8 @@ import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { redirect } from 'next/navigation'
-import { Content, UIText } from '@/components/ui'
+import { Button, Content, UIText } from '@/components/ui'
+import { canCreateResourceInPortfolio } from '@/lib/notes/helpers'
 
 interface CreateNotePageProps {
   searchParams: {
@@ -79,6 +80,12 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
     defaultPortfolioIds.push(sourcePortfolio.id)
   }
 
+  // When creating from a portfolio, also offer a quick path to create a Resource.
+  let canCreateResource = false
+  if (sourcePortfolio) {
+    canCreateResource = await canCreateResourceInPortfolio(sourcePortfolio.id, user.id)
+  }
+
   return (
     <div className="bg-white shadow rounded-lg p-6">
           {annotatedNote && (
@@ -97,6 +104,21 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
             mentionedNoteId={searchParams.annotate || undefined}
             redirectUrl="/main"
           />
+
+          {sourcePortfolio && canCreateResource && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <div className="flex items-center justify-between gap-4">
+                <UIText as="p">Prefer a Resource note instead?</UIText>
+                <Button
+                  asLink
+                  variant="secondary"
+                  href={`/notes/create/resource?portfolio=${encodeURIComponent(sourcePortfolio.id)}`}
+                >
+                  <UIText>Create Resource</UIText>
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
   )
 }

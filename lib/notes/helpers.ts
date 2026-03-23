@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio } from '@/types/portfolio'
+import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio, isActivityPortfolio } from '@/types/portfolio'
 
 /**
  * Check if user is a member of a portfolio (server-side)
@@ -70,6 +70,57 @@ export async function canCreateNoteInPortfolio(
   userId: string
 ): Promise<boolean> {
   return isPortfolioMember(portfolioId, userId)
+}
+
+/**
+ * Check if a user can create a "resource" note in a portfolio.
+ *
+ * Rules:
+ * - Human portfolios: only the owner can create resources (resources are unassigned; visibility is owner-scoped).
+ * - Projects/Community: only owner or manager can create resources.
+ * - Activities:
+ *   - external activity: owner/manager/member can create resources
+ *   - non-external: only owner/manager can create resources
+ */
+export async function canCreateResourceInPortfolio(
+  portfolioId: string,
+  userId: string
+): Promise<boolean> {
+  if (!userId) return false
+
+  const supabase = await createClient()
+
+  const { data: portfolio, error } = await supabase
+    .from('portfolios')
+    .select('user_id, type, metadata')
+    .eq('id', portfolioId)
+    .single()
+
+  if (error || !portfolio) return false
+
+  // Owner can always create
+  const isOwner = portfolio.user_id === userId
+  if (isHumanPortfolio(portfolio as Portfolio)) return isOwner
+
+  const metadata = portfolio.metadata as any
+  const managers = metadata?.managers || []
+  const isManager = Array.isArray(managers) && managers.includes(userId)
+
+  if (isActivityPortfolio(portfolio as Portfolio)) {
+    const properties = metadata?.properties || {}
+    const isExternalActivity = properties?.external === true
+
+    if (isExternalActivity) {
+      const members = metadata?.members || []
+      const isMember = Array.isArray(members) && members.includes(userId)
+      return isOwner || isManager || isMember
+    }
+
+    return isOwner || isManager
+  }
+
+  // Projects/Community
+  return isOwner || isManager
 }
 
 /**

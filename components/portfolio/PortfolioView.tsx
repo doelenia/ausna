@@ -5,6 +5,7 @@ import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
 import { NotesFeed } from './NotesFeed'
+import { ResourcesSection } from './ResourcesSection'
 import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
 import { DescriptionViewerPopup } from './DescriptionPopups'
@@ -1749,6 +1750,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           {/* Overview tab */}
           {activeTab === 'overview' && (
             <>
+          {/* Resources section (Overview only) */}
+          <ResourcesSection
+            portfolioId={portfolio.id}
+            portfolioType={portfolio.type}
+            currentUserId={currentUserId}
+          />
+
           {/* Projects Row (for all visitors, human portfolios only) */}
           {isHumanPortfolio(portfolio) && (
             <div className="mt-4 mb-8 group">

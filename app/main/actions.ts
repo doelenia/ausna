@@ -422,6 +422,7 @@ export async function getFeedNotes(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null) // Exclude annotations
+        .neq('type', 'resource')
         .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(publicLimit)
@@ -458,6 +459,7 @@ export async function getFeedNotes(
       .select('*')
       .is('deleted_at', null)
       .is('mentioned_note_id', null) // Exclude annotations
+      .neq('type', 'resource')
       .order('created_at', { ascending: false })
       .range(rangeStart, rangeEnd)
 
@@ -475,6 +477,7 @@ export async function getFeedNotes(
               .select('*')
               .is('deleted_at', null)
               .is('mentioned_note_id', null)
+              .neq('type', 'resource')
               .in('owner_account_id', friendIds)
               .order('created_at', { ascending: false })
               .range(rangeStart, rangeEnd)
@@ -484,6 +487,7 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
+          .neq('type', 'resource')
           .eq('owner_account_id', user.id)
           .order('created_at', { ascending: false })
           .range(rangeStart, rangeEnd),
@@ -492,6 +496,7 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
+          .neq('type', 'resource')
           .contains('collaborator_account_ids', [user.id])
           .order('created_at', { ascending: false })
           .limit(rangeEnd - rangeStart + 1),
@@ -574,6 +579,7 @@ export async function getFeedNotes(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
+          .neq('type', 'resource')
           .in('owner_account_id', allUserIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit)
@@ -596,6 +602,7 @@ export async function getFeedNotes(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
+        .neq('type', 'resource')
         .contains('collaborator_account_ids', [user.id])
         .order('created_at', { ascending: false })
         .limit(poolLimit)
@@ -612,6 +619,7 @@ export async function getFeedNotes(
             .select('*')
             .is('deleted_at', null)
             .is('mentioned_note_id', null) // Exclude annotations
+            .neq('type', 'resource')
             .order('created_at', { ascending: false })
             .limit(poolLimit)
 
@@ -771,6 +779,7 @@ export async function getFeedItemsForUserId(
               .select('*')
               .is('deleted_at', null)
               .is('mentioned_note_id', null)
+              .neq('type', 'resource')
               .in('owner_account_id', friendIds)
               .order('created_at', { ascending: false })
               .limit(poolLimit)
@@ -780,6 +789,7 @@ export async function getFeedItemsForUserId(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
+          .neq('type', 'resource')
           .contains('collaborator_account_ids', [userId])
           .order('created_at', { ascending: false })
           .limit(poolLimit),
@@ -842,6 +852,7 @@ export async function getFeedItemsForUserId(
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
+          .neq('type', 'resource')
           .in('owner_account_id', memberIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit),
@@ -904,6 +915,7 @@ export async function getFeedItemsForUserId(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
+        .neq('type', 'resource')
         .in('owner_account_id', allUserIds)
         .order('created_at', { ascending: false })
         .limit(poolLimit)
@@ -916,6 +928,7 @@ export async function getFeedItemsForUserId(
       .select('*')
       .is('deleted_at', null)
       .is('mentioned_note_id', null)
+      .neq('type', 'resource')
       .contains('collaborator_account_ids', [userId])
       .order('created_at', { ascending: false })
       .limit(poolLimit)
@@ -929,6 +942,7 @@ export async function getFeedItemsForUserId(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
+        .neq('type', 'resource')
         .order('created_at', { ascending: false })
         .limit(poolLimit)
       if (!portfolioError && portfolioNotesData) {
@@ -1046,6 +1060,7 @@ export async function getFeedItems(
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
+        .neq('type', 'resource')
         .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(publicLimit)
