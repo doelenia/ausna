@@ -134,6 +134,7 @@ export async function GET(
     }
     const filteredNotesRaw = (notesRes.data || []).filter((note: any) => {
       if (note?.type === 'open_call') return false
+      if (note?.type === 'resource') return false
       if (mustBeAssigned) {
         const assigned = Array.isArray(note.assigned_portfolios) ? note.assigned_portfolios : []
         if (!assigned.some((id: string) => validPortfolioIds.has(id))) return false

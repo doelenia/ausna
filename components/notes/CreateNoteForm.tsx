@@ -54,6 +54,8 @@ interface CreateNoteFormProps {
   onCancel?: () => void
   /** When true, form is for creating an open call (title, end date; no comment/collection settings) */
   isOpenCall?: boolean
+  /** When true, form is for creating a resource note (no annotation privacy / collections / pin) */
+  isResource?: boolean
 }
 
 type ReferenceType = 'none' | 'image' | 'url'
@@ -71,6 +73,7 @@ export function CreateNoteForm({
   onSuccess,
   onCancel,
   isOpenCall = false,
+  isResource = false,
 }: CreateNoteFormProps) {
   const router = useRouter()
   const [text, setText] = useState('')
@@ -1047,6 +1050,8 @@ export function CreateNoteForm({
         if (openCallEndDate) {
           formData.append('open_call_end_date', openCallEndDate.toISOString())
         }
+      } else if (isResource) {
+        formData.append('note_type', 'resource')
       } else {
         if (!mentionedNoteId) {
           formData.append('annotation_privacy', annotationPrivacy)
@@ -1060,7 +1065,7 @@ export function CreateNoteForm({
       formData.append('visibility', visibility)
 
       // Add pin preference if user wants to pin
-      if (shouldPin && pinInfo?.canPin) {
+      if (!isResource && shouldPin && pinInfo?.canPin) {
         formData.append('should_pin', 'true')
       }
 
@@ -1946,7 +1951,7 @@ export function CreateNoteForm({
       )}
 
       {/* Pin option - only show if user is owner and there's space */}
-      {selectedContextId && pinInfo?.canPin && (
+      {!isResource && selectedContextId && pinInfo?.canPin && (
         <div>
           <label className="flex items-center gap-2">
             <input
@@ -2047,7 +2052,7 @@ export function CreateNoteForm({
             </div>
 
             {/* Collection selection - only show if a context portfolio is selected (hidden for open call) */}
-            {!isOpenCall && selectedContextId && (
+            {!isOpenCall && !isResource && selectedContextId && (
               <div>
                 <UIText as="label" className="block mb-2">
                   Collections (optional)
@@ -2112,7 +2117,15 @@ export function CreateNoteForm({
           variant="primary"
           disabled={isSubmitting || !text.trim()}
         >
-          <UIText>{isSubmitting ? 'Creating...' : isOpenCall ? 'Create Open call' : 'Create Note'}</UIText>
+          <UIText>
+            {isSubmitting
+              ? 'Creating...'
+              : isOpenCall
+                ? 'Create Open call'
+                : isResource
+                  ? 'Create Resource'
+                  : 'Create Note'}
+          </UIText>
         </Button>
         {onCancel && (
           <Button

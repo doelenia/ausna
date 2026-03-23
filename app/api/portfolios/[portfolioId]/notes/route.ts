@@ -129,6 +129,9 @@ export async function GET(
       if (note.type === 'open_call') {
         return false
       }
+      if (note.type === 'resource') {
+        return false
+      }
       if (noteIdsInCollection && !noteIdsInCollection.includes(note.id)) {
         return false
       }

@@ -63,6 +63,7 @@ export function NoteView({
   const [pendingCollaboratorInviteId, setPendingCollaboratorInviteId] = useState<string | null>(null)
   const [acceptingInvite, setAcceptingInvite] = useState(false)
   const isOpenCall = note.type === 'open_call'
+  const isResource = note.type === 'resource'
   const supabaseRef = useRef(createClient())
   const humanPortfoliosRef = useRef(humanPortfolios)
   humanPortfoliosRef.current = humanPortfolios
@@ -496,7 +497,7 @@ export function NoteView({
       />
 
       {/* Comment bar + comments section (scroll target for #comments from feed) - hidden for open call */}
-      {!isOpenCall && (
+      {!isOpenCall && !isResource && (
       <div id="comments" className="w-full">
         {/* Annotation Composer - Desktop (inline); same Card as comments section */}
         {!isMobile && (
@@ -573,7 +574,7 @@ export function NoteView({
       )}
 
       {/* Annotation Composer - Mobile (fixed at bottom) - hidden for open call */}
-      {isMobile && !isOpenCall && (
+      {isMobile && !isOpenCall && !isResource && (
         !currentUserId ? (
           <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-50">
             <Button variant="primary" fullWidth onClick={() => router.push(loginToCommentHref)}>

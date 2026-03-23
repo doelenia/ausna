@@ -51,8 +51,9 @@ export interface Note {
    * - 'annotation': comment/annotation on another note
    * - 'reaction': lightweight reaction (e.g. like) on another note
    * - 'open_call': open call (no comments/likes; has metadata title, interested, dates)
+   * - 'resource': portfolio-only resource (shown in Overview; no dedicated metadata title)
    */
-  type: 'post' | 'annotation' | 'reaction' | 'open_call'
+  type: 'post' | 'annotation' | 'reaction' | 'open_call' | 'resource'
   owner_account_id: string
   /**
    * Extra structural data per note type. For open_call: title, interested, begin_date, end_date.
@@ -105,7 +106,7 @@ export type NoteVisibility = 'public' | 'friends' | 'private' | 'members'
  */
 export interface CreateNoteInput {
   text: string
-  type?: 'post' | 'annotation' | 'reaction' | 'open_call'
+  type?: 'post' | 'annotation' | 'reaction' | 'open_call' | 'resource'
   references?: NoteReference[]
   assigned_portfolios?: string[]
   collaborator_account_ids?: string[]
@@ -119,7 +120,7 @@ export interface CreateNoteInput {
  */
 export interface UpdateNoteInput {
   text?: string
-  type?: 'post' | 'annotation' | 'reaction' | 'open_call'
+  type?: 'post' | 'annotation' | 'reaction' | 'open_call' | 'resource'
   references?: NoteReference[]
   assigned_portfolios?: string[]
   collaborator_account_ids?: string[]
