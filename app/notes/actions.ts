@@ -1601,39 +1601,47 @@ export async function createAnnotation(
     const portfolioId = formData.get('portfolio_id') as string | null
     const targetNotePortfolios = targetNote.assigned_portfolios || []
 
-    // Validate target note has exactly one project assigned
-    if (targetNotePortfolios.length !== 1) {
+    if (targetNotePortfolios.length > 1) {
       return {
         success: false,
-        error: 'Cannot annotate: target note must be assigned to exactly one project',
+        error: 'Cannot annotate: target note has invalid portfolio assignment',
       }
     }
 
-    const targetProjectId = targetNotePortfolios[0]
+    let targetProjectId: string | null = null
+    if (targetNotePortfolios.length === 1) {
+      targetProjectId = targetNotePortfolios[0]
+      const { data: targetProject, error: projectError } = await supabase
+        .from('portfolios')
+        .select('type')
+        .eq('id', targetProjectId)
+        .single()
 
-    // Validate the target project exists and is a project type
-    const { data: targetProject, error: projectError } = await supabase
-      .from('portfolios')
-      .select('type')
-      .eq('id', targetProjectId)
-      .single()
+      if (projectError || !targetProject) {
+        return {
+          success: false,
+          error: 'Target project not found',
+        }
+      }
 
-    if (projectError || !targetProject) {
-      return {
-        success: false,
-        error: 'Target project not found',
+      if (targetProject.type !== 'projects') {
+        return {
+          success: false,
+          error: 'Target note must be assigned to a project',
+        }
+      }
+    } else {
+      // Unassigned note: comment stays unassigned; do not pass a project id for the thread
+      if (portfolioId) {
+        return {
+          success: false,
+          error:
+            'Cannot assign a project when commenting on a note that is not in a project',
+        }
       }
     }
 
-    if (targetProject.type !== 'projects') {
-      return {
-        success: false,
-        error: 'Target note must be assigned to a project',
-      }
-    }
-
-    // If portfolio is provided, validate it matches the target note's project
-    if (portfolioId && portfolioId !== targetProjectId) {
+    if (targetProjectId && portfolioId && portfolioId !== targetProjectId) {
       return {
         success: false,
         error: 'Annotation must be assigned to the same project as the target note',
@@ -1696,7 +1704,10 @@ export async function createAnnotation(
     formData.append('mentioned_note_id', noteId)
     formData.append('parent_note_id', parentNoteId)
     formData.append('primary_annotation', newPrimaryAnnotation ? 'true' : 'false')
-    formData.append('assigned_portfolios', JSON.stringify([targetProjectId]))
+    formData.append(
+      'assigned_portfolios',
+      JSON.stringify(targetProjectId ? [targetProjectId] : [])
+    )
 
     // Create the annotation note
     const result = await createNote(formData)
