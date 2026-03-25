@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { lookupCityLocationFromIp } from '@/lib/geoip'
-import { buildLoginHref, getReturnToFromUrl } from '@/lib/auth/login-redirect'
+import { buildLoginHref, getReturnToFromUrl, sanitizeReturnTo } from '@/lib/auth/login-redirect'
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -83,6 +83,29 @@ export async function updateSession(request: NextRequest) {
       redirectResponse.cookies.set(cookie.name, cookie.value)
     })
     return redirectResponse
+  }
+
+  // Don't allow authenticated (non-blocked) users to view login/signup pages.
+  if (
+    user &&
+    (request.nextUrl.pathname.startsWith('/login') ||
+      request.nextUrl.pathname.startsWith('/signup'))
+  ) {
+    const metadata = user.user_metadata || {}
+    const isBlocked = metadata.is_blocked === true
+
+    if (!isBlocked) {
+      const returnTo = sanitizeReturnTo(
+        request.nextUrl.searchParams.get('returnTo')
+      )
+      const redirectResponse = NextResponse.redirect(
+        new URL(returnTo, request.nextUrl.origin)
+      )
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
   }
 
   // Admin routes - require admin access
