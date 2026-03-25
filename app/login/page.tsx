@@ -1,15 +1,35 @@
 import { AuthForm } from '@/components/auth/AuthForm'
 import Link from 'next/link'
-import { Title, Content, UIText } from '@/components/ui'
+import { Title, UIText } from '@/components/ui'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { sanitizeReturnTo } from '@/lib/auth/login-redirect'
 
 interface LoginPageProps {
   searchParams: {
     password_reset?: string
     error?: string
+    returnTo?: string
   }
 }
 
-export default function LoginPage({ searchParams }: LoginPageProps) {
+export default async function LoginPage({ searchParams }: LoginPageProps) {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  // If already logged in, don't show the login page.
+  // Blocked users are allowed to stay on login.
+  if (user) {
+    const metadata = user.user_metadata || {}
+    const isBlocked = metadata.is_blocked === true
+
+    if (!isBlocked) {
+      redirect(sanitizeReturnTo(searchParams?.returnTo))
+    }
+  }
+
   const passwordResetSuccess = searchParams?.password_reset === 'success'
 
   return (

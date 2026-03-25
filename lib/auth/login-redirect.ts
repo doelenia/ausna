@@ -14,6 +14,13 @@ export function sanitizeReturnTo(value: string | null | undefined): string {
     return DEFAULT_RETURN_TO
   }
 
+  // Never allow redirecting back to the login/signup pages after auth.
+  // This prevents loops like: protected -> /login?returnTo=/login -> post-login -> /login.
+  const pathOnly = raw.split(/[?#]/)[0]
+  if (pathOnly === '/login' || pathOnly === '/signup') {
+    return DEFAULT_RETURN_TO
+  }
+
   return raw
 }
 
