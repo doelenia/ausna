@@ -86,7 +86,7 @@ export default async function CommunitiesPage({ params }: CommunitiesPageProps) 
   const { data: allCommunities } = await supabase
     .from('portfolios')
     .select('id, metadata')
-    .eq('type', 'community')
+    .eq('type', 'portfolio')
     .order('created_at', { ascending: false })
     .limit(500)
 

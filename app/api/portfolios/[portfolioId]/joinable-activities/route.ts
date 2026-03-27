@@ -78,32 +78,31 @@ function activityMatchesTargetPortfolio(activity: ActivityRow, target: { id: str
     return hostedByHuman || going
   }
 
-  if (target.type === 'projects') {
+  if (target.type === 'portfolio') {
     const hostProjectIds: string[] = Array.isArray(props?.host_project_ids) ? props.host_project_ids : []
-    const legacyHost = activity.host_project_id
-    return hostProjectIds.includes(target.id) || (legacyHost ? legacyHost === target.id : false)
-  }
+    const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids)
+      ? props.host_community_ids
+      : []
+    const legacyHost = activity.host_project_id ? [activity.host_project_id] : []
+    const candidateHosts = [...hostProjectIds, ...hostCommunityIds, ...legacyHost]
 
-  if (target.type === 'community') {
-    const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids) ? props.host_community_ids : []
-    return hostCommunityIds.includes(target.id)
-  }
+    // Direct host mapping
+    if (candidateHosts.includes(target.id)) return true
 
-  if (target.type === 'activities') {
+    // Host overlap mapping (legacy behavior for previously activity-like entities)
     const targetProps = (target.metadata as any)?.properties || {}
     const targetHostProjects: string[] = Array.isArray(targetProps?.host_project_ids) ? targetProps.host_project_ids : []
     const targetHostCommunities: string[] = Array.isArray(targetProps?.host_community_ids) ? targetProps.host_community_ids : []
-    const legacyHost = target.host_project_id ? [target.host_project_id] : []
+    const targetLegacyHost = target.host_project_id ? [target.host_project_id] : []
 
-    const targetHostSet = new Set<string>([...targetHostProjects, ...targetHostCommunities, ...legacyHost])
+    const targetHostSet = new Set<string>([
+      ...targetHostProjects,
+      ...targetHostCommunities,
+      ...targetLegacyHost,
+    ])
     if (targetHostSet.size === 0) return false
 
-    const candidateHostProjects: string[] = Array.isArray(props?.host_project_ids) ? props.host_project_ids : []
-    const candidateHostCommunities: string[] = Array.isArray(props?.host_community_ids) ? props.host_community_ids : []
-    const candidateLegacy = activity.host_project_id ? [activity.host_project_id] : []
-    const candidateHostAll = [...candidateHostProjects, ...candidateHostCommunities, ...candidateLegacy]
-
-    return candidateHostAll.some((id) => targetHostSet.has(id))
+    return candidateHosts.some((id) => targetHostSet.has(id))
   }
 
   return false
@@ -141,7 +140,7 @@ export async function GET(
     const { data: activitiesRaw } = await supabase
       .from('portfolios')
       .select('id, user_id, host_project_id, visibility, metadata')
-      .eq('type', 'activities')
+      .eq('type', 'portfolio')
       .limit(500)
 
     const activities = ((activitiesRaw || []) as ActivityRow[])

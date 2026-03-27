@@ -284,7 +284,7 @@ async function getCommunityMemberIds(
     .from('portfolios')
     .select('user_id, metadata')
     .eq('id', communityId)
-    .eq('type', 'community')
+    .eq('type', 'portfolio')
     .maybeSingle()
 
   if (!community) {
@@ -314,7 +314,7 @@ async function getUserCommunitiesMap(
   const { data: allCommunities } = await supabase
     .from('portfolios')
     .select('id, user_id, metadata')
-    .eq('type', 'community')
+    .eq('type', 'portfolio')
 
   const communitiesMap = new Map<string, { id: string; name: string; members: string[] }>()
 
@@ -763,11 +763,7 @@ export async function getFeedItemsForUserId(
     const poolTarget = offset + limit + 1
     const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
-    const portfolioTypes: Array<'projects' | 'activities' | 'community'> = [
-      'projects',
-      'activities',
-      'community',
-    ]
+    const portfolioTypes: Array<'portfolio'> = ['portfolio']
 
     if (feedType === 'friends') {
       const friendIds = await getFriendIds(userId, supabase)
@@ -1132,7 +1128,7 @@ export async function getUserCommunities(): Promise<GetUserCommunitiesResult> {
     const { data: allCommunities, error } = await supabase
       .from('portfolios')
       .select('id, user_id, slug, metadata')
-      .eq('type', 'community')
+      .eq('type', 'portfolio')
       .order('created_at', { ascending: false })
 
     if (error) {

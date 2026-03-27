@@ -50,7 +50,7 @@ export async function PUT(
     }
 
     // Only projects and communities have member roles
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+    if (portfolio.type === 'human') {
       return NextResponse.json(
         { error: 'Only projects and communities have member roles' },
         { status: 400 }

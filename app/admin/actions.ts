@@ -440,7 +440,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
     const { data: ownedProjects, error: projectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
       .eq('user_id', userId)
 
     if (projectsError) {
@@ -491,7 +491,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
     const { data: allProjects, error: allProjectsError } = await serviceClient
       .from('portfolios')
       .select('id, user_id, metadata')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
 
     if (allProjectsError) {
       console.error('Error fetching all projects:', allProjectsError)
@@ -541,7 +541,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
     const { data: allCommunities, error: communitiesError } = await serviceClient
       .from('portfolios')
       .select('id, user_id, metadata')
-      .eq('type', 'community')
+      .eq('type', 'portfolio')
 
     if (communitiesError) {
       console.error('Error fetching communities:', communitiesError)
@@ -921,7 +921,7 @@ export async function approveUser(userId: string, approve: boolean): Promise<App
     const { error: updateProjectsError } = await serviceClient
       .from('portfolios')
       .update({ is_pseudo: nextIsPseudo })
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
       .eq('user_id', userId)
 
     if (updateProjectsError) {
@@ -1632,7 +1632,7 @@ export async function createHumanPortfolioWithProjects(
         const { data: existing } = await supabase
           .from('portfolios')
           .select('id')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .eq('slug', slug)
           .maybeSingle()
 
@@ -2006,7 +2006,7 @@ export async function reprocessApprovedForm(
     const { data: pseudoProjects, error: projectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
       .eq('user_id', userId)
       .eq('is_pseudo', true)
 
@@ -2112,7 +2112,7 @@ export async function reprocessApprovedForm(
       const { data: allCommunities, error: communitiesError } = await serviceClient
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'community')
+        .eq('type', 'portfolio')
 
       if (!communitiesError && allCommunities) {
         for (const community of allCommunities) {
@@ -2326,7 +2326,7 @@ export async function getMatchData(userId: string): Promise<GetMatchDataResult> 
     const { data: allProjects, error: projectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata, created_at, updated_at, user_id, is_pseudo')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
 
     if (projectsError) {
       console.error('Error fetching projects:', projectsError)
@@ -2708,7 +2708,7 @@ export async function getMatchExplanation(
     const { data: searcherProjects, error: searcherProjectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
 
     if (searcherProjectsError) {
       console.error('Error fetching searcher projects:', searcherProjectsError)
@@ -2741,7 +2741,7 @@ export async function getMatchExplanation(
     const { data: targetProjects, error: targetProjectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
 
     if (targetProjectsError) {
       console.error('Error fetching target projects:', targetProjectsError)
@@ -3224,7 +3224,7 @@ export async function getMatchBreakdown(
             .from('portfolios')
             .select('id, metadata')
             .in('id', missingProjectIds)
-            .eq('type', 'projects')
+            .eq('type', 'portfolio')
 
           ;(fetchedProjects || []).forEach((p: any) => {
             const meta = (p.metadata as any) || {}
@@ -3245,7 +3245,7 @@ export async function getMatchBreakdown(
           .from('portfolios')
           .select('id, metadata')
           .in('id', Array.from(projectIdsFromSource))
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
 
         ;(fetchedProjects || []).forEach((p: any) => {
           const meta = (p.metadata as any) || {}

@@ -178,7 +178,7 @@ export function CreateActivityForm({
         const { data: projects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         const options: HostProjectOption[] =
@@ -233,7 +233,7 @@ export function CreateActivityForm({
         const { data: communities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'community')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         const options: HostCommunityOption[] =

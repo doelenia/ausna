@@ -279,7 +279,7 @@ export async function getExploreActivities(userId: string): Promise<GetExploreAc
         supabase
           .from('portfolios')
           .select('id, user_id, host_project_id, visibility, metadata')
-          .eq('type', 'activities')
+          .eq('type', 'portfolio')
           .limit(500),
       ])
 
@@ -580,14 +580,14 @@ async function buildHighlightMetadata(
       ? supabase
           .from('portfolios')
           .select('id, metadata')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .in('id', Array.from(hostProjectIdsAll))
       : Promise.resolve({ data: [] as any[], error: null }),
     hostCommunityIdsAll.size > 0
       ? supabase
           .from('portfolios')
           .select('id, metadata')
-          .eq('type', 'community')
+          .eq('type', 'portfolio')
           .in('id', Array.from(hostCommunityIdsAll))
       : Promise.resolve({ data: [] as any[], error: null }),
     friendIdsAll.size > 0
@@ -855,14 +855,14 @@ async function computeAndStoreDailyExploreMatch(
           ? supabase
               .from('portfolios')
               .select('id, metadata')
-              .eq('type', 'projects')
+              .eq('type', 'portfolio')
               .in('id', Array.from(hostProjectIdsAll))
           : Promise.resolve({ data: [] as any[], error: null }),
         hostCommunityIdsAll.size > 0
           ? supabase
               .from('portfolios')
               .select('id, metadata')
-              .eq('type', 'community')
+              .eq('type', 'portfolio')
               .in('id', Array.from(hostCommunityIdsAll))
           : Promise.resolve({ data: [] as any[], error: null }),
         friendIdsAll.size > 0
@@ -881,7 +881,7 @@ async function computeAndStoreDailyExploreMatch(
         supabase
           .from('portfolios')
           .select('metadata')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .eq('user_id', userId)
           .limit(5),
       ])

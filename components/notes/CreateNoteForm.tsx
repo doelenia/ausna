@@ -279,19 +279,19 @@ export function CreateNoteForm({
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         const { data: allActivities } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'activities')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         const { data: allCommunities } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'community')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         const projects = (allProjects || [])
