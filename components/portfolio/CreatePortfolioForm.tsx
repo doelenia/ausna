@@ -164,7 +164,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
 
       // Redirect to the new portfolio
       // Use window.location for a full page navigation to ensure fresh data
-      const redirectUrl = `/portfolio/${type}/${result.portfolioId}`
+      const redirectUrl = `/portfolio/${result.portfolioId}`
       if (process.env.NODE_ENV === 'development') {
         console.log('Redirecting to:', redirectUrl, { type, portfolioId: result.portfolioId })
       }

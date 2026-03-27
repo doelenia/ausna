@@ -6,7 +6,27 @@ export type PortfolioVisibility = 'public' | 'private'
 /**
  * Base portfolio types that all portfolio types extend
  */
-export type PortfolioType = 'human' | 'projects' | 'community' | 'activities'
+/**
+ * Canonical portfolio discriminator.
+ *
+ * We only distinguish "human" vs "portfolio" in application code.
+ * Legacy DB values (projects/community/activities) should be migrated to 'portfolio'.
+ */
+export type PortfolioType = 'human' | 'portfolio'
+
+export type LegacyNonHumanPortfolioType = 'projects' | 'community' | 'activities'
+
+export function normalizePortfolioType(
+  type: string | null | undefined
+): PortfolioType | null {
+  if (!type) return null
+  const t = String(type).toLowerCase()
+  if (t === 'human') return 'human'
+  if (t === 'portfolio') return 'portfolio'
+  // Backward compatibility while DB migration is pending
+  if (t === 'projects' || t === 'community' || t === 'activities') return 'portfolio'
+  return null
+}
 
 /**
  * Basic metadata fields shared by all portfolios
@@ -133,7 +153,7 @@ export interface ProjectPortfolioAsk {
 /**
  * Project portfolio properties template
  */
-export interface ProjectPortfolioProperties {
+export interface PortfolioProperties {
   goals?: string
   timelines?: string
   asks?: ProjectPortfolioAsk[]
@@ -144,7 +164,22 @@ export interface ProjectPortfolioProperties {
     allDay?: boolean
   }
   location?: ActivityLocationValue
+  /**
+   * Optional call-to-join configuration controlling how non-members can apply
+   * to join this portfolio.
+   *
+   * Note: historically activities supported this first; we now allow any
+   * non-human portfolio to use the same model.
+   */
+  call_to_join?: ActivityCallToJoinConfig
+  /** When true, this portfolio represents an external item linked elsewhere. */
+  external?: boolean
+  /** URL to the external item (when external is true). */
+  external_link?: string
 }
+
+// Backward compatible alias (avoid churn elsewhere while refactoring)
+export type ProjectPortfolioProperties = PortfolioProperties
 
 export interface ActivityCallToJoinRoleOption {
   id: string
@@ -187,39 +222,16 @@ export interface ActivityCallToJoinConfig {
  * Mirrors ProjectPortfolioProperties so activities can carry their own
  * goals, asks, and scheduling/location information.
  */
-export interface ActivityPortfolioProperties {
-  /** Portfolio IDs of projects that host this activity (owner/managers can add their projects). */
+export interface ActivityPortfolioProperties extends PortfolioProperties {
+  /** Legacy: host references (kept until DB migration removes activity concept). */
   host_project_ids?: string[]
-  /** Portfolio IDs of communities that host this activity (owner/managers can add their communities). */
   host_community_ids?: string[]
-  goals?: string
-  timelines?: string
-  asks?: ProjectPortfolioAsk[]
-  activity_datetime?: {
-    start: string
-    end?: string | null
-    inProgress?: boolean
-    allDay?: boolean
-  }
-  location?: ActivityLocationValue
-  /**
-   * Optional call-to-join configuration controlling how non-members can apply
-   * to join this activity.
-   */
-  call_to_join?: ActivityCallToJoinConfig
-  /**
-   * When true, this activity is an external event (link to external site).
-   * External activities are publicly joinable without approval; owner/manager cannot remove members.
-   */
-  external?: boolean
-  /** URL to the external event (when external is true). */
-  external_link?: string
 }
 
 /**
  * Project portfolio metadata
  */
-export interface ProjectPortfolioMetadata extends PortfolioMetadata {
+export interface PortfolioEntityMetadata extends PortfolioMetadata {
   members: string[] // Array of user IDs (includes owner)
   managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
   project_type_general?: string // General category (e.g., "Arts & Culture")
@@ -232,55 +244,24 @@ export interface ProjectPortfolioMetadata extends PortfolioMetadata {
   collaborators?: string[]
   start_date?: string
   end_date?: string
-  properties?: ProjectPortfolioProperties
+  properties?: PortfolioProperties
   [key: string]: any
 }
 
 /**
  * Community portfolio metadata
  */
-export interface CommunityPortfolioMetadata extends PortfolioMetadata {
-  members: string[] // Array of user IDs (includes owner)
-  managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
-  project_type_general?: string // General category (e.g., "Arts & Culture")
-  project_type_specific?: string // Specific type (e.g., "Film", max 2 words)
-  memberRoles?: { [userId: string]: string } // Object mapping userId to role (max 2 words)
-  topic_tags?: string[]
-  category?: string
-  related_projects?: string[] // portfolio IDs
-  related_humans?: string[] // user IDs
-  community_type?: 'question' | 'idea' | 'collaboration' | 'feedback'
-  [key: string]: any
-}
-
-/**
- * Activity portfolio metadata
- * Closely mirrors ProjectPortfolioMetadata but is associated with
- * a host project via portfolios.host_project_id at the table level.
- */
-export interface ActivityPortfolioMetadata extends PortfolioMetadata {
-  members: string[]
-  managers: string[]
-  project_type_general?: string
-  project_type_specific?: string
-  memberRoles?: { [userId: string]: string }
-  technologies?: string[]
-  github_url?: string
-  live_url?: string
-  status?: 'idea' | 'live' | 'in-progress' | 'completed' | 'archived'
-  collaborators?: string[]
-  start_date?: string
-  end_date?: string
-  properties?: ActivityPortfolioProperties
-  [key: string]: any
-}
+// Backward compatible aliases
+export type ProjectPortfolioMetadata = PortfolioEntityMetadata
+export type CommunityPortfolioMetadata = PortfolioEntityMetadata
+export type ActivityPortfolioMetadata = PortfolioEntityMetadata
 
 /**
  * Base portfolio interface - common fields for all portfolio types
  */
 export interface BasePortfolio {
   id: string
-  type: PortfolioType
+  type: PortfolioType | LegacyNonHumanPortfolioType
   slug: string
   user_id: string
   host_project_id?: string | null
@@ -299,54 +280,47 @@ export interface HumanPortfolio extends BasePortfolio {
   metadata: HumanPortfolioMetadata
 }
 
-export interface ProjectPortfolio extends BasePortfolio {
-  type: 'projects'
-  metadata: ProjectPortfolioMetadata
-}
-
-export interface ActivityPortfolio extends BasePortfolio {
-  type: 'activities'
-  metadata: ActivityPortfolioMetadata
-}
-
-export interface CommunityPortfolio extends BasePortfolio {
-  type: 'community'
-  metadata: CommunityPortfolioMetadata
+export interface PortfolioEntity extends BasePortfolio {
+  type: 'portfolio' | LegacyNonHumanPortfolioType
+  metadata: PortfolioEntityMetadata
 }
 
 /**
  * Union type for all portfolio types
  */
-export type Portfolio =
-  | HumanPortfolio
-  | ProjectPortfolio
-  | ActivityPortfolio
-  | CommunityPortfolio
+export type Portfolio = HumanPortfolio | PortfolioEntity
 
 /**
  * Type guard functions
  */
 export function isHumanPortfolio(portfolio: Portfolio): portfolio is HumanPortfolio {
-  return portfolio.type === 'human'
+  return normalizePortfolioType(portfolio.type) === 'human'
 }
 
-export function isProjectPortfolio(portfolio: Portfolio): portfolio is ProjectPortfolio {
-  return portfolio.type === 'projects'
+export function isPortfolioEntity(portfolio: Portfolio): portfolio is PortfolioEntity {
+  return normalizePortfolioType(portfolio.type) === 'portfolio'
 }
 
-export function isActivityPortfolio(portfolio: Portfolio): portfolio is ActivityPortfolio {
-  return portfolio.type === 'activities'
+// ---------------------------------------------------------------------------
+// Backward compatible type guards (to be removed after full de-typing refactor)
+// ---------------------------------------------------------------------------
+export function isProjectPortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
+  return normalizePortfolioType(portfolio.type) === 'portfolio'
 }
 
-export function isCommunityPortfolio(portfolio: Portfolio): portfolio is CommunityPortfolio {
-  return portfolio.type === 'community'
+export function isActivityPortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
+  return normalizePortfolioType(portfolio.type) === 'portfolio'
+}
+
+export function isCommunityPortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
+  return normalizePortfolioType(portfolio.type) === 'portfolio'
 }
 
 /**
  * Portfolio creation input type
  */
 export interface CreatePortfolioInput {
-  type: 'projects' | 'community' // Only projects and communities can be created
+  type: 'portfolio'
   name: string
   avatar?: string // Optional avatar URL
 }

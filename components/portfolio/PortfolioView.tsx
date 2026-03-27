@@ -10,7 +10,6 @@ import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
 import { DescriptionViewerPopup } from './DescriptionPopups'
 import { ImageViewerPopup } from './ImageViewerPopup'
-import { CommunityMembersGrid } from './CommunityMembersGrid'
 import { OpenCallStack } from '@/components/notes/OpenCallStack'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect, useRef, useMemo } from 'react'
@@ -19,7 +18,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar, Card } from '@/components/ui'
-import { Apple, Balloon, ChevronRight, Lock, Megaphone, Timer, History } from 'lucide-react'
+import { Apple, ChevronRight, Lock, Megaphone, Timer, History } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -30,8 +29,6 @@ import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationBadge } from './ActivityLocationBadge'
 import { ActivityLinkBadge } from './ActivityLinkBadge'
 import { FeedView } from '@/components/main/FeedView'
-import { ExploreView } from '@/components/explore/ExploreView'
-import type { ExploreActivity } from '@/app/explore/actions'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -71,11 +68,6 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [communitiesLoading, setCommunitiesLoading] = useState(false)
   const [totalMutualCommunities, setTotalMutualCommunities] = useState<number>(0)
   const involvementScrollRef = useRef<HTMLDivElement | null>(null)
-  const activitiesScrollRef = useRef<HTMLDivElement | null>(null)
-  const [activities, setActivities] = useState<
-    Array<{ id: string; name: string; avatar?: string; emoji?: string; hostProjectName?: string | null }>
-  >([])
-  const [activitiesLoading, setActivitiesLoading] = useState(false)
   const [activityHostProjects, setActivityHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [activityHostCommunities, setActivityHostCommunities] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState<number | null>(null)
@@ -230,130 +222,6 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     fetchProjects()
   }, [portfolio.id, portfolio.type, supabase])
 
-  // Fetch activities for human, project, and community portfolios (for all visitors)
-  useEffect(() => {
-    const fetchActivities = async () => {
-      if (!isHumanPortfolio(portfolio) && !isProjectPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
-        return
-      }
-
-      setActivitiesLoading(true)
-      try {
-        if (isHumanPortfolio(portfolio)) {
-          // Activities where this human is a member/manager/owner
-          const ownerId = portfolio.user_id
-          const { data: allActivities } = await supabase
-            .from('portfolios')
-            .select('id, user_id, metadata, type')
-            .eq('type', 'activities')
-            .order('created_at', { ascending: false })
-
-          if (!allActivities || allActivities.length === 0) {
-            setActivities([])
-            setActivitiesLoading(false)
-            return
-          }
-
-          const userActivities = (allActivities as any[]).filter((p: any) => {
-            const meta = p.metadata as any
-            const managers: string[] = meta?.managers || []
-            const members: string[] = meta?.members || []
-            const isOwner = p.user_id === ownerId
-            const isManager = Array.isArray(managers) && managers.includes(ownerId)
-            const isMember = Array.isArray(members) && members.includes(ownerId)
-            return isOwner || isManager || isMember
-          })
-
-          const mapped = userActivities.map((p: any) => {
-            const meta = p.metadata as any
-            const basic = meta?.basic || {}
-            return {
-              id: p.id as string,
-              name: (basic.name as string) || 'Activity',
-              avatar: basic.avatar as string | undefined,
-              emoji: basic.emoji as string | undefined,
-              hostProjectName: null,
-            }
-          })
-
-          setActivities(mapped)
-        } else if (isProjectPortfolio(portfolio)) {
-          // Activities hosted by this project
-          const { data: hosted } = await supabase
-            .from('portfolios')
-            .select('id, metadata, host_project_id')
-            .eq('type', 'activities')
-            .eq('host_project_id', portfolio.id)
-            .order('created_at', { ascending: false })
-
-          if (!hosted || hosted.length === 0) {
-            setActivities([])
-            setActivitiesLoading(false)
-            return
-          }
-
-          const mapped = (hosted as any[]).map((p: any) => {
-            const meta = p.metadata as any
-            const basic = meta?.basic || {}
-            return {
-              id: p.id as string,
-              name: (basic.name as string) || 'Activity',
-              avatar: basic.avatar as string | undefined,
-              emoji: basic.emoji as string | undefined,
-              hostProjectName: basic.name as string | undefined,
-            }
-          })
-
-          setActivities(mapped)
-        } else if (isCommunityPortfolio(portfolio)) {
-          // Activities hosted by this community
-          const { data: allActivities } = await supabase
-            .from('portfolios')
-            .select('id, metadata, type')
-            .eq('type', 'activities')
-            .order('created_at', { ascending: false })
-            .limit(200)
-
-          if (!allActivities || allActivities.length === 0) {
-            setActivities([])
-            setActivitiesLoading(false)
-            return
-          }
-
-          const communityActivities = (allActivities as any[]).filter((p: any) => {
-            const meta = p.metadata as any
-            const props = meta?.properties || {}
-            const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids)
-              ? props.host_community_ids
-              : []
-            return hostCommunityIds.includes(portfolio.id)
-          })
-
-          const mapped = communityActivities.map((p: any) => {
-            const meta = p.metadata as any
-            const basic = meta?.basic || {}
-            return {
-              id: p.id as string,
-              name: (basic.name as string) || 'Activity',
-              avatar: basic.avatar as string | undefined,
-              emoji: basic.emoji as string | undefined,
-              hostProjectName: null,
-            }
-          })
-
-          setActivities(mapped)
-        }
-      } catch (error) {
-        console.error('Failed to fetch activities:', error)
-        setActivities([])
-      } finally {
-        setActivitiesLoading(false)
-      }
-    }
-
-    fetchActivities()
-  }, [portfolio, supabase])
-
   // Fetch host project details for activity view (for host project pills)
   useEffect(() => {
     if (!isActivityPortfolio(portfolio)) {
@@ -430,9 +298,12 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     return () => { cancelled = true }
   }, [portfolio, supabase])
 
-  // Pending join requests count for activity owner/manager (call-to-join card badge)
+  // Pending join requests count for owner/manager (call-to-join card badge)
   useEffect(() => {
-    if (!isActivityPortfolio(portfolio) || (!isOwner && !isManager)) {
+    const hasCallToJoin = !!((portfolio.metadata as any)?.properties?.call_to_join)
+    const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+
+    if (portfolio.type === 'human' || visibility === 'private' || !hasCallToJoin || (!isOwner && !isManager)) {
       setPendingJoinRequestsCount(null)
       return
     }
@@ -764,47 +635,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [isSubmittingCommunityJoin, setIsSubmittingCommunityJoin] = useState(false)
   const [communityJoinFeedback, setCommunityJoinFeedback] = useState<string | null>(null)
   const [isCommunityLoginRequiredOpen, setIsCommunityLoginRequiredOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'feed' | 'activities'>('overview')
-  const [joinableActivities, setJoinableActivities] = useState<ExploreActivity[]>([])
-  const [joinableActivitiesLoading, setJoinableActivitiesLoading] = useState(false)
-  const [joinableActivitiesError, setJoinableActivitiesError] = useState<string | null>(null)
-
-  // Activities tab (joinable) data fetch — reuse Explore activities UI
-  useEffect(() => {
-    if (activeTab !== 'activities') return
-
-    if (!currentUserId) {
-      setJoinableActivities([])
-      setJoinableActivitiesLoading(false)
-      setJoinableActivitiesError(null)
-      return
-    }
-
-    let cancelled = false
-    const load = async () => {
-      setJoinableActivitiesLoading(true)
-      setJoinableActivitiesError(null)
-      try {
-        const res = await fetch(`/api/portfolios/${portfolio.id}/joinable-activities`)
-        const data = res.ok ? await res.json() : null
-        if (!res.ok) {
-          throw new Error(data?.error || 'Failed to load activities')
-        }
-        if (cancelled) return
-        setJoinableActivities(Array.isArray(data?.activities) ? data.activities : [])
-      } catch (e: any) {
-        if (cancelled) return
-        setJoinableActivities([])
-        setJoinableActivitiesError(e?.message || 'Failed to load activities')
-      } finally {
-        if (!cancelled) setJoinableActivitiesLoading(false)
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [activeTab, currentUserId, portfolio.id])
+  const [activeTab, setActiveTab] = useState<'overview' | 'feed'>('overview')
 
   if (isEditing) {
     return (
@@ -815,9 +646,9 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           setIsEditing(false)
           // Force a full page reload to ensure fresh data is loaded
           // This ensures the server action completes and cache is cleared
-          const portfolioUrl = isHumanPortfolio(portfolio) 
-            ? `/portfolio/human/${portfolio.user_id}`
-            : getPortfolioUrl(portfolio.type, portfolio.id)
+          const portfolioUrl = getPortfolioUrl(
+            portfolio.slug || (isHumanPortfolio(portfolio) ? portfolio.user_id : portfolio.id)
+          )
           // Use window.location to force a full page reload with fresh data
           window.location.href = portfolioUrl
         }}
@@ -919,7 +750,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                   size={96}
                   emoji={(metadata as any)?.basic?.emoji || '🎨'}
                   name={basic.name}
-                  href={getPortfolioUrl(portfolio.type, portfolio.id)}
+                  href={getPortfolioUrl(portfolio.slug || portfolio.id)}
                   className="flex-shrink-0"
                 />
               )}
@@ -942,7 +773,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 }
                 return null
               })()}
-              {(isProjectPortfolio(portfolio) || isActivityPortfolio(portfolio)) && (() => {
+              {portfolio.type !== 'human' && (() => {
                 const metadataAny = portfolio.metadata as any
                 const props = metadataAny?.properties
                 const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
@@ -965,7 +796,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     return (
                       <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
                         <UIText as="span" className="text-[11px] text-black leading-none">
-                          Activity ended
+                          Ended
                         </UIText>
                       </div>
                     )
@@ -996,7 +827,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 let target: Date | null = null
 
                 if (status === 'archived') {
-                  label = 'Activity ended'
+                  label = 'Ended'
                 } else if (validStart) {
                   // Determine upcoming vs past using start/end
                   if (now < validStart) {
@@ -1015,7 +846,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     const relative = formatDistanceToNowStrict(target, { addSuffix: true })
                     label = relative
                   } else {
-                    label = 'Activity ended'
+                    label = 'Ended'
                   }
                 }
 
@@ -1058,8 +889,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               </button>
             )}
 
-            {/* Activity datetime & location badges (activities) */}
-            {isActivityPortfolio(portfolio) && (() => {
+            {/* Date/time & location badges (non-human portfolios) */}
+            {portfolio.type !== 'human' && (() => {
               const props = (portfolio.metadata as any)?.properties
               const activity = props?.activity_datetime as ActivityDateTimeValue | undefined
               const location = props?.location as ActivityLocationValue | undefined
@@ -1241,8 +1072,8 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               )
             })()}
 
-            {/* Activity Call-to-Join Card (activities only; on when not private) */}
-            {isActivityPortfolio(portfolio) && activityCallToJoin && (portfolio as any).visibility !== 'private' && (() => {
+            {/* Call-to-Join Card (any non-human portfolio; on when not private) */}
+            {portfolio.type !== 'human' && activityCallToJoin && (portfolio as any).visibility !== 'private' && (() => {
               const config = activityCallToJoin
               const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
               const activityDateTime = (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null
@@ -1278,7 +1109,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 }
 
                 // When approval is required, open the confirmation/prompt modal.
-                // When no approval is required, auto-join directly (same flow as external activities, no popup).
+                // When no approval is required, auto-join directly (no popup).
                 if (requiresApproval) {
                   handleOpenApply()
                   return
@@ -1299,7 +1130,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       setApplyFeedback(result?.error || 'Failed to join.')
                       return
                     }
-                    setApplyFeedback('You have joined this activity.')
+                    setApplyFeedback('You have joined this portfolio.')
                     router.refresh()
                   } catch (error: any) {
                     setApplyFeedback(error?.message || 'Failed to join.')
@@ -1324,7 +1155,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 setIsEditingCallToJoin(true)
               }
 
-              const membersRequestsUrl = `${getPortfolioUrl(portfolio.type, portfolio.id)}/members?tab=requests`
+              const membersRequestsUrl = `${getPortfolioUrl(portfolio.slug || portfolio.id)}/members?tab=requests`
               const pendingCount = pendingJoinRequestsCount ?? 0
 
               return (
@@ -1361,7 +1192,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       ) : (
                         <>
                           <Content className="my-1.5">
-                            {config.description?.trim() || 'Join this activity.'}
+                            {config.description?.trim() || 'Join this portfolio.'}
                           </Content>
                           {(canApplyAsVisitor || (!canSeeOwnerManagerCard && !joinWindowOpen)) && (
                             <div className="flex items-center gap-2 mt-0.5">
@@ -1542,7 +1373,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       </div>
                     ) : (
                       <Link
-                        href={`${getPortfolioUrl(portfolio.type, portfolio.id)}/members`}
+                        href={`${getPortfolioUrl(portfolio.slug || portfolio.id)}/members`}
                         className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
                         title="View all members"
                       >
@@ -1610,7 +1441,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         {activityHostProjects.slice(0, 5).map((proj) => (
                           <Link
                             key={`project-${proj.id}`}
-                            href={getPortfolioUrl('projects', proj.id)}
+                            href={getPortfolioUrl(proj.id)}
                             className="block hover:opacity-90"
                           >
                             <StickerAvatar
@@ -1628,7 +1459,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         {activityHostCommunities.slice(0, 5).map((comm) => (
                           <Link
                             key={`community-${comm.id}`}
-                            href={getPortfolioUrl('community', comm.id)}
+                            href={getPortfolioUrl(comm.id)}
                             className="block hover:opacity-90"
                           >
                             <StickerAvatar
@@ -1729,19 +1560,6 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                   >
                     <UIText>Feed</UIText>
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault()
-                      setActiveTab('activities')
-                    }}
-                    className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
-                      activeTab === 'activities'
-                        ? 'bg-gray-200 text-gray-700'
-                        : 'text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    <UIText>Activities</UIText>
-                  </button>
                 </div>
               </div>
             </div>
@@ -1808,7 +1626,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                           />
                         )}
                         <Link
-                          href={getPortfolioUrl('projects', project.id)}
+                              href={getPortfolioUrl(project.id)}
                           className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
                         >
                           <div className="flex flex-col items-center gap-3">
@@ -1845,7 +1663,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         <div className="w-full rounded-2xl px-3 pt-3 pb-4">
                           <div className="flex flex-col items-center gap-3">
                             <Link
-                              href="/portfolio/create/projects"
+                              href="/portfolio/create"
                               className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                             >
                               <svg
@@ -1863,7 +1681,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                               </svg>
                             </Link>
                             <UIText className="text-center max-w-[140px] mx-auto truncate">
-                              Create Project
+                              Create Portfolio
                             </UIText>
                           </div>
                         </div>
@@ -1875,7 +1693,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         <div className="w-full rounded-2xl px-3 pt-3 pb-4">
                           <div className="flex flex-col items-center gap-3">
                             <Link
-                              href="/portfolio/create/community"
+                              href="/portfolio/create"
                               className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                             >
                               <svg
@@ -1893,7 +1711,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                               </svg>
                             </Link>
                             <UIText className="text-center max-w-[140px] mx-auto truncate">
-                              Create Community
+                              Create Portfolio
                             </UIText>
                           </div>
                         </div>
@@ -1906,102 +1724,13 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
           )}
 
-          {/* Activities Row (for all visitors, human and project portfolios) */}
-          {(isHumanPortfolio(portfolio) || isProjectPortfolio(portfolio)) && activities.length > 0 && (
-            <div className="mt-4 mb-8 group">
-              <div className="flex items-center gap-2 mb-4">
-                <Balloon className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                <UIText>Activities</UIText>
-              </div>
-              <div className="relative">
-                <button
-                  type="button"
-                  className="hidden group-hover:flex items-center justify-center absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
-                  onClick={() => {
-                    if (activitiesScrollRef.current) {
-                      activitiesScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' })
-                    }
-                  }}
-                >
-                  <ChevronRight className="w-5 h-5 rotate-180 text-gray-700" strokeWidth={1.5} />
-                </button>
-                <button
-                  type="button"
-                  className="hidden group-hover:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
-                  onClick={() => {
-                    if (activitiesScrollRef.current) {
-                      activitiesScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' })
-                    }
-                  }}
-                >
-                  <ChevronRight className="w-5 h-5 text-gray-700" strokeWidth={1.5} />
-                </button>
-                <div
-                  ref={activitiesScrollRef}
-                  className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth"
-                >
-                  {activitiesLoading ? (
-                    <UIText className="text-gray-500">Loading activities...</UIText>
-                  ) : (
-                    activities.map((activity) => (
-                      <div
-                        key={activity.id}
-                        className="flex flex-col items-center flex-shrink-0 w-48"
-                      >
-                        <Link
-                          href={getPortfolioUrl('activities', activity.id)}
-                          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                        >
-                          <div className="flex flex-col items-center gap-3">
-                            <StickerAvatar
-                              src={activity.avatar}
-                              alt={activity.name}
-                              type="activities"
-                              size={96}
-                              emoji={activity.emoji}
-                              name={activity.name}
-                            />
-                            <div className="flex flex-col items-center gap-1 w-full">
-                              <Content
-                                className="text-center max-w-[140px] mx-auto line-clamp-2"
-                                title={activity.name}
-                              >
-                                {activity.name}
-                              </Content>
-                              {activity.hostProjectName && (
-                                <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
-                                  {activity.hostProjectName}
-                                </UIText>
-                              )}
-                            </div>
-                          </div>
-                        </Link>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Community Members Grid (for communities) or Notes Feed (for projects/humans) */}
-          {isCommunityPortfolio(portfolio) ? (
-            <CommunityMembersGrid
-              portfolioId={portfolio.id}
-              creatorId={portfolio.user_id}
-              managers={managers}
-              members={members}
-              memberRoles={metadata?.memberRoles || {}}
-              currentUserId={currentUserId}
-            />
-          ) : (
-            <NotesFeed
-              portfolio={portfolio}
-              portfolioId={portfolio.id}
-              currentUserId={currentUserId}
-              canCreateNote={canCreateNote}
-            />
-          )}
+          {/* Notes feed (unified overview layout) */}
+          <NotesFeed
+            portfolio={portfolio}
+            portfolioId={portfolio.id}
+            currentUserId={currentUserId}
+            canCreateNote={canCreateNote}
+          />
             </>
           )}
 
@@ -2015,34 +1744,10 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               />
             </div>
           )}
-
-          {/* Activities tab */}
-          {activeTab === 'activities' && (
-            <div className="mt-6 -mx-6 md:mx-0">
-              {!currentUserId ? (
-                <UIText className="text-gray-500">
-                  Log in to see joinable activities.
-                </UIText>
-              ) : joinableActivitiesLoading ? (
-                <UIText className="text-gray-500">Loading activities...</UIText>
-              ) : joinableActivitiesError ? (
-                <UIText className="text-gray-500">{joinableActivitiesError}</UIText>
-              ) : joinableActivities.length === 0 ? (
-                <UIText className="text-gray-500">No joinable activities yet.</UIText>
-              ) : (
-                <ExploreView
-                  activities={joinableActivities}
-                  userId={currentUserId}
-                  isAdmin={isAdmin}
-                  dailyMatch={undefined}
-                />
-              )}
-            </div>
-          )}
         </div>
 
-        {/* Apply to Join Modal (activities only, when approval is required) */}
-        {isActivityPortfolio(portfolio) && isApplyModalOpen && activityCallToJoin && (activityCallToJoin.require_approval ?? true) && (() => {
+        {/* Apply to Join Modal (any non-human portfolio, when approval is required) */}
+        {portfolio.type !== 'human' && isApplyModalOpen && activityCallToJoin && (activityCallToJoin.require_approval ?? true) && (() => {
           const config = activityCallToJoin
           const requiresPrompt = !!config.require_approval && !!config.prompt
 
@@ -2069,7 +1774,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               setApplyFeedback(
                 config.require_approval
                   ? 'Application submitted. Waiting for approval.'
-                  : 'You have joined this activity.'
+                  : 'You have joined this portfolio.'
               )
               setIsApplyModalOpen(false)
               // Refresh to reflect membership changes if auto-joined
@@ -2077,7 +1782,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 router.refresh()
               }
             } catch (error) {
-              console.error('Failed to apply to activity:', error)
+              console.error('Failed to apply to portfolio:', error)
               setApplyFeedback('An unexpected error occurred.')
             } finally {
               setIsApplying(false)
@@ -2137,15 +1842,15 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           )
         })()}
 
-        {/* Login Required Modal for Apply (activities only, unauthenticated visitors) */}
-        {isActivityPortfolio(portfolio) && isLoginRequiredModalOpen && (
+        {/* Login Required Modal for Apply (unauthenticated visitors) */}
+        {portfolio.type !== 'human' && isLoginRequiredModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
             <div className="bg-white rounded-xl w-full max-w-md mx-4 p-6">
               <Title as="h2" className="mb-3">
-                Log in to join this activity
+                Log in to join this portfolio
               </Title>
               <Content className="mb-4">
-                Please log in to join this activity. After logging in, refresh this page to continue.
+                Please log in to join this portfolio. After logging in, refresh this page to continue.
               </Content>
               <div className="flex justify-end gap-2 mt-4">
                 <Button

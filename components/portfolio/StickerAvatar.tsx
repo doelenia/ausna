@@ -1,13 +1,13 @@
 'use client'
 
-import { PortfolioType } from '@/types/portfolio'
+import { normalizePortfolioType, PortfolioType } from '@/types/portfolio'
 import Link from 'next/link'
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 
 interface StickerAvatarProps {
   src?: string // Optional - can be emoji instead
   alt: string
-  type: PortfolioType
+  type: PortfolioType | string
   size?: number | string
   className?: string
   href?: string
@@ -127,7 +127,7 @@ function StickerAvatarComponent({
   name,
   variant = 'default',
 }: StickerAvatarProps) {
-  const isHuman = type === 'human'
+  const isHuman = normalizePortfolioType(type) === 'human'
   const [scale, setScale] = useState<number>(1)
   const [imageLoaded, setImageLoaded] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)

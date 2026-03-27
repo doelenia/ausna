@@ -6,16 +6,28 @@
 import { PortfolioType } from '@/types/portfolio'
 
 /**
- * Generate portfolio URL
+ * Generate portfolio URL.
+ *
+ * Canonical URLs no longer include the portfolio type segment.
  */
-export function getPortfolioUrl(type: PortfolioType, id: string): string {
-  return `/portfolio/${type}/${id}`
+export function getPortfolioUrl(idOrSlug: string): string
+export function getPortfolioUrl(type: PortfolioType, idOrSlug: string): string
+export function getPortfolioUrl(
+  typeOrId: PortfolioType | string,
+  idMaybe?: string
+): string {
+  if (typeof idMaybe === 'string') {
+    // Legacy typed URLs (kept for backward compatibility; these redirect).
+    return `/portfolio/${typeOrId}/${idMaybe}`
+  }
+  return `/portfolio/${typeOrId}`
 }
 
 /**
  * Generate portfolio URL with slug (for SEO-friendly URLs)
  */
 export function getPortfolioUrlWithSlug(type: PortfolioType, slug: string): string {
+  // Legacy typed URL with slug (kept for backward compatibility; these redirect).
   return `/portfolio/${type}/${slug}`
 }
 
@@ -26,7 +38,7 @@ export function parsePortfolioRoute(
   type: string | undefined,
   id: string | undefined
 ): { type: PortfolioType | null; id: string | null; isValid: boolean } {
-  const validTypes: PortfolioType[] = ['human', 'projects', 'community', 'activities']
+  const validTypes: PortfolioType[] = ['human', 'portfolio']
   
   if (!type || !id) {
     return { type: null, id: null, isValid: false }
@@ -46,7 +58,7 @@ export function parsePortfolioRoute(
  * Validate portfolio type
  */
 export function isValidPortfolioType(type: string): type is PortfolioType {
-  const validTypes: PortfolioType[] = ['human', 'projects', 'community', 'activities']
+  const validTypes: PortfolioType[] = ['human', 'portfolio']
   return validTypes.includes(type.toLowerCase() as PortfolioType)
 }
 
@@ -54,7 +66,7 @@ export function isValidPortfolioType(type: string): type is PortfolioType {
  * Get all valid portfolio types
  */
 export function getPortfolioTypes(): PortfolioType[] {
-  return ['human', 'projects', 'community', 'activities']
+  return ['human', 'portfolio']
 }
 
 /**
@@ -63,9 +75,7 @@ export function getPortfolioTypes(): PortfolioType[] {
 export function getPortfolioTypeDisplayName(type: PortfolioType): string {
   const displayNames: Record<PortfolioType, string> = {
     human: 'Human',
-    projects: 'Projects',
-    community: 'Community',
-    activities: 'Activities',
+    portfolio: 'Portfolio',
   }
   return displayNames[type]
 }

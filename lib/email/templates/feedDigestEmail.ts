@@ -192,7 +192,7 @@ function renderNoteCard(siteUrl: string, item: FeedItem & { kind: 'note' }): str
 function renderPortfolioCreatedCard(siteUrl: string, item: FeedItem & { kind: 'portfolio_created' }): string {
   const { portfolio, creator_profile } = item
   const typeWord = portfolioTypeWord(portfolio.type)
-  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(portfolio.type, portfolio.id))
+  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(portfolio.slug || portfolio.id))
   const meta = (portfolio.metadata as any) || {}
   const basic = meta.basic || {}
   const name = (basic.name as string)?.trim() || 'Untitled'

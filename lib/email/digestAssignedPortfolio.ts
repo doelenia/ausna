@@ -127,7 +127,7 @@ export function renderDigestAssignedPortfolioBannerHtml(
 ): string {
   if (!banner) return ''
 
-  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(banner.portfolioType, banner.portfolioId))
+  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(banner.portfolioId))
   const name = escapeHtml(banner.name)
   const typeLabel = banner.projectTypeLabel ? escapeHtml(banner.projectTypeLabel) : ''
   const descRaw = banner.description?.trim()

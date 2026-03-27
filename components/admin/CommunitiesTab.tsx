@@ -205,7 +205,7 @@ export function CommunitiesTab() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                         <Link
-                          href={`/portfolio/community/${portfolio.id}`}
+                          href={`/portfolio/${portfolio.id}`}
                           className="text-blue-600 hover:text-blue-800"
                         >
                           View

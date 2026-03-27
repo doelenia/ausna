@@ -514,7 +514,7 @@ export function PortfolioEditor({
 
       const formData = new FormData()
       const actProps = (portfolio.metadata as any)?.properties || {}
-      const isExternalAct = portfolio.type === 'activities' && actProps.external === true
+      const isExternalAct = actProps.external === true
       formData.append('portfolioId', portfolio.id)
       formData.append('name', name.trim())
       formData.append('description', description.trim())
@@ -534,7 +534,9 @@ export function PortfolioEditor({
         formData.append('project_type_general', projectTypeGeneral)
         formData.append('project_type_specific', projectTypeSpecific)
       }
-      if (isProjectPortfolio(portfolio) || portfolio.type === 'activities') {
+      if (portfolio.type !== 'human') {
+        // visibility/status are only respected server-side for projects/activities, but
+        // time/location/call-to-join are supported across all non-human portfolios.
         formData.append('visibility', isExternalAct ? 'public' : visibility)
         formData.append('project_status', projectStatus || '')
         if (activityValue?.start) {
@@ -632,16 +634,18 @@ export function PortfolioEditor({
         return
       }
 
-      // Update activity call-to-join configuration from editor (skip for external)
-      if (portfolio.type === 'activities' && !isExternalAct) {
+      // Update call-to-join configuration from editor (skip for external)
+      const currentVisibility: PortfolioVisibility =
+        (portfolio as any).visibility === 'private' ? 'private' : 'public'
+      if (portfolio.type !== 'human' && !isExternalAct && currentVisibility !== 'private') {
         const cfg: ActivityCallToJoinConfig =
           callToJoinConfig ||
           initialCallToJoin || {
-            enabled: (visibility !== 'private'),
+            enabled: true,
             description: 'Join us!',
             join_by: null,
             require_approval: true,
-            prompt: 'Why do you want to join this activity?',
+            prompt: 'Why do you want to join?',
             roles: [
               {
                 id: 'default-member',
@@ -653,7 +657,7 @@ export function PortfolioEditor({
           }
 
         await updateActivityCallToJoin(portfolio.id, {
-          enabled: (visibility !== 'private'),
+          enabled: true,
           description: cfg.description,
           joinBy: cfg.join_by ?? null,
           requireApproval: cfg.require_approval ?? true,
@@ -939,14 +943,14 @@ export function PortfolioEditor({
               </>
             )}
 
-            {/* Activity edit: same order as create — Host projects (or link for external), Date & time, Location, then Advanced */}
-            {portfolio.type === 'activities' && (() => {
+            {/* Time, location, open-to-join (non-human portfolios) */}
+            {portfolio.type !== 'human' && (() => {
               const activityProps = (portfolio.metadata as any)?.properties || {}
               const isExternalActivity = activityProps.external === true
               const externalLink = (activityProps.external_link as string) || ''
               return (
               <>
-                {!isExternalActivity && (
+                {portfolio.type === 'activities' && !isExternalActivity && (
                 <div>
                   <UIText as="label" className="block mb-2">
                     Hosts
@@ -1040,13 +1044,13 @@ export function PortfolioEditor({
                 {isExternalActivity && externalLink && (
                   <div>
                     <UIText as="label" className="block mb-2">
-                      Event link
+                      Link
                     </UIText>
                     <ActivityLinkBadge url={externalLink} />
                   </div>
                 )}
 
-                {isExternalActivity && (
+                {portfolio.type === 'activities' && isExternalActivity && (
                   <div className="flex items-center gap-2 mt-4">
                     <input
                       type="checkbox"
@@ -1064,13 +1068,13 @@ export function PortfolioEditor({
 
                 <div className="mt-4">
                   <UIText as="label" className="block mb-2">
-                    Activity date &amp; time
+                    Date &amp; time
                   </UIText>
                   <ActivityDateTimeField
                     value={activityValue}
                     onChange={setActivityValue}
                     portfolioTitle={name || basic.name}
-                    hint="When set, the activity is Live during the scheduled period (and after start if there's no end time). After the end time it's no longer Live—you don't need to switch it manually."
+                    hint="Use this to show when this portfolio happens. If you don’t set an end time, it’s treated as ongoing after the start."
                     defaultOpen={initialShowActivityPicker}
                   />
                 </div>
@@ -1088,7 +1092,7 @@ export function PortfolioEditor({
                   />
                 </div>
 
-                {/* Advanced settings (activities): Category, Visibility, Live/Archive, Call to join — hidden for external */}
+                {/* Advanced settings: keep activity-specific fields, but allow call-to-join for all */}
                 {!isExternalActivity && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden mt-4">
                   <button
@@ -1112,92 +1116,97 @@ export function PortfolioEditor({
                   </button>
                   {advancedOpen && (
                     <div className="p-4 pt-2 space-y-4 border-t border-gray-200">
-                      <div>
-                        <UIText as="label" className="block mb-2">
-                          Category
-                        </UIText>
-                        <ProjectTypeSelector
-                          generalCategory={projectTypeGeneral}
-                          specificType={projectTypeSpecific}
-                          onSelect={(general, specific) => {
-                            setProjectTypeGeneral(general)
-                            setProjectTypeSpecific(specific)
-                          }}
-                          disabled={loading}
-                        />
-                      </div>
-
-                      <div>
-                        <UIText as="label" className="block mb-2">
-                          Visibility
-                        </UIText>
-                        <div className="flex flex-wrap gap-2">
-                          {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
-                            <button
-                              key={v}
-                              type="button"
-                              onClick={() => setVisibility(v)}
-                              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                                visibility === v
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                              }`}
-                              disabled={loading}
-                            >
-                              {v === 'public' && 'Public'}
-                              {v === 'private' && 'Private'}
-                            </button>
-                          ))}
+                      {portfolio.type === 'activities' && (
+                        <div>
+                          <UIText as="label" className="block mb-2">
+                            Category
+                          </UIText>
+                          <ProjectTypeSelector
+                            generalCategory={projectTypeGeneral}
+                            specificType={projectTypeSpecific}
+                            onSelect={(general, specific) => {
+                              setProjectTypeGeneral(general)
+                              setProjectTypeSpecific(specific)
+                            }}
+                            disabled={loading}
+                          />
                         </div>
-                        <UIText as="p" className="text-xs text-gray-500 mt-1">
-                          Private activities are only visible to you and will not appear in search or feeds.
-                        </UIText>
-                      </div>
+                      )}
 
-                      {/* Live / Archive: only when no date & time — clear relationship to schedule */}
-                      <div>
-                        <UIText as="label" className="block mb-2">
-                          Status (Live / Archived)
-                        </UIText>
-                        {activityValue?.start ? (
-                          <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
-                            <UIText className="text-gray-700">
-                              You’ve set a date &amp; time, so status is automatic: the activity is Live during the scheduled period and no longer Live after the end time. No need to set Live/Archived here.
-                            </UIText>
+                      {portfolio.type === 'activities' && (
+                        <div>
+                          <UIText as="label" className="block mb-2">
+                            Visibility
+                          </UIText>
+                          <div className="flex flex-wrap gap-2">
+                            {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+                              <button
+                                key={v}
+                                type="button"
+                                onClick={() => setVisibility(v)}
+                                className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                                  visibility === v
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                }`}
+                                disabled={loading}
+                              >
+                                {v === 'public' && 'Public'}
+                                {v === 'private' && 'Private'}
+                              </button>
+                            ))}
                           </div>
-                        ) : (
-                          <>
-                            <div className="flex flex-wrap gap-2">
-                              {[
-                                { key: 'in-progress', label: 'Live' },
-                                { key: 'archived', label: 'Archived' },
-                              ].map((option) => {
-                                const selected = projectStatus === option.key
-                                return (
-                                  <button
-                                    key={option.key}
-                                    type="button"
-                                    onClick={() =>
-                                      setProjectStatus(selected ? '' : option.key)
-                                    }
-                                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                                      selected
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                    }`}
-                                    disabled={loading}
-                                  >
-                                    {option.label}
-                                  </button>
-                                )
-                              })}
+                          <UIText as="p" className="text-xs text-gray-500 mt-1">
+                            Private activities are only visible to you and will not appear in search or feeds.
+                          </UIText>
+                        </div>
+                      )}
+
+                      {portfolio.type === 'activities' && (
+                        <div>
+                          <UIText as="label" className="block mb-2">
+                            Status (Live / Archived)
+                          </UIText>
+                          {activityValue?.start ? (
+                            <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2">
+                              <UIText className="text-gray-700">
+                                You’ve set a date &amp; time, so status is automatic: the activity is Live during the scheduled period and no longer Live after the end time.
+                              </UIText>
                             </div>
-                            <UIText as="p" className="text-xs text-gray-500 mt-1">
-                              When no date &amp; time is set, use this to mark whether the activity is currently live or archived.
-                            </UIText>
-                          </>
-                        )}
-                      </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap gap-2">
+                                {[
+                                  { key: 'in-progress', label: 'Live' },
+                                  { key: 'archived', label: 'Archived' },
+                                ].map((option) => {
+                                  const selected = projectStatus === option.key
+                                  return (
+                                    <button
+                                      key={option.key}
+                                      type="button"
+                                      onClick={() =>
+                                        setProjectStatus(selected ? '' : option.key)
+                                      }
+                                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                                        selected
+                                          ? 'bg-blue-600 text-white'
+                                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                      }`}
+                                      disabled={loading}
+                                    >
+                                      {option.label}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                              <UIText as="p" className="text-xs text-gray-500 mt-1">
+                                When no date &amp; time is set, use this to mark whether the activity is currently live or archived.
+                              </UIText>
+                            </>
+                          )}
+                        </div>
+                      )}
 
                       {visibility !== 'private' && (
                         <div>
@@ -1205,7 +1214,7 @@ export function PortfolioEditor({
                             Call to join
                           </UIText>
                           <UIText as="p" className="text-xs text-gray-500 mb-2">
-                            Public activities show a call-to-join card so visitors can apply.
+                            Public portfolios show a call-to-join card so visitors can apply.
                           </UIText>
                           <div className="mt-2">
                             <Card variant="subtle" padding="sm">
@@ -1215,7 +1224,7 @@ export function PortfolioEditor({
                                     Call to join preview
                                   </UIText>
                                   <Content className="mb-1">
-                                    {callToJoinConfig?.description || 'Join this activity.'}
+                                    {callToJoinConfig?.description || 'Join this portfolio.'}
                                   </Content>
                                   <UIText className="text-gray-600 text-xs">
                                     {callToJoinConfig?.join_by

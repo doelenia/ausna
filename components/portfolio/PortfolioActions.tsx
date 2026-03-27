@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio, isActivityPortfolio } from '@/types/portfolio'
-import { getPortfolioUrl, getPortfolioUrlWithSlug } from '@/lib/portfolio/routes'
+import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Button, UIText, Dropdown, DropdownItem, Card } from '@/components/ui'
 import { FriendButton } from './FriendButton'
 import { useFriendStatus } from './useFriendStatus'
@@ -202,9 +202,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
     setShowSendModal(true)
   }
 
-  const portfolioPath = portfolio.slug
-    ? getPortfolioUrlWithSlug(portfolio.type, portfolio.slug)
-    : getPortfolioUrl(portfolio.type, portfolio.id)
+  const portfolioPath = getPortfolioUrl(portfolio.slug || portfolio.id)
   const portfolioLink =
     typeof window !== 'undefined' ? `${window.location.origin}${portfolioPath}` : portfolioPath
   // Use a predictable reference so the Messages UI can render a clickable portfolio module.

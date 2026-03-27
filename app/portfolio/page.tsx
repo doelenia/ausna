@@ -105,7 +105,7 @@ export default async function PortfolioIndexPage({ searchParams }: PortfolioInde
               return (
                 <Link
                   key={portfolio.id}
-                  href={getPortfolioUrl(portfolio.type, portfolio.id)}
+                  href={getPortfolioUrl(portfolio.slug || portfolio.id)}
                   className="bg-transparent rounded-lg p-6 transition-opacity hover:opacity-80"
                 >
                   <Title as="h2" className="mb-2">{basic.name}</Title>

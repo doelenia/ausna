@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { getPortfolioUrl, getPortfolioUrlWithSlug } from '@/lib/portfolio/routes'
+import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Portfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 
@@ -15,7 +15,7 @@ export function PortfolioPreviewCard({ portfolio, isSent = false }: PortfolioPre
 
   return (
     <Link
-      href={portfolio.slug ? getPortfolioUrlWithSlug(portfolio.type, portfolio.slug) : getPortfolioUrl(portfolio.type, portfolio.id)}
+      href={getPortfolioUrl(portfolio.slug || portfolio.id)}
       className={`block mb-2 rounded-lg border-2 overflow-hidden transition-all ${
         isSent ? 'border-blue-400 bg-transparent' : 'border-gray-300 bg-transparent'
       }`}

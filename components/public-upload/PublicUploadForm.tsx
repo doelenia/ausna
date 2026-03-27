@@ -877,7 +877,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
               {/* Project Members */}
               {!projectMembersLoading && projectMembers.length > 0 && (
                 <Link
-                  href={getPortfolioUrl('projects', PROJECT_ID)}
+                  href={getPortfolioUrl(PROJECT_ID)}
                   className="inline-flex items-center gap-2 mt-3 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
                 >
                   <div className="flex -space-x-2">
@@ -920,7 +920,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                 {/* Project Members */}
                 {!projectMembersLoading && projectMembers.length > 0 && (
                   <Link
-                    href={getPortfolioUrl('projects', PROJECT_ID)}
+                    href={getPortfolioUrl(PROJECT_ID)}
                     className="inline-flex items-center gap-2 mt-3 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
                   >
                     <div className="flex -space-x-2">
