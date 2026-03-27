@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
-import { getSubPortfolios } from '@/app/portfolio/[type]/[id]/actions'
+import { getSubPortfolios } from '@/app/portfolio/[idOrSlug]/actions'
 
 interface SubPortfolio {
   id: string

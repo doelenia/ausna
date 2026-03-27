@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getEligibleItemsForPinning, updatePinnedList } from '@/app/portfolio/[type]/[id]/actions'
+import { getEligibleItemsForPinning, updatePinnedList } from '@/app/portfolio/[idOrSlug]/actions'
 import { PinnedItem } from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
@@ -115,7 +115,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
     const result = await updatePinnedList(portfolioId, pinnedItems)
 
     if (result.success) {
-      router.push(`/portfolio/${portfolioType}/${portfolioId}`)
+      router.push(`/portfolio/${portfolioId}`)
       router.refresh()
     } else {
       setError(result.error || 'Failed to save pinned list')
@@ -338,7 +338,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
         <Button
           variant="secondary"
           asLink
-          href={`/portfolio/${portfolioType}/${portfolioId}`}
+          href={`/portfolio/${portfolioId}`}
         >
           <UIText>Cancel</UIText>
         </Button>

@@ -17,8 +17,7 @@ export function getPortfolioUrl(
   idMaybe?: string
 ): string {
   if (typeof idMaybe === 'string') {
-    // Legacy typed URLs (kept for backward compatibility; these redirect).
-    return `/portfolio/${typeOrId}/${idMaybe}`
+    return `/portfolio/${idMaybe}`
   }
   return `/portfolio/${typeOrId}`
 }
@@ -27,8 +26,7 @@ export function getPortfolioUrl(
  * Generate portfolio URL with slug (for SEO-friendly URLs)
  */
 export function getPortfolioUrlWithSlug(type: PortfolioType, slug: string): string {
-  // Legacy typed URL with slug (kept for backward compatibility; these redirect).
-  return `/portfolio/${type}/${slug}`
+  return `/portfolio/${slug}`
 }
 
 /**

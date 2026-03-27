@@ -13,7 +13,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
-import { updatePortfolio, updateActivityCallToJoin } from '@/app/portfolio/[type]/[id]/actions'
+import { updatePortfolio, updateActivityCallToJoin } from '@/app/portfolio/[idOrSlug]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { DescriptionEditorPopup } from './DescriptionPopups'

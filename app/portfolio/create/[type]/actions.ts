@@ -2,7 +2,6 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
-import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { uploadAvatar } from '@/lib/storage/avatars-server'
 import { generateSlug } from '@/lib/portfolio/helpers'
 import { addProjectToOwnedList } from '@/lib/portfolio/human'
@@ -90,24 +89,15 @@ export async function createPortfolio(
           })()
         : []
 
-    // Validate type
-    if (type !== 'projects' && type !== 'community' && type !== 'activities') {
+    // Validate type (legacy values are accepted and normalized to portfolio)
+    if (type !== 'portfolio' && type !== 'projects' && type !== 'community' && type !== 'activities') {
       return {
         success: false,
-        error: 'Invalid portfolio type. Only projects, activities, and communities can be created.',
+        error: 'Invalid portfolio type.',
       }
     }
 
-    // Check if user is admin for community creation
-    if (type === 'community') {
-      const adminUser = await checkAdmin()
-      if (!adminUser) {
-        return {
-          success: false,
-          error: 'Only administrators can create communities.',
-        }
-      }
-    }
+    const normalizedType = type === 'human' ? 'human' : 'portfolio'
 
     // Validate name
     if (!name || !name.trim()) {
@@ -138,7 +128,7 @@ export async function createPortfolio(
       const { data: portfolios } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .in('type', ['projects', 'community', 'activities'])
+        .eq('type', 'portfolio')
 
       const duplicate = (portfolios || []).find((p: any) => {
         const props = p.metadata?.properties || {}
@@ -200,11 +190,7 @@ export async function createPortfolio(
     // Compute visibility for projects/activities (public/private). Communities remain public for now.
     // External activities are always public.
     const visibility: 'public' | 'private' =
-      type === 'activities' && isExternal
-        ? 'public'
-        : visibilityRaw === 'private' && (type === 'projects' || type === 'activities')
-          ? 'private'
-          : 'public'
+      isExternal ? 'public' : visibilityRaw === 'private' ? 'private' : 'public'
 
     // For external portfolios, use favicon as avatar when no file/emoji provided
     const externalAvatarUrl =
@@ -374,7 +360,7 @@ export async function createPortfolio(
     }
 
     // Normalize project/activity status
-    if (type === 'projects' || type === 'activities') {
+    if (normalizedType === 'portfolio') {
       if (projectStatusRaw) {
         // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
         const normalizedStatus =
@@ -386,8 +372,8 @@ export async function createPortfolio(
         if (normalizedStatus) {
           metadata.status = normalizedStatus
         }
-      } else if (type === 'activities') {
-        // Activities without datetime: default to live when no status set (create form has no Status field)
+      } else {
+        // Non-human portfolios without datetime: default to live when no status set
         if (metadata.status == null || metadata.status === '') {
           metadata.status = 'live'
         }
@@ -396,7 +382,7 @@ export async function createPortfolio(
 
     // For activities, optionally validate and resolve host projects (multiple)
     let resolvedHostProjectIds: string[] = []
-    if (type === 'activities' && hostProjectIds.length > 0) {
+    if (normalizedType === 'portfolio' && hostProjectIds.length > 0) {
       const { data: projects, error: hostError } = await supabase
         .from('portfolios')
         .select('id, user_id, metadata, type')
@@ -431,7 +417,7 @@ export async function createPortfolio(
 
     // For activities, optionally validate and resolve host communities (multiple)
     let resolvedHostCommunityIds: string[] = []
-    if (type === 'activities' && hostCommunityIds.length > 0) {
+    if (normalizedType === 'portfolio' && hostCommunityIds.length > 0) {
       const { data: communities, error: hostError } = await supabase
         .from('portfolios')
         .select('id, user_id, metadata, type')
@@ -463,13 +449,13 @@ export async function createPortfolio(
       metadata.properties = { ...activityProps, host_community_ids: resolvedHostCommunityIds }
     }
 
-    const firstHostId = type === 'activities' && resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null
+    const firstHostId = normalizedType === 'portfolio' && resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null
 
     // Create portfolio
     const { data: portfolio, error: createError } = await supabase
       .from('portfolios')
       .insert({
-        type: type as 'projects' | 'community' | 'activities',
+        type: normalizedType as 'portfolio' | 'human',
         slug,
         user_id: user.id,
         metadata,
@@ -561,8 +547,8 @@ export async function createPortfolio(
       }
     }
 
-    // If this is a project (not community), add it to user's owned_projects list
-    if (type === 'projects') {
+    // Add new non-human portfolio to owner's owned list
+    if (normalizedType === 'portfolio') {
       try {
         await addProjectToOwnedList(user.id, portfolio.id)
       } catch (error) {
