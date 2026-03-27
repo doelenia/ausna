@@ -82,7 +82,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
             return (
               <Link
                 key={`portfolio-${item.id}`}
-                href={getPortfolioUrl(portfolio.type as any, portfolio.id)}
+                href={getPortfolioUrl((portfolio as any).slug || portfolio.id)}
                 className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
               >
                 {portfolio.avatar ? (

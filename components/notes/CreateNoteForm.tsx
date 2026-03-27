@@ -1126,7 +1126,9 @@ export function CreateNoteForm({
 
   const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
   const ownerName = ownerBasic?.name || 'You'
-  const ownerUrl = currentUserId ? getPortfolioUrl('human', ownerPortfolio?.id ?? '') : '#'
+  const ownerUrl = currentUserId
+    ? getPortfolioUrl(ownerPortfolio?.slug || ownerPortfolio?.id || currentUserId)
+    : '#'
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -1696,7 +1698,7 @@ export function CreateNoteForm({
         return (
           <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-100">
             <Link
-              href={getPortfolioUrl(context.type, context.id)}
+              href={getPortfolioUrl(context.slug || context.id)}
               className="flex items-start gap-3 flex-1 min-w-0 overflow-hidden"
             >
               <div className="flex-shrink-0">

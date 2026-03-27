@@ -1,14 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { parsePortfolioRoute } from '@/lib/portfolio/routes'
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, isActivityPortfolio } from '@/types/portfolio'
-import { getCurrentUserPendingActivityRequest, getCurrentUserPendingCommunityRequest } from './actions'
-import { notFound } from 'next/navigation'
-import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
-import { PortfolioView } from '@/components/portfolio/PortfolioView'
-import { getTopInterestedTopics } from '@/lib/indexing/interest-tracking'
-import { checkAdmin } from '@/lib/auth/requireAdmin'
-import Link from 'next/link'
-import { redirect } from 'next/navigation'
+import { Portfolio } from '@/types/portfolio'
+import { notFound, redirect } from 'next/navigation'
 
 interface PortfolioPageProps {
   params: {
@@ -26,18 +19,11 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
 
   const supabase = await createClient()
 
-  // Get current user for ownership check
-  // This will refresh the session if needed (middleware already refreshed it)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
   // Fetch portfolio by ID, slug, or user_id (for human portfolios)
   let portfolio: Portfolio | null = null
-  let errorBySlug: { message?: string } | null = null
 
   // Try fetching by ID first
-  const { data: portfolioById, error: errorById } = await supabase
+  const { data: portfolioById } = await supabase
     .from('portfolios')
     .select('*')
     .eq('id', id)
@@ -49,7 +35,7 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
   } else if (type === 'human') {
     // For human portfolios, also try fetching by user_id
     // This allows URLs like /portfolio/human/{user_id}
-    const { data: portfolioByUserId, error: errorByUserId } = await supabase
+    const { data: portfolioByUserId } = await supabase
       .from('portfolios')
       .select('*')
       .eq('user_id', id)
@@ -63,90 +49,23 @@ export default async function PortfolioPage({ params }: PortfolioPageProps) {
 
   if (!portfolio) {
     // Try fetching by slug as last resort
-    const { data: portfolioBySlug, error: slugError } = await supabase
+    const { data: portfolioBySlug } = await supabase
       .from('portfolios')
       .select('*')
       .eq('slug', id)
       .eq('type', type)
       .maybeSingle()
 
-    errorBySlug = slugError
     if (portfolioBySlug) {
       portfolio = portfolioBySlug as Portfolio
     }
   }
 
   if (!portfolio) {
-    // Log errors for debugging (only in development)
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Portfolio not found:', {
-        type,
-        id,
-        errorById: errorById?.message,
-        errorBySlug: errorBySlug?.message,
-      })
-      // Try to fetch all portfolios of this type to see what's available
-      const { data: allPortfolios } = await supabase
-        .from('portfolios')
-        .select('id, type, slug')
-        .eq('type', type)
-        .limit(10)
-      console.log('Available portfolios of type', type, ':', allPortfolios)
-    }
     notFound()
   }
 
-  // Normalize URL: always use slug in visible URL for sharing
-  if (portfolio.slug && id !== portfolio.slug) {
-    redirect(`/portfolio/${type}/${portfolio.slug}`)
-  }
-
-  // Check if user is owner - simple comparison (more reliable than separate query)
-  // Compare portfolio.user_id with authenticated user.id
-  const isOwner = user ? portfolio.user_id === user.id : false
-
-  // Extract basic info
-  const basic = getPortfolioBasic(portfolio)
-
-  // Fetch top 5 interested topics for human portfolios
-  let topInterests: Array<{ topic: any; memory_score: number; aggregate_score: number }> = []
-  if (isHumanPortfolio(portfolio)) {
-    try {
-      topInterests = await getTopInterestedTopics(portfolio.user_id, 5)
-    } catch (error) {
-      console.error('Failed to fetch top interests:', error)
-    }
-  }
-
-  // Check if user is admin
-  const adminUser = await checkAdmin()
-  const isAdmin = adminUser !== null
-
-  // For activities: whether current user has a pending join request (show "under review" instead of Apply)
-  let hasPendingApplication = false
-  if (user && isActivityPortfolio(portfolio)) {
-    const res = await getCurrentUserPendingActivityRequest(portfolio.id)
-    if (res.success && res.hasPending) hasPendingApplication = true
-  }
-
-  // For community: whether current user has a pending join request
-  let hasPendingCommunityApplication = false
-  if (user && isCommunityPortfolio(portfolio)) {
-    const res = await getCurrentUserPendingCommunityRequest(portfolio.id)
-    if (res.success && res.hasPending) hasPendingCommunityApplication = true
-  }
-
-  return (
-    <PortfolioView
-      portfolio={portfolio}
-      basic={basic}
-      isOwner={isOwner}
-      currentUserId={user?.id}
-      topInterests={topInterests}
-      isAdmin={isAdmin}
-      hasPendingApplication={hasPendingApplication}
-      hasPendingCommunityApplication={hasPendingCommunityApplication}
-    />
-  )
+  // Compatibility redirect: canonical URL is now /portfolio/[idOrSlug]
+  redirect(`/portfolio/${portfolio.slug || portfolio.id}`)
 }
 

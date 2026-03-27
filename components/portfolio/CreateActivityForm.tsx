@@ -32,7 +32,13 @@ interface HostCommunityOption {
   emoji?: string
 }
 
-export function CreateActivityForm() {
+export function CreateActivityForm({
+  targetType = 'activities',
+  mode = 'activity',
+}: {
+  targetType?: 'projects' | 'activities'
+  mode?: 'portfolio' | 'activity'
+}) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [name, setName] = useState('')
@@ -84,6 +90,10 @@ export function CreateActivityForm() {
   } | null>(null)
   const [linkVerified, setLinkVerified] = useState(false)
   const [iAmGoing, setIAmGoing] = useState(true)
+
+  const entityLabel = mode === 'portfolio' ? 'portfolio' : 'activity'
+  const entityLabelTitle = mode === 'portfolio' ? 'Portfolio' : 'Activity'
+  const showHosts = mode !== 'portfolio'
 
   const handleContinue = async () => {
     const url = externalLink.trim()
@@ -152,6 +162,7 @@ export function CreateActivityForm() {
 
   useEffect(() => {
     const fetchHostProjects = async () => {
+      if (!showHosts) return
       setHostProjectsLoading(true)
       try {
         const {
@@ -206,6 +217,7 @@ export function CreateActivityForm() {
 
   useEffect(() => {
     const fetchHostCommunities = async () => {
+      if (!showHosts) return
       setHostCommunitiesLoading(true)
       try {
         const {
@@ -343,7 +355,7 @@ export function CreateActivityForm() {
 
     try {
       const formData = new FormData()
-      formData.append('type', 'activities')
+      formData.append('type', targetType)
       formData.append('name', name.trim())
       if (description.trim()) {
         formData.append('description', description.trim())
@@ -352,10 +364,10 @@ export function CreateActivityForm() {
         formData.append('is_external', 'true')
         formData.append('external_link', externalLink.trim())
       } else {
-        if (hostProjectIds.length > 0) {
+        if (showHosts && hostProjectIds.length > 0) {
           formData.append('host_project_ids', JSON.stringify(hostProjectIds))
         }
-        if (hostCommunityIds.length > 0) {
+        if (showHosts && hostCommunityIds.length > 0) {
           formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
         }
       }
@@ -457,24 +469,24 @@ export function CreateActivityForm() {
       const result = await createPortfolio(formData)
 
       if (result.error || !result.success) {
-        setError(result.error || 'Failed to create activity')
+        setError(result.error || `Failed to create ${entityLabel}`)
         setLoading(false)
         return
       }
 
       if (!result.portfolioId) {
-        setError('Activity created but no ID returned')
+        setError(`${entityLabelTitle} created but no ID returned`)
         setLoading(false)
         return
       }
 
-      const redirectUrl = `/portfolio/activities/${result.portfolioId}`
+      const redirectUrl = `/portfolio/${result.portfolioId}`
       if (process.env.NODE_ENV === 'development') {
-        console.log('Redirecting to:', redirectUrl, { type: 'activities', portfolioId: result.portfolioId })
+        console.log('Redirecting to:', redirectUrl, { type: targetType, portfolioId: result.portfolioId })
       }
       window.location.href = redirectUrl
     } catch (err: any) {
-      setError(err.message || 'Failed to create activity')
+      setError(err.message || `Failed to create ${entityLabel}`)
       setLoading(false)
     }
   }
@@ -492,7 +504,7 @@ export function CreateActivityForm() {
         {/* External toggle */}
         <div className="flex items-center justify-between">
           <UIText as="label" className="block">
-            External activity
+            External {entityLabel}
           </UIText>
           <button
             type="button"
@@ -523,7 +535,7 @@ export function CreateActivityForm() {
           </button>
         </div>
         <UIText as="p" className="text-xs text-gray-500 -mt-2">
-          External activities link to events on other sites. Anyone can join without approval.
+          External {entityLabel}s link to items on other sites. Anyone can join without approval.
         </UIText>
 
         {isExternal && (
@@ -557,7 +569,7 @@ export function CreateActivityForm() {
             </div>
             {existingActivity && (
               <Link
-                href={getPortfolioUrl('activities', existingActivity.id)}
+                href={getPortfolioUrl(existingActivity.slug || existingActivity.id)}
                 className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
               >
                 <div className="flex-shrink-0">
@@ -694,7 +706,7 @@ export function CreateActivityForm() {
             required
             maxLength={100}
             className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="Enter activity name"
+            placeholder={`Enter ${entityLabel} name`}
             disabled={loading}
           />
         </div>
@@ -734,7 +746,7 @@ export function CreateActivityForm() {
           </div>
         )}
 
-        {!isExternal && (
+        {showHosts && !isExternal && (
         <div>
           <UIText as="label" className="block mb-2">
             Hosts (optional)
@@ -832,7 +844,7 @@ export function CreateActivityForm() {
 
         <div className="mt-4">
           <UIText as="label" className="block mb-2">
-            Activity date &amp; time
+            Date &amp; time
           </UIText>
           <div className="max-w-full">
             <ActivityDateTimeField
@@ -1000,7 +1012,7 @@ export function CreateActivityForm() {
             disabled={loading || !!existingActivity || !name.trim() || (!isExternal && !avatarFile && !selectedEmoji)}
           >
             <UIText>
-              {existingActivity ? 'Event already exists' : loading ? 'Creating...' : 'Create Activity'}
+              {existingActivity ? 'Event already exists' : loading ? 'Creating...' : `Create ${entityLabelTitle}`}
             </UIText>
           </Button>
         </div>

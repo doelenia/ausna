@@ -124,23 +124,23 @@ export async function createPortfolio(
       }
     }
 
-    // External activities require a link
-    if (type === 'activities' && isExternal && !externalLink) {
+    // External portfolios require a link
+    if (isExternal && !externalLink) {
       return {
         success: false,
-        error: 'Event link is required for external activities',
+        error: 'Link is required for external portfolios',
       }
     }
 
-    // External activities: check for duplicate link
-    if (type === 'activities' && isExternal && externalLink) {
+    // External portfolios: check for duplicate link (across all non-human portfolios)
+    if (isExternal && externalLink) {
       const normalizedLink = normalizeExternalLink(externalLink)
-      const { data: activities } = await supabase
+      const { data: portfolios } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'activities')
+        .in('type', ['projects', 'community', 'activities'])
 
-      const duplicate = (activities || []).find((p: any) => {
+      const duplicate = (portfolios || []).find((p: any) => {
         const props = p.metadata?.properties || {}
         if (props.external !== true) return false
         const stored = (props.external_link as string) || ''
@@ -150,7 +150,7 @@ export async function createPortfolio(
       if (duplicate) {
         return {
           success: false,
-          error: 'An activity with this event link already exists',
+          error: 'A portfolio with this link already exists',
         }
       }
     }
@@ -181,12 +181,11 @@ export async function createPortfolio(
     let slug = baseSlug
     let slugCounter = 1
 
-    // Ensure slug is unique for this type
+    // Ensure slug is unique globally (canonical route is /portfolio/[slug])
     while (true) {
       const { data: existing } = await supabase
         .from('portfolios')
         .select('id')
-        .eq('type', type)
         .eq('slug', slug)
         .single()
 
@@ -207,21 +206,17 @@ export async function createPortfolio(
           ? 'private'
           : 'public'
 
-    // For external activities, use favicon as avatar when no file/emoji provided
+    // For external portfolios, use favicon as avatar when no file/emoji provided
     const externalAvatarUrl =
-      type === 'activities' && isExternal && !avatarFile && !emoji
-        ? avatarUrl || getFaviconUrl(externalLink)
-        : ''
+      isExternal && !avatarFile && !emoji ? avatarUrl || getFaviconUrl(externalLink) : ''
 
-    // For external activities, creator is only in members if they chose "I'm going"
-    const initialMembers =
-      type === 'activities' && isExternal ? (iAmGoing ? [user.id] : []) : [user.id]
-    const initialMemberRoles: Record<string, string> =
-      type === 'activities' && isExternal
-        ? iAmGoing
-          ? { [user.id]: creatorRole.trim() || 'Uploader' }
-          : {}
-        : { [user.id]: creatorRole.trim() || 'Creator' }
+    // For external portfolios, creator is only in members if they chose "I'm going"
+    const initialMembers = isExternal ? (iAmGoing ? [user.id] : []) : [user.id]
+    const initialMemberRoles: Record<string, string> = isExternal
+      ? iAmGoing
+        ? { [user.id]: creatorRole.trim() || 'Uploader' }
+        : {}
+      : { [user.id]: creatorRole.trim() || 'Creator' }
 
     // Create portfolio metadata structure
     const metadata: any = {
@@ -244,144 +239,137 @@ export async function createPortfolio(
       memberRoles: initialMemberRoles,
     }
 
-    // Attach initial activity_datetime, location, and call-to-join for activities when provided
-    if (type === 'activities') {
-      let activityNormalized: any = null
+    // Attach initial time, location, external-link, and call-to-join properties for any non-human portfolio.
+    const hasAnyActivityField =
+      (activityStartRaw && activityStartRaw.trim().length > 0) ||
+      (activityEndRaw && activityEndRaw.trim().length > 0) ||
+      (activityInProgressRaw && activityInProgressRaw.trim().length > 0) ||
+      (activityAllDayRaw && activityAllDayRaw.trim().length > 0)
 
-      const hasAnyActivityField =
-        (activityStartRaw && activityStartRaw.trim().length > 0) ||
-        (activityEndRaw && activityEndRaw.trim().length > 0) ||
-        (activityInProgressRaw && activityInProgressRaw.trim().length > 0) ||
-        (activityAllDayRaw && activityAllDayRaw.trim().length > 0)
-
-      if (hasAnyActivityField) {
-        const normalized = normalizeActivityDateTime(
-          {
-            start: activityStartRaw || '',
-            end: activityEndRaw || undefined,
-            inProgress: activityInProgressRaw === 'true',
-            allDay: activityAllDayRaw === 'true',
-          },
-          { intervalMinutes: 1 }
-        )
-        
-        if (normalized) {
-          activityNormalized = normalized
-          metadata.properties = {
-            ...(metadata.properties || {}),
-            activity_datetime: normalized,
-          }
-        }
-      }
-
-      const locationLine1 = activityLocationLine1Raw?.trim() || ''
-      const locationCity = activityLocationCityRaw?.trim() || ''
-      const locationState = activityLocationStateRaw?.trim() || ''
-      const locationCountry = activityLocationCountryRaw?.trim() || ''
-      const locationCountryCode = activityLocationCountryCodeRaw?.trim() || ''
-      const locationStateCode = activityLocationStateCodeRaw?.trim() || ''
-      const locationPrivate = activityLocationPrivateRaw === 'true'
-
-      const isLocationOnline = activityLocationOnlineRaw === 'true'
-      const locationOnlineUrl = (activityLocationOnlineUrlRaw || '').trim() || undefined
-      const locationOnlinePrivate = activityLocationOnlinePrivateRaw === 'true'
-
-      const hasAnyLocationField =
-        locationLine1.length > 0 ||
-        locationCity.length > 0 ||
-        locationState.length > 0 ||
-        locationCountry.length > 0 ||
-        locationPrivate ||
-        isLocationOnline ||
-        locationOnlinePrivate
-
-      if (hasAnyLocationField) {
-        const location: Record<string, any> = {}
-        if (isLocationOnline) {
-          location.online = true
-          if (locationOnlineUrl) location.onlineUrl = locationOnlineUrl
-          if (locationOnlinePrivate) location.isOnlineLocationPrivate = true
-        } else {
-          if (locationLine1) location.line1 = locationLine1
-          if (locationCity) location.city = locationCity
-          if (locationState) location.state = locationState
-          if (locationCountry) location.country = locationCountry
-          if (locationCountryCode) location.countryCode = locationCountryCode
-          if (locationStateCode) location.stateCode = locationStateCode
-          if (locationPrivate) location.isExactLocationPrivate = true
-        }
-
-        if (Object.keys(location).length > 0) {
-          metadata.properties = {
-            ...(metadata.properties || {}),
-            location,
-          }
-        }
-      }
-
-      // External activities: set external flag and link; no call-to-join
-      if (isExternal && externalLink) {
+    if (hasAnyActivityField) {
+      const normalized = normalizeActivityDateTime(
+        {
+          start: activityStartRaw || '',
+          end: activityEndRaw || undefined,
+          inProgress: activityInProgressRaw === 'true',
+          allDay: activityAllDayRaw === 'true',
+        },
+        { intervalMinutes: 1 }
+      )
+      if (normalized) {
         metadata.properties = {
           ...(metadata.properties || {}),
-          external: true,
-          external_link: externalLink,
+          activity_datetime: normalized,
+        }
+      }
+    }
+
+    const locationLine1 = activityLocationLine1Raw?.trim() || ''
+    const locationCity = activityLocationCityRaw?.trim() || ''
+    const locationState = activityLocationStateRaw?.trim() || ''
+    const locationCountry = activityLocationCountryRaw?.trim() || ''
+    const locationCountryCode = activityLocationCountryCodeRaw?.trim() || ''
+    const locationStateCode = activityLocationStateCodeRaw?.trim() || ''
+    const locationPrivate = activityLocationPrivateRaw === 'true'
+
+    const isLocationOnline = activityLocationOnlineRaw === 'true'
+    const locationOnlineUrl = (activityLocationOnlineUrlRaw || '').trim() || undefined
+    const locationOnlinePrivate = activityLocationOnlinePrivateRaw === 'true'
+
+    const hasAnyLocationField =
+      locationLine1.length > 0 ||
+      locationCity.length > 0 ||
+      locationState.length > 0 ||
+      locationCountry.length > 0 ||
+      locationPrivate ||
+      isLocationOnline ||
+      locationOnlinePrivate
+
+    if (hasAnyLocationField) {
+      const location: Record<string, any> = {}
+      if (isLocationOnline) {
+        location.online = true
+        if (locationOnlineUrl) location.onlineUrl = locationOnlineUrl
+        if (locationOnlinePrivate) location.isOnlineLocationPrivate = true
+      } else {
+        if (locationLine1) location.line1 = locationLine1
+        if (locationCity) location.city = locationCity
+        if (locationState) location.state = locationState
+        if (locationCountry) location.country = locationCountry
+        if (locationCountryCode) location.countryCode = locationCountryCode
+        if (locationStateCode) location.stateCode = locationStateCode
+        if (locationPrivate) location.isExactLocationPrivate = true
+      }
+
+      if (Object.keys(location).length > 0) {
+        metadata.properties = {
+          ...(metadata.properties || {}),
+          location,
+        }
+      }
+    }
+
+    // External portfolios: set external flag and link; no call-to-join
+    if (isExternal && externalLink) {
+      metadata.properties = {
+        ...(metadata.properties || {}),
+        external: true,
+        external_link: externalLink,
+      }
+    }
+
+    // Call-to-join: on when portfolio is not private and not external.
+    if (!isExternal && visibility !== 'private') {
+      const existingProperties: Record<string, any> = metadata.properties || {}
+
+      let callToJoinRoles: Array<{ id: string; label: string; activityRole: string }> = [
+        { id: 'default-member', label: 'Member', activityRole: 'member' },
+      ]
+      if (activityCallToJoinRolesRaw && typeof activityCallToJoinRolesRaw === 'string') {
+        try {
+          const parsed = JSON.parse(activityCallToJoinRolesRaw)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            callToJoinRoles = parsed
+          }
+        } catch {
+          // Ignore parse errors and keep default roles
         }
       }
 
-      // Call-to-join: on when activity is not private and not external.
-      // No default join_by; window closes when activity end has passed or status is archived.
-      if (!isExternal && visibility !== 'private') {
-        const existingProperties: Record<string, any> = metadata.properties || {}
+      const descriptionOverride =
+        activityCallToJoinDescriptionRaw && activityCallToJoinDescriptionRaw.trim().length > 0
+          ? activityCallToJoinDescriptionRaw.trim()
+          : 'Join us!'
 
-        let callToJoinRoles: Array<{ id: string; label: string; activityRole: string }> = [
-          { id: 'default-member', label: 'Member', activityRole: 'member' },
-        ]
-        if (activityCallToJoinRolesRaw && typeof activityCallToJoinRolesRaw === 'string') {
-          try {
-            const parsed = JSON.parse(activityCallToJoinRolesRaw)
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              callToJoinRoles = parsed
-            }
-          } catch {
-            // Ignore parse errors and keep default roles
-          }
+      const requireApproval =
+        activityCallToJoinRequireApprovalRaw == null
+          ? true
+          : activityCallToJoinRequireApprovalRaw === 'true'
+
+      let joinBy: string | null = null
+      if (activityCallToJoinJoinByRaw && activityCallToJoinJoinByRaw.trim().length > 0) {
+        const explicit = new Date(activityCallToJoinJoinByRaw)
+        if (!Number.isNaN(explicit.getTime())) {
+          joinBy = explicit.toISOString()
         }
+      }
 
-        const descriptionOverride =
-          activityCallToJoinDescriptionRaw && activityCallToJoinDescriptionRaw.trim().length > 0
-            ? activityCallToJoinDescriptionRaw.trim()
-            : 'Join us!'
+      const defaultPrompt = 'Why do you want to join?'
+      let prompt: string | null = requireApproval ? defaultPrompt : null
+      if (requireApproval && activityCallToJoinPromptRaw && activityCallToJoinPromptRaw.trim().length > 0) {
+        prompt = activityCallToJoinPromptRaw.trim()
+      }
 
-        const requireApproval =
-          activityCallToJoinRequireApprovalRaw == null
-            ? true
-            : activityCallToJoinRequireApprovalRaw === 'true'
-
-        let joinBy: string | null = null
-        if (activityCallToJoinJoinByRaw && activityCallToJoinJoinByRaw.trim().length > 0) {
-          const explicit = new Date(activityCallToJoinJoinByRaw)
-          if (!Number.isNaN(explicit.getTime())) {
-            joinBy = explicit.toISOString()
-          }
-        }
-
-        const defaultPrompt = 'Why do you want to join this activity?'
-        let prompt: string | null = requireApproval ? defaultPrompt : null
-        if (requireApproval && activityCallToJoinPromptRaw && activityCallToJoinPromptRaw.trim().length > 0) {
-          prompt = activityCallToJoinPromptRaw.trim()
-        }
-
-        metadata.properties = {
-          ...existingProperties,
-          call_to_join: {
-            enabled: true,
-            description: descriptionOverride,
-            join_by: joinBy,
-            require_approval: requireApproval,
-            prompt,
-            roles: callToJoinRoles,
-          },
-        }
+      metadata.properties = {
+        ...existingProperties,
+        call_to_join: {
+          enabled: true,
+          description: descriptionOverride,
+          join_by: joinBy,
+          require_approval: requireApproval,
+          prompt,
+          roles: callToJoinRoles,
+        },
       }
     }
 

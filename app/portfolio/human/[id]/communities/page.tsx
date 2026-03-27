@@ -169,7 +169,7 @@ export default async function CommunitiesPage({ params }: CommunitiesPageProps) 
                 className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
               >
                 <Link
-                  href={getPortfolioUrl('community', community.id)}
+                  href={getPortfolioUrl(community.id)}
                   className="flex items-center gap-3 hover:opacity-80"
                 >
                   <StickerAvatar

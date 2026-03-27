@@ -389,7 +389,7 @@ export function NoteView({
       // Navigate to first portfolio if available, otherwise to main feed
       if (portfolios && portfolios.length > 0) {
         const firstPortfolio = portfolios[0]
-        router.push(getPortfolioUrl(firstPortfolio.type, firstPortfolio.id))
+        router.push(getPortfolioUrl(firstPortfolio.slug || firstPortfolio.id))
       } else {
         router.push('/main')
       }

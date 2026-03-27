@@ -82,7 +82,7 @@ export function SubPortfoliosTab({
             {communities.slice(0, 10).map((community) => (
               <Link
                 key={community.id}
-                href={getPortfolioUrl('community', community.id)}
+                href={getPortfolioUrl(community.id)}
                 className="flex-shrink-0 w-64 bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
               >
                 {community.avatar ? (
@@ -136,7 +136,7 @@ export function SubPortfoliosTab({
           {projects.map((project) => (
             <Link
               key={project.id}
-              href={getPortfolioUrl('projects', project.id)}
+              href={getPortfolioUrl(project.id)}
               className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
             >
               <div className="flex gap-4">

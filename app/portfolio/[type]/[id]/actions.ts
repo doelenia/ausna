@@ -465,30 +465,12 @@ export async function updatePortfolio(
       // If not provided in formData, leave existing values unchanged
     }
 
-    // For project portfolios, keep status/visibility but do not manage activity datetime/location
-    if (portfolio.type === 'projects') {
-      if (projectStatusRaw !== null) {
-        // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
-        const normalizedStatus =
-          projectStatusRaw === 'archived'
-            ? 'archived'
-            : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
-              ? 'live'
-              : undefined
-        if (normalizedStatus) {
-          updatedMetadata.status = normalizedStatus
-        } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
-          delete updatedMetadata.status
-        }
-      }
-    }
-
-    // For activity portfolios, update activity_datetime, location, and status inside metadata
-    // and later notify members when time and/or location changes.
+    // Persist time/location for any non-human portfolio.
+    // For activities, we also track changes for member notifications.
     let activityTimeChanged = false
     let activityLocationChanged = false
 
-    if (portfolio.type === 'activities') {
+    if (portfolio.type !== 'human') {
       const properties = (currentMetadata.properties || {}) as Record<string, any>
       const hasAnyActivityField =
         (activityStartRaw && activityStartRaw.trim().length > 0) ||
@@ -523,9 +505,11 @@ export async function updatePortfolio(
 
           const nextActivityDateTime = (nextProperties.activity_datetime ||
             null) as import('@/lib/datetime').ActivityDateTimeValue | null
-          activityTimeChanged =
-            JSON.stringify(previousActivityDateTime || null) !==
-            JSON.stringify(nextActivityDateTime || null)
+          if (portfolio.type === 'activities') {
+            activityTimeChanged =
+              JSON.stringify(previousActivityDateTime || null) !==
+              JSON.stringify(nextActivityDateTime || null)
+          }
         } else {
           // If normalization failed, remove the property rather than saving invalid data
           const { activity_datetime, ...rest } = properties
@@ -535,7 +519,9 @@ export async function updatePortfolio(
           const hasNext =
             (updatedMetadata.properties as Record<string, any> | undefined)
               ?.activity_datetime != null
-          activityTimeChanged = hadPrevious !== hasNext
+          if (portfolio.type === 'activities') {
+            activityTimeChanged = hadPrevious !== hasNext
+          }
         }
       } else if (properties && Object.prototype.hasOwnProperty.call(properties, 'activity_datetime')) {
         const { activity_datetime, ...rest } = properties
@@ -545,7 +531,9 @@ export async function updatePortfolio(
         const hasNext =
           (updatedMetadata.properties as Record<string, any> | undefined)
             ?.activity_datetime != null
-        activityTimeChanged = hadPrevious !== hasNext
+        if (portfolio.type === 'activities') {
+          activityTimeChanged = hadPrevious !== hasNext
+        }
       }
 
       const locationLine1 = activityLocationLine1Raw?.trim() || ''
@@ -609,9 +597,11 @@ export async function updatePortfolio(
 
           const nextLocation = (nextProperties.location ||
             null) as import('@/lib/location').ActivityLocationValue | null
-          activityLocationChanged =
-            JSON.stringify(previousLocation || null) !==
-            JSON.stringify(nextLocation || null)
+          if (portfolio.type === 'activities') {
+            activityLocationChanged =
+              JSON.stringify(previousLocation || null) !==
+              JSON.stringify(nextLocation || null)
+          }
         } else if (Object.prototype.hasOwnProperty.call(nextProperties, 'location')) {
           const { location, ...rest } = nextProperties
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
@@ -620,24 +610,28 @@ export async function updatePortfolio(
           const hasNext =
             (updatedMetadata.properties as Record<string, any> | undefined)
               ?.location != null
-          activityLocationChanged = hadPrevious !== hasNext
+          if (portfolio.type === 'activities') {
+            activityLocationChanged = hadPrevious !== hasNext
+          }
         } else {
           updatedMetadata.properties = Object.keys(nextProperties).length > 0 ? nextProperties : undefined
         }
       }
 
-      if (projectStatusRaw !== null) {
-        // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
-        const normalizedStatus =
-          projectStatusRaw === 'archived'
-            ? 'archived'
-            : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
-              ? 'live'
-              : undefined
-        if (normalizedStatus) {
-          updatedMetadata.status = normalizedStatus
-        } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
-          delete updatedMetadata.status
+      if (portfolio.type === 'projects' || portfolio.type === 'activities') {
+        if (projectStatusRaw !== null) {
+          // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
+          const normalizedStatus =
+            projectStatusRaw === 'archived'
+              ? 'archived'
+              : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
+                ? 'live'
+                : undefined
+          if (normalizedStatus) {
+            updatedMetadata.status = normalizedStatus
+          } else if (Object.prototype.hasOwnProperty.call(updatedMetadata, 'status')) {
+            delete updatedMetadata.status
+          }
         }
       }
 
@@ -853,7 +847,7 @@ export async function updatePortfolio(
 
           const baseUrl =
             process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-          const activityPath = `/portfolio/activities/${portfolioId}`
+          const activityPath = `/portfolio/${portfolioId}`
           const activityUrl = `${baseUrl}${activityPath}`
 
           const text = `updated the ${changeLabel} for ${activityName} (activity). View details: ${activityPath}`
@@ -1142,11 +1136,11 @@ export async function updateActivityCallToJoin(
       .single()
 
     if (portfolioError || !portfolio) {
-      return { success: false, error: 'Activity not found' }
+      return { success: false, error: 'Portfolio not found' }
     }
 
-    if (portfolio.type !== 'activities') {
-      return { success: false, error: 'Call-to-join is only available for activities' }
+    if (portfolio.type === 'human') {
+      return { success: false, error: 'Call-to-join is not available for human portfolios' }
     }
 
     const metadata = (portfolio.metadata as any) || {}
@@ -1233,8 +1227,10 @@ export async function updateActivityCallToJoin(
       }
     }
 
-    revalidatePath(`/portfolio/activities/${portfolioId}`)
-    revalidatePath(`/portfolio/activities/${portfolioId}/members`)
+    // Canonical route + legacy typed route (typed redirects but may still be cached)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1260,7 +1256,7 @@ export async function getPendingJoinRequestsCount(
       .select('id, type, user_id, metadata')
       .eq('id', portfolioId)
       .single()
-    if (!portfolio || portfolio.type !== 'activities') {
+    if (!portfolio || portfolio.type === 'human') {
       return { success: false, error: 'Not found' }
     }
     const metadata = (portfolio.metadata as any) || {}
@@ -1297,7 +1293,7 @@ export async function getCurrentUserPendingActivityRequest(
       .select('id, type')
       .eq('id', portfolioId)
       .single()
-    if (!portfolio || portfolio.type !== 'activities') {
+    if (!portfolio || portfolio.type === 'human') {
       return { success: false, error: 'Not found' }
     }
     const { data: request, error } = await supabase
@@ -1348,8 +1344,8 @@ export async function respondToActivityJoinRequest(
       .eq('id', activityId)
       .single()
 
-    if (portfolioError || !portfolio || portfolio.type !== 'activities') {
-      return { success: false, error: 'Activity not found for this request' }
+    if (portfolioError || !portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Portfolio not found for this request' }
     }
 
     const metadata = (portfolio.metadata as any) || {}
@@ -1379,11 +1375,12 @@ export async function respondToActivityJoinRequest(
     }
 
     const basic = metadata?.basic || {}
-    const activityName = (basic.name as string) || 'this activity'
+    const portfolioName = (basic.name as string) || 'this portfolio'
+    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
     const text =
       message.trim().length > 0
-        ? `Regarding your request to join ${activityName} (activity): ${message.trim()}`
-        : `We received your request to join ${activityName} (activity). We’ll get back to you soon.`
+        ? `Regarding your request to join ${portfolioName} (${label}): ${message.trim()}`
+        : `We received your request to join ${portfolioName} (${label}). We’ll get back to you soon.`
 
     await supabase.from('messages').insert({
       sender_id: user.id,
@@ -1396,8 +1393,9 @@ export async function respondToActivityJoinRequest(
       .eq('user_id', request.applicant_user_id)
       .eq('partner_id', user.id)
 
-    revalidatePath(`/portfolio/activities/${activityId}`)
-    revalidatePath(`/portfolio/activities/${activityId}/members`)
+    revalidatePath(`/portfolio/${activityId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${activityId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${activityId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1429,16 +1427,16 @@ export async function applyToActivityCallToJoin(
       .single()
 
     if (portfolioError || !portfolio) {
-      return { success: false, error: 'Activity not found' }
+      return { success: false, error: 'Portfolio not found' }
     }
 
-    if (portfolio.type !== 'activities') {
-      return { success: false, error: 'Call-to-join is only available for activities' }
+    if (portfolio.type === 'human') {
+      return { success: false, error: 'Call-to-join is not available for human portfolios' }
     }
 
     const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
     if (visibility === 'private') {
-      return { success: false, error: 'Call-to-join is not available for private activities' }
+      return { success: false, error: 'Call-to-join is not available for private portfolios' }
     }
 
     const metadata = (portfolio.metadata as any) || {}
@@ -1446,9 +1444,9 @@ export async function applyToActivityCallToJoin(
     const callToJoin: ActivityCallToJoinConfig | undefined = properties.call_to_join
     const isExternal = properties.external === true
 
-    // External activities: always publicly joinable, no call-to-join config needed
+    // External portfolios: always publicly joinable, no call-to-join config needed
     if (!isExternal && !callToJoin) {
-      return { success: false, error: 'Call-to-join is not configured for this activity' }
+      return { success: false, error: 'Call-to-join is not configured for this portfolio' }
     }
 
     if (!isExternal) {
@@ -1456,7 +1454,7 @@ export async function applyToActivityCallToJoin(
       const status = (metadata.status as string) || null
       const { isCallToJoinWindowOpen } = await import('@/lib/callToJoin')
       if (!isCallToJoinWindowOpen(visibility, callToJoin!, activityDateTime, status)) {
-        return { success: false, error: 'The call-to-join window for this activity is closed' }
+        return { success: false, error: 'The call-to-join window for this portfolio is closed' }
       }
     }
 
@@ -1468,7 +1466,7 @@ export async function applyToActivityCallToJoin(
     const isMember = Array.isArray(members) && members.includes(user.id)
 
     if (isOwner || isManager || isMember) {
-      return { success: false, error: 'You are already part of this activity' }
+      return { success: false, error: 'You are already part of this portfolio' }
     }
 
     // Role is configured after joining; new members join as member by default
@@ -1490,7 +1488,8 @@ export async function applyToActivityCallToJoin(
     }
 
     const basic = metadata?.basic || {}
-    const activityName = (basic.name as string) || 'this activity'
+    const portfolioName = (basic.name as string) || 'this portfolio'
+    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
 
     // External activities: always auto-join. Non-external with approval: create pending request.
     if (!isExternal && callToJoin?.require_approval) {
@@ -1506,7 +1505,7 @@ export async function applyToActivityCallToJoin(
       if (existingRequest) {
         return {
           success: false,
-          error: 'You already have a pending request for this activity',
+          error: 'You already have a pending request for this portfolio',
         }
       }
 
@@ -1526,11 +1525,11 @@ export async function applyToActivityCallToJoin(
         }
       }
 
-      // Notify activity owner; link directs to Requests & Invites tab
-      const requestsUrl = `/portfolio/activities/${portfolioId}/members?tab=requests`
+      // Notify owner; link directs to Requests tab
+      const requestsUrl = `/portfolio/${portfolio.type}/${portfolioId}/members?tab=requests`
       await sendMessage(
         portfolio.user_id,
-        `applied to join ${activityName} (activity). Review: ${requestsUrl}`
+        `applied to join ${portfolioName} (${label}). Review: ${requestsUrl}`
       )
 
       return {
@@ -1582,7 +1581,7 @@ export async function applyToActivityCallToJoin(
       if (directError) {
         return {
           success: false,
-          error: directError.message || 'Failed to join activity',
+          error: directError.message || 'Failed to join portfolio',
         }
       }
     } else {
@@ -1594,7 +1593,7 @@ export async function applyToActivityCallToJoin(
       if (metadataError) {
         return {
           success: false,
-          error: metadataError.message || 'Failed to update activity membership',
+          error: metadataError.message || 'Failed to update membership',
         }
       }
     }
@@ -1614,7 +1613,7 @@ export async function applyToActivityCallToJoin(
     // Notify owner about the new member
     await sendMessage(
       portfolio.user_id,
-      `joined ${activityName} (activity) as ${memberRoleLabel}`
+      `joined ${portfolioName} (${label}) as ${memberRoleLabel}`
     )
 
     try {
@@ -1624,8 +1623,9 @@ export async function applyToActivityCallToJoin(
       console.error('Failed to add portfolio topics to user interests:', interestError)
     }
 
-    revalidatePath(`/portfolio/activities/${portfolioId}`)
-    revalidatePath(`/portfolio/activities/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1668,8 +1668,8 @@ export async function approveActivityJoinRequest(
       .eq('id', activityId)
       .single()
 
-    if (portfolioError || !portfolio || portfolio.type !== 'activities') {
-      return { success: false, error: 'Activity not found for this request' }
+    if (portfolioError || !portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Portfolio not found for this request' }
     }
 
     const metadata = (portfolio.metadata as any) || {}
@@ -1767,12 +1767,13 @@ export async function approveActivityJoinRequest(
     }
 
     const basic = metadata?.basic || {}
-    const activityName = (basic.name as string) || 'this activity'
+    const portfolioName = (basic.name as string) || 'this portfolio'
+    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
 
     await supabase.from('messages').insert({
       sender_id: user.id,
       receiver_id: applicantId,
-      text: `approved your request to join ${activityName} (activity) as ${memberRoleLabel}`,
+      text: `approved your request to join ${portfolioName} (${label}) as ${memberRoleLabel}`,
     })
     await supabase
       .from('conversation_completions')
@@ -1788,8 +1789,9 @@ export async function approveActivityJoinRequest(
       console.error('Failed to add portfolio topics to user interests:', interestError)
     }
 
-    revalidatePath(`/portfolio/activities/${activityId}`)
-    revalidatePath(`/portfolio/activities/${activityId}/members`)
+    revalidatePath(`/portfolio/${activityId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${activityId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${activityId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1833,8 +1835,8 @@ export async function rejectActivityJoinRequest(
       .eq('id', activityId)
       .single()
 
-    if (portfolioError || !portfolio || portfolio.type !== 'activities') {
-      return { success: false, error: 'Activity not found for this request' }
+    if (portfolioError || !portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Portfolio not found for this request' }
     }
 
     const metadata = (portfolio.metadata as any) || {}
@@ -1867,9 +1869,10 @@ export async function rejectActivityJoinRequest(
     }
 
     const basic = metadata?.basic || {}
-    const activityName = (basic.name as string) || 'this activity'
+    const portfolioName = (basic.name as string) || 'this portfolio'
+    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
 
-    let text = `rejected your request to join ${activityName} (activity)`
+    let text = `rejected your request to join ${portfolioName} (${label})`
     if (rejectionMessage && rejectionMessage.trim().length > 0) {
       text += `: ${rejectionMessage.trim()}`
     }
@@ -1886,8 +1889,9 @@ export async function rejectActivityJoinRequest(
         `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
       )
 
-    revalidatePath(`/portfolio/activities/${activityId}`)
-    revalidatePath(`/portfolio/activities/${activityId}/members`)
+    revalidatePath(`/portfolio/${activityId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${activityId}`)
+    revalidatePath(`/portfolio/${portfolio.type}/${activityId}/members`)
 
     return { success: true }
   } catch (error: any) {

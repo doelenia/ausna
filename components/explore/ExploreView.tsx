@@ -390,7 +390,7 @@ export function ActivityCard({
   memberLabel?: string
   memberUserIds?: string[]
   memberUsers?: Array<{ userId: string; name?: string | null; avatar?: string | null }>
-  avatarTypeOverride?: 'activities' | 'projects' | 'community' | 'human'
+  avatarTypeOverride?: string
 }) {
   const dateStr = activity.activityDateTime?.start
     ? formatDateOnly(activity.activityDateTime.start)
@@ -398,8 +398,8 @@ export function ActivityCard({
   const locationStr = formatLocationShort(activity.location)
   const hasDate = !!dateStr
   const hasLocation = !!locationStr
-  const href = hrefOverride ?? `/portfolio/activities/${activity.id}`
-  const avatarType = avatarTypeOverride ?? 'activities'
+  const href = hrefOverride ?? `/portfolio/${activity.id}`
+  const avatarType = avatarTypeOverride ?? 'portfolio'
 
   return (
     <div>

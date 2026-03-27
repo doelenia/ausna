@@ -5,11 +5,11 @@ import Link from 'next/link'
 import { UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { Content, UIText, UIButtonText } from '@/components/ui'
-import { PortfolioType } from '@/types/portfolio'
+import { normalizePortfolioType } from '@/types/portfolio'
 
 interface SearchResult {
   id: string
-  type: PortfolioType
+  type: string
   name: string
   description?: string
   avatar?: string | null
@@ -75,7 +75,8 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
     }
 
     if (mutualInfo) {
-      if (result.type === 'human') {
+      const normalizedType = normalizePortfolioType(result.type) || 'portfolio'
+      if (normalizedType === 'human') {
         // Prioritize mutual communities, then mutual friends
         if (mutualInfo.mutualCommunities.length > 0) {
           const community = mutualInfo.mutualCommunities[0]
@@ -95,26 +96,15 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
             return { text: `${mutualInfo.mutualFriends.length} mutual friends`, isBold: true }
           }
         }
-      } else if (result.type === 'projects') {
+      } else {
         // Show friends who are members
         if (mutualInfo.mutualFriends.length > 0) {
           const friend = mutualInfo.mutualFriends[0]
           if (mutualInfo.mutualFriends.length === 1 && friend.name) {
-            return { text: `${friend.name} is on this project`, isBold: true }
+            return { text: `${friend.name} is connected to this`, isBold: true }
           }
           if (mutualInfo.mutualFriends.length > 1) {
-            return { text: `${mutualInfo.mutualFriends.length} friends are on this project`, isBold: true }
-          }
-        }
-      } else if (result.type === 'community') {
-        // Show friends who are members
-        if (mutualInfo.mutualFriends.length > 0) {
-          const friend = mutualInfo.mutualFriends[0]
-          if (mutualInfo.mutualFriends.length === 1 && friend.name) {
-            return { text: `${friend.name} joined this community`, isBold: true }
-          }
-          if (mutualInfo.mutualFriends.length > 1) {
-            return { text: `${mutualInfo.mutualFriends.length} friends joined this community`, isBold: true }
+            return { text: `${mutualInfo.mutualFriends.length} friends are connected to this`, isBold: true }
           }
         }
       }
@@ -125,10 +115,11 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
   }
 
   const secondLine = getSecondLine()
+  const normalizedType = normalizePortfolioType(result.type) || 'portfolio'
   const portfolioUrl =
-    result.type === 'human' && result.is_pseudo
+    normalizedType === 'human' && result.is_pseudo
       ? undefined
-      : `/portfolio/${result.type}/${result.id}`
+      : `/portfolio/${result.id}`
 
   const Wrapper: React.ComponentType<{ children: React.ReactNode }> = portfolioUrl
     ? (({ children }) => (

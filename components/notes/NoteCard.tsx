@@ -1500,7 +1500,7 @@ export function NoteCard({
 
     return (
       <Link
-        href={getPortfolioUrl(portfolio.type, portfolio.id)}
+        href={getPortfolioUrl(portfolio.slug || portfolio.id)}
         onClick={(e) => e.stopPropagation()}
         className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-gray-100"
       >
@@ -1739,7 +1739,7 @@ export function NoteCard({
                 const meta = projectPortfolio.metadata as any
                 return (
                   <Link
-                    href={getPortfolioUrl(projectPortfolio.type, projectPortfolio.id)}
+                    href={getPortfolioUrl(projectPortfolio.slug || projectPortfolio.id)}
                     onClick={(e) => e.stopPropagation()}
                     className="inline-flex items-center gap-2 hover:opacity-80 transition-colors flex-shrink-0"
                   >

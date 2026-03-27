@@ -482,19 +482,10 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                       variant="secondary"
                       onClick={() => {
                         setShowCreateMenu(false)
-                        window.location.href = '/portfolio/create/activities'
+                        window.location.href = '/portfolio/create'
                       }}
                     >
-                      <UIText>New activity</UIText>
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setShowCreateMenu(false)
-                        window.location.href = '/portfolio/create/projects'
-                      }}
-                    >
-                      <UIText>New project</UIText>
+                      <UIText>Create portfolio</UIText>
                     </Button>
                   </>
                 )}
@@ -705,8 +696,8 @@ function UserAvatarClient({ userId }: { userId: string }) {
 
   // Link to human portfolio instead of account page
   const humanPortfolioUrl = humanPortfolio 
-    ? `/portfolio/human/${humanPortfolio.id}`
-    : `/portfolio/human/${userId}`
+    ? `/portfolio/${humanPortfolio.slug || humanPortfolio.id}`
+    : `/portfolio/${userId}`
 
   if (loading) {
     return (
