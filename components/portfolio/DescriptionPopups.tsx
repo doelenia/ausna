@@ -52,11 +52,13 @@ export function DescriptionEditorPopup({
   value,
   onChange,
   onClose,
+  placeholder = 'Write a description. You can use paragraphs.',
 }: {
   open: boolean
   value: string
   onChange: (next: string) => void
   onClose: () => void
+  placeholder?: string
 }) {
   useEscapeToClose(open, onClose)
   const { ref } = useAutosizeTextarea({ value, open })
@@ -86,7 +88,7 @@ export function DescriptionEditorPopup({
               value={value}
               onChange={(e) => onChange(e.target.value.slice(0, MAX_DESCRIPTION_CHARS))}
               maxLength={MAX_DESCRIPTION_CHARS}
-              placeholder="Write a description. You can use paragraphs."
+              placeholder={placeholder}
               className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 bg-white resize-none overflow-y-auto whitespace-pre-wrap"
               rows={4}
             />

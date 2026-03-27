@@ -93,6 +93,66 @@ export interface CompleteOpenCallsOnboardingResult {
   error?: string
 }
 
+export interface GenerateOnboardingOpenCallDraftResult {
+  success: boolean
+  title?: string
+  description?: string
+  error?: string
+}
+
+export async function generateOnboardingOpenCallDraft(): Promise<GenerateOnboardingOpenCallDraftResult> {
+  try {
+    const auth = await getCurrentUserAndClient()
+    if (!auth) return { success: false, error: 'Unauthorized' }
+
+    const portfolio = await ensureHumanPortfolio(auth.user.id)
+    const metadata = (portfolio.metadata ?? {}) as HumanPortfolioMetadata
+    const profileDescription = (metadata.basic?.description as string | undefined)?.trim() ?? ''
+    const profileName = (metadata.basic?.name as string | undefined)?.trim() || 'this person'
+
+    if (!profileDescription) {
+      return { success: false, error: 'Please add your profile description first.' }
+    }
+
+    const { openai } = await import('@/lib/openai/client')
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.8,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You write concise and warm open calls for networking and collaboration. Return exactly two lines only: first line starts with "TITLE: " and second line starts with "DESCRIPTION: ". Keep title under 90 characters and description under 450 characters. No markdown, no extra lines.',
+        },
+        {
+          role: 'user',
+          content: `Create a personalized open call title and description for ${profileName} based on this profile description:\n\n${profileDescription}`,
+        },
+      ],
+    })
+
+    const raw = completion.choices?.[0]?.message?.content?.trim() ?? ''
+    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean)
+    const titleLine = lines.find((line) => line.toLowerCase().startsWith('title:'))
+    const descriptionLine = lines.find((line) => line.toLowerCase().startsWith('description:'))
+
+    const title = (titleLine ? titleLine.replace(/^title:\s*/i, '') : '').trim()
+    const description = (descriptionLine ? descriptionLine.replace(/^description:\s*/i, '') : '').trim()
+
+    if (!title || !description) {
+      return { success: false, error: 'Failed to generate a usable open call draft. Please try again.' }
+    }
+
+    return {
+      success: true,
+      title: title.slice(0, 90),
+      description: description.slice(0, 450),
+    }
+  } catch (e: any) {
+    return { success: false, error: e?.message ?? 'Failed to generate open call draft' }
+  }
+}
+
 export async function completeOpenCallsOnboarding(input: {
   title: string
   description: string

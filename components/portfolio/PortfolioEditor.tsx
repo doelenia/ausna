@@ -54,6 +54,12 @@ const HUMAN_AVAILABILITY_DAY_LABELS: Record<keyof HumanAvailabilitySchedule, str
   sunday: 'Sun',
 }
 
+const HUMAN_DESCRIPTION_HELP_TEXT =
+  'Tell us a bit about what you’re working on, what you care about, and what kinds of opportunities you’d like to find. You can also add links to projects, portfolios, websites, or other work that represents you (please do not put LinkedIn links here).\n\nThis helps us recommend more relevant opportunities to you.'
+
+const HUMAN_DESCRIPTION_PLACEHOLDER =
+  'Student into climate tech, design, and community projects. Also love cafes, creative ideas, and meeting people. Currently working on hackathons and startup-related projects in Tokyo. Looking for collaborators!'
+
 function createDefaultAvailabilitySchedule(): HumanAvailabilitySchedule {
   const schedule: HumanAvailabilitySchedule = {}
   for (const day of HUMAN_AVAILABILITY_DAYS) {
@@ -696,6 +702,7 @@ export function PortfolioEditor({
         value={description}
         onChange={setDescription}
         onClose={() => setShowDescriptionEditor(false)}
+        placeholder={isHumanPortfolio(portfolio) ? HUMAN_DESCRIPTION_PLACEHOLDER : undefined}
       />
       {avatarPreview && (
         <ImageViewerPopup
@@ -835,7 +842,9 @@ export function PortfolioEditor({
                 </Button>
               </div>
               <UIText as="p" className="text-xs text-gray-500 mb-2">
-                You can add relevant links (NOT LinkedIn!) This description helps us build the knowledge graph to find better opportunities for you.
+                {isHumanPortfolio(portfolio)
+                  ? HUMAN_DESCRIPTION_HELP_TEXT
+                  : 'You can add relevant links (NOT LinkedIn!) This description helps us build the knowledge graph to find better opportunities for you.'}
               </UIText>
               {description.trim().length > 0 ? (
                 <Card variant="subtle" padding="sm">
