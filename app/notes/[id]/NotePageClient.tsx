@@ -125,7 +125,7 @@ export function NotePageClient({
         p => p.user_id === serverNote.owner_account_id
       ) || null
       
-      const assignedProjects = serverPortfolios.filter(p => p.type === 'projects')
+      const assignedProjects = serverPortfolios.filter(p => p.type === 'portfolio')
       
       if (ownerPortfolio || assignedProjects.length > 0) {
         setCachedPortfolioData(noteId, {

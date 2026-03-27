@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
-import { createPortfolio } from '@/app/portfolio/create/[type]/actions'
+import { createPortfolio } from '@/app/portfolio/create/actions'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
@@ -107,17 +107,17 @@ export function CreateActivityForm({
     try {
       // Check for duplicate link first
       const checkRes = await fetch(
-        `/api/activities/find-by-external-link?url=${encodeURIComponent(url)}`
+        `/api/portfolios/external-link/find?url=${encodeURIComponent(url)}`
       )
       const checkData = await checkRes.json()
-      if (checkData.existing && checkData.activity) {
-        setExistingActivity(checkData.activity)
+      if (checkData.existing && checkData.portfolio) {
+        setExistingActivity(checkData.portfolio)
         setLinkVerified(false)
         setExtractingLink(false)
         return
       }
 
-      const res = await fetch('/api/activities/extract-external-link', {
+      const res = await fetch('/api/portfolios/external-link/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),

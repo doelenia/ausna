@@ -12,7 +12,7 @@ import {
   saveOnboardingAvailabilitySchedule,
   completeOpenCallsOnboarding,
 } from '@/app/onboarding/actions'
-import { applyToCommunityJoin } from '@/app/portfolio/[type]/[id]/actions'
+import { applyToCommunityJoin } from '@/app/portfolio/[idOrSlug]/actions'
 import type { HumanAvailabilitySchedule } from '@/types/portfolio'
 import { Title, Content, UIText, Button, Card, UIButtonText, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'

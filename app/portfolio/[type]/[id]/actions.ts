@@ -4,8 +4,6 @@ import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import {
   Portfolio,
-  isProjectPortfolio,
-  isCommunityPortfolio,
   isHumanPortfolio,
   PinnedItem,
   ActivityCallToJoinConfig,
@@ -36,7 +34,7 @@ interface DeletePortfolioResult {
 
 interface SubPortfolio {
   id: string
-  type: 'projects' | 'community'
+  type: 'portfolio'
   name: string
   avatar?: string
   slug: string
@@ -328,8 +326,8 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         projects,
         communities,
       }
-    } else if (isProjectPortfolio(portfolioData) || isCommunityPortfolio(portfolioData)) {
-      // For project/community portfolios: no sub-portfolios (hosts concept removed)
+    } else if (!isHumanPortfolio(portfolioData)) {
+      // For non-human portfolios: no sub-portfolios (hosts concept removed)
       return {
         success: true,
         projects: [],
@@ -454,9 +452,9 @@ export async function updatePortfolio(
       },
     }
 
-    // Update project type if provided (for projects and communities)
+    // Update portfolio subtype metadata if provided for non-human portfolios
     // Allow clearing project types by providing empty values
-    if (portfolio.type === 'projects' || portfolio.type === 'community') {
+    if (portfolio.type !== 'human') {
       if (projectTypeGeneral !== null && projectTypeSpecific !== null) {
         // If both are provided (even if empty), update them
         updatedMetadata.project_type_general = projectTypeGeneral || undefined
@@ -505,7 +503,7 @@ export async function updatePortfolio(
 
           const nextActivityDateTime = (nextProperties.activity_datetime ||
             null) as import('@/lib/datetime').ActivityDateTimeValue | null
-          if (portfolio.type === 'activities') {
+          if (portfolio.type !== 'human') {
             activityTimeChanged =
               JSON.stringify(previousActivityDateTime || null) !==
               JSON.stringify(nextActivityDateTime || null)
@@ -519,7 +517,7 @@ export async function updatePortfolio(
           const hasNext =
             (updatedMetadata.properties as Record<string, any> | undefined)
               ?.activity_datetime != null
-          if (portfolio.type === 'activities') {
+          if (portfolio.type !== 'human') {
             activityTimeChanged = hadPrevious !== hasNext
           }
         }
@@ -531,7 +529,7 @@ export async function updatePortfolio(
         const hasNext =
           (updatedMetadata.properties as Record<string, any> | undefined)
             ?.activity_datetime != null
-        if (portfolio.type === 'activities') {
+        if (portfolio.type !== 'human') {
           activityTimeChanged = hadPrevious !== hasNext
         }
       }
@@ -597,7 +595,7 @@ export async function updatePortfolio(
 
           const nextLocation = (nextProperties.location ||
             null) as import('@/lib/location').ActivityLocationValue | null
-          if (portfolio.type === 'activities') {
+          if (portfolio.type !== 'human') {
             activityLocationChanged =
               JSON.stringify(previousLocation || null) !==
               JSON.stringify(nextLocation || null)
@@ -610,7 +608,7 @@ export async function updatePortfolio(
           const hasNext =
             (updatedMetadata.properties as Record<string, any> | undefined)
               ?.location != null
-          if (portfolio.type === 'activities') {
+          if (portfolio.type !== 'human') {
             activityLocationChanged = hadPrevious !== hasNext
           }
         } else {
@@ -618,7 +616,7 @@ export async function updatePortfolio(
         }
       }
 
-      if (portfolio.type === 'projects' || portfolio.type === 'activities') {
+      if (portfolio.type !== 'human') {
         if (projectStatusRaw !== null) {
           // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
           const normalizedStatus =
@@ -792,16 +790,16 @@ export async function updatePortfolio(
       metadata: updatedMetadata,
     }
 
-    // Allow owner to update visibility for project and activity portfolios
+    // Allow owner to update visibility for non-human portfolios
     if (
-      (portfolio.type === 'projects' || portfolio.type === 'activities') &&
+      portfolio.type !== 'human' &&
       (visibilityRaw === 'public' || visibilityRaw === 'private')
     ) {
       updatePayload.visibility = visibilityRaw
     }
 
-    // For activities, sync host_project_id from metadata.properties.host_project_ids (first)
-    if (portfolio.type === 'activities') {
+    // For non-human portfolios, sync host_project_id from metadata.properties.host_project_ids (first)
+    if (portfolio.type !== 'human') {
       const props = (updatedMetadata.properties || {}) as Record<string, any>
       const ids = props.host_project_ids as string[] | undefined
       updatePayload.host_project_id = Array.isArray(ids) && ids.length > 0 ? ids[0] : null
@@ -820,14 +818,14 @@ export async function updatePortfolio(
       }
     }
 
-    // For activity portfolios, notify members when time and/or location changes.
-    if (portfolio.type === 'activities' && (activityTimeChanged || activityLocationChanged)) {
+    // For non-human portfolios, notify members when time and/or location changes.
+    if (portfolio.type !== 'human' && (activityTimeChanged || activityLocationChanged)) {
       try {
         const metadataAfter = updatedMetadata as any
         const members: string[] = metadataAfter?.members || []
         const managers: string[] = metadataAfter?.managers || []
         const basicAfter = metadataAfter?.basic || {}
-        const activityName: string = (basicAfter.name as string) || 'this activity'
+        const activityName: string = (basicAfter.name as string) || 'this portfolio'
 
         const participantIds = new Set<string>()
         participantIds.add(portfolio.user_id as string)
@@ -850,7 +848,7 @@ export async function updatePortfolio(
           const activityPath = `/portfolio/${portfolioId}`
           const activityUrl = `${baseUrl}${activityPath}`
 
-          const text = `updated the ${changeLabel} for ${activityName} (activity). View details: ${activityPath}`
+          const text = `updated the ${changeLabel} for ${activityName} (portfolio). View details: ${activityPath}`
 
           const inserts = Array.from(participantIds).map((receiverId) => ({
             sender_id: user.id,
@@ -899,22 +897,7 @@ export async function updatePortfolio(
             // Log error but don't fail portfolio update
             console.error('Failed to trigger human description processing:', error)
           })
-        } else if (portfolio.type === 'projects') {
-          fetch(`${baseUrl}/api/index-project-description`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              portfolioId,
-              userId: user.id,
-              description: normalizedDescription,
-            }),
-          }).catch((error) => {
-            // Log error but don't fail portfolio update
-            console.error('Failed to trigger project description processing:', error)
-          })
-        } else if (portfolio.type === 'activities') {
+        } else if (portfolio.type !== 'human') {
           const activityProps = (updatedMetadata?.properties as { external?: boolean; external_link?: string } | undefined) || {}
           const externalLink =
             activityProps.external === true ? activityProps.external_link ?? undefined : undefined
@@ -930,7 +913,7 @@ export async function updatePortfolio(
               externalLink,
             }),
           }).catch((error) => {
-            console.error('Failed to trigger activity description processing:', error)
+            console.error('Failed to trigger portfolio description processing:', error)
           })
         }
       } catch (error) {
@@ -976,9 +959,9 @@ export async function updatePortfolio(
           .eq('id', portfolioId)
         
         // Revalidate Next.js cache for this portfolio page
-        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
-        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
-        revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/pinned`)
+        revalidatePath(`/portfolio/${portfolioId}`)
+        revalidatePath(`/portfolio/${portfolioId}/members`)
+        revalidatePath(`/portfolio/${portfolioId}/pinned`)
       } catch (avatarError: any) {
         // Avatar upload failed, but portfolio was updated
         console.error('Failed to upload avatar:', avatarError)
@@ -1066,8 +1049,8 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
       }
     }
 
-    // If this was a project, remove it from owner's owned_projects list
-    if (portfolio.type === 'projects') {
+    // If this was a non-human portfolio, remove it from owner's owned list
+    if (portfolio.type !== 'human') {
       try {
         const { removeProjectFromOwnedList } = await import('@/lib/portfolio/human')
         await removeProjectFromOwnedList(portfolio.user_id, portfolioId)
@@ -1229,8 +1212,8 @@ export async function updateActivityCallToJoin(
 
     // Canonical route + legacy typed route (typed redirects but may still be cached)
     revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolioId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1394,8 +1377,8 @@ export async function respondToActivityJoinRequest(
       .eq('partner_id', user.id)
 
     revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${activityId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${activityId}/members`)
+    revalidatePath(`/portfolio/${activityId}`)
+    revalidatePath(`/portfolio/${activityId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1526,7 +1509,7 @@ export async function applyToActivityCallToJoin(
       }
 
       // Notify owner; link directs to Requests tab
-      const requestsUrl = `/portfolio/${portfolio.type}/${portfolioId}/members?tab=requests`
+      const requestsUrl = `/portfolio/${portfolioId}/members?tab=requests`
       await sendMessage(
         portfolio.user_id,
         `applied to join ${portfolioName} (${label}). Review: ${requestsUrl}`
@@ -1624,8 +1607,8 @@ export async function applyToActivityCallToJoin(
     }
 
     revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolioId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1790,8 +1773,8 @@ export async function approveActivityJoinRequest(
     }
 
     revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${activityId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${activityId}/members`)
+    revalidatePath(`/portfolio/${activityId}`)
+    revalidatePath(`/portfolio/${activityId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1890,8 +1873,8 @@ export async function rejectActivityJoinRequest(
       )
 
     revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${activityId}`)
-    revalidatePath(`/portfolio/${portfolio.type}/${activityId}/members`)
+    revalidatePath(`/portfolio/${activityId}`)
+    revalidatePath(`/portfolio/${activityId}/members`)
 
     return { success: true }
   } catch (error: any) {
@@ -1927,10 +1910,10 @@ export async function applyToCommunityJoin(
       .single()
 
     if (portfolioError || !portfolio) {
-      return { success: false, error: 'Community not found' }
+      return { success: false, error: 'Portfolio not found' }
     }
-    if (portfolio.type !== 'community') {
-      return { success: false, error: 'Not a community' }
+    if (portfolio.type === 'human') {
+      return { success: false, error: 'Not available for human portfolios' }
     }
 
     const metadata = (portfolio.metadata as any) || {}
@@ -1948,7 +1931,7 @@ export async function applyToCommunityJoin(
       .maybeSingle()
 
     if (existingRequest) {
-      return { success: false, error: 'You already have a pending request for this community' }
+      return { success: false, error: 'You already have a pending request for this portfolio' }
     }
 
     const { error: insertError } = await supabase.from('portfolio_join_requests').insert({
@@ -1963,12 +1946,12 @@ export async function applyToCommunityJoin(
     }
 
     const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this community'
-    const requestsUrl = `/portfolio/community/${portfolioId}/members?tab=requests`
+    const communityName = (basic.name as string) || 'this portfolio'
+    const requestsUrl = `/portfolio/${portfolioId}/members?tab=requests`
     await supabase.from('messages').insert({
       sender_id: user.id,
       receiver_id: portfolio.user_id,
-      text: `applied to join ${communityName} (community). Review: ${requestsUrl}`,
+      text: `applied to join ${communityName} (portfolio). Review: ${requestsUrl}`,
     })
     await supabase
       .from('conversation_completions')
@@ -1997,7 +1980,7 @@ export async function getPendingCommunityJoinRequestsCount(
       .select('id, type, user_id, metadata')
       .eq('id', portfolioId)
       .single()
-    if (!portfolio || portfolio.type !== 'community') {
+    if (!portfolio || portfolio.type === 'human') {
       return { success: false, error: 'Not found' }
     }
     const metadata = (portfolio.metadata as any) || {}
@@ -2020,7 +2003,7 @@ export async function getPendingCommunityJoinRequestsCount(
 }
 
 /**
- * Check whether the current user has a pending join request for this community.
+ * Check whether the current user has a pending join request for this portfolio.
  */
 export async function getCurrentUserPendingCommunityRequest(
   portfolioId: string
@@ -2033,7 +2016,7 @@ export async function getCurrentUserPendingCommunityRequest(
       .select('id, type')
       .eq('id', portfolioId)
       .single()
-    if (!portfolio || portfolio.type !== 'community') {
+    if (!portfolio || portfolio.type === 'human') {
       return { success: false, error: 'Not found' }
     }
     const { data: request, error } = await supabase
@@ -2077,15 +2060,15 @@ export async function respondToCommunityJoinRequest(
       .select('id, type, user_id, metadata')
       .eq('id', portfolioId)
       .single()
-    if (portfolioError || !portfolio || portfolio.type !== 'community') {
-      return { success: false, error: 'Community not found for this request' }
+    if (portfolioError || !portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Portfolio not found for this request' }
     }
     const metadata = (portfolio.metadata as any) || {}
     const managers: string[] = metadata?.managers || []
     const isOwner = portfolio.user_id === user.id
     const isManager = Array.isArray(managers) && managers.includes(user.id)
     if (!isOwner && !isManager) {
-      return { success: false, error: 'Only the community owner or managers can respond to requests' }
+      return { success: false, error: 'Only the portfolio owner or managers can respond to requests' }
     }
     const { error: updateRequestError } = await supabase
       .from('portfolio_join_requests')
@@ -2095,11 +2078,11 @@ export async function respondToCommunityJoinRequest(
       return { success: false, error: updateRequestError.message || 'Failed to update join request' }
     }
     const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this community'
+    const communityName = (basic.name as string) || 'this portfolio'
     const text =
       message.trim().length > 0
-        ? `Regarding your request to join ${communityName} (community): ${message.trim()}`
-        : `We received your request to join ${communityName} (community). We'll get back to you soon.`
+        ? `Regarding your request to join ${communityName} (portfolio): ${message.trim()}`
+        : `We received your request to join ${communityName} (portfolio). We'll get back to you soon.`
     await supabase.from('messages').insert({
       sender_id: user.id,
       receiver_id: request.applicant_user_id,
@@ -2111,8 +2094,8 @@ export async function respondToCommunityJoinRequest(
       .or(
         `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
       )
-    revalidatePath(`/portfolio/community/${portfolioId}`)
-    revalidatePath(`/portfolio/community/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolioId}/members`)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message || 'An unexpected error occurred' }
@@ -2143,15 +2126,15 @@ export async function approveCommunityJoinRequest(requestId: string): Promise<Si
       .select('id, type, user_id, metadata')
       .eq('id', portfolioId)
       .single()
-    if (portfolioError || !portfolio || portfolio.type !== 'community') {
-      return { success: false, error: 'Community not found for this request' }
+    if (portfolioError || !portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Portfolio not found for this request' }
     }
     const metadata = (portfolio.metadata as any) || {}
     const managers: string[] = metadata?.managers || []
     const isOwner = portfolio.user_id === user.id
     const isManager = Array.isArray(managers) && managers.includes(user.id)
     if (!isOwner && !isManager) {
-      return { success: false, error: 'Only the community owner or managers can approve requests' }
+      return { success: false, error: 'Only the portfolio owner or managers can approve requests' }
     }
     const applicantId: string = request.applicant_user_id
     const currentMembers: string[] = metadata?.members || []
@@ -2192,11 +2175,11 @@ export async function approveCommunityJoinRequest(requestId: string): Promise<Si
       return { success: false, error: updateRequestError.message || 'Failed to update request' }
     }
     const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this community'
+    const communityName = (basic.name as string) || 'this portfolio'
   await supabase.from('messages').insert({
     sender_id: user.id,
     receiver_id: applicantId,
-    text: `approved your request to join ${communityName} (community)`,
+    text: `approved your request to join ${communityName} (portfolio)`,
   })
   await supabase
     .from('conversation_completions')
@@ -2204,8 +2187,8 @@ export async function approveCommunityJoinRequest(requestId: string): Promise<Si
     .or(
       `and(user_id.eq.${applicantId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${applicantId})`
     )
-    revalidatePath(`/portfolio/community/${portfolioId}`)
-    revalidatePath(`/portfolio/community/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolioId}/members`)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message || 'An unexpected error occurred' }
@@ -2239,15 +2222,15 @@ export async function rejectCommunityJoinRequest(
       .select('id, type, user_id, metadata')
       .eq('id', portfolioId)
       .single()
-    if (portfolioError || !portfolio || portfolio.type !== 'community') {
-      return { success: false, error: 'Community not found for this request' }
+    if (portfolioError || !portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Portfolio not found for this request' }
     }
     const metadata = (portfolio.metadata as any) || {}
     const managers: string[] = metadata?.managers || []
     const isOwner = portfolio.user_id === user.id
     const isManager = Array.isArray(managers) && managers.includes(user.id)
     if (!isOwner && !isManager) {
-      return { success: false, error: 'Only the community owner or managers can reject requests' }
+      return { success: false, error: 'Only the portfolio owner or managers can reject requests' }
     }
     const { error: updateRequestError } = await supabase
       .from('portfolio_join_requests')
@@ -2262,8 +2245,8 @@ export async function rejectCommunityJoinRequest(
       return { success: false, error: updateRequestError.message || 'Failed to update join request' }
     }
     const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this community'
-    let text = `rejected your request to join ${communityName} (community)`
+    const communityName = (basic.name as string) || 'this portfolio'
+    let text = `rejected your request to join ${communityName} (portfolio)`
     if (rejectionMessage && rejectionMessage.trim().length > 0) {
       text += `: ${rejectionMessage.trim()}`
     }
@@ -2278,8 +2261,8 @@ export async function rejectCommunityJoinRequest(
     .or(
       `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
     )
-    revalidatePath(`/portfolio/community/${portfolioId}`)
-    revalidatePath(`/portfolio/community/${portfolioId}/members`)
+    revalidatePath(`/portfolio/${portfolioId}`)
+    revalidatePath(`/portfolio/${portfolioId}/members`)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message || 'An unexpected error occurred' }

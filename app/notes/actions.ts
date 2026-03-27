@@ -484,7 +484,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     // Resource notes are never pinned.
     if (!isResource && shouldPin && portfolioIds.length > 0) {
       try {
-        const { addToPinned } = await import('@/app/portfolio/[type]/[id]/actions')
+        const { addToPinned } = await import('@/app/portfolio/[idOrSlug]/actions')
         const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
 
         const portfolioId = portfolioIds[0]

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Note } from '@/types/note'
-import { getPinnedItems } from '@/app/portfolio/[type]/[id]/actions'
+import { getPinnedItems } from '@/app/portfolio/[idOrSlug]/actions'
 import { getNotesByPortfolioPaginated } from '@/app/notes/actions'
 import { NotesMasonry } from '@/components/notes/NotesMasonry'
 import { isHumanPortfolio, isProjectPortfolio, Portfolio } from '@/types/portfolio'

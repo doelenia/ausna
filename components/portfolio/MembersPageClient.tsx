@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
-import { approveActivityJoinRequest, respondToActivityJoinRequest, approveCommunityJoinRequest, respondToCommunityJoinRequest } from '@/app/portfolio/[type]/[id]/actions'
+import { approveActivityJoinRequest, respondToActivityJoinRequest, approveCommunityJoinRequest, respondToCommunityJoinRequest } from '@/app/portfolio/[idOrSlug]/actions'
 
 interface UserInfo {
   id: string

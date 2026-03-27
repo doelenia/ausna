@@ -1,6 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, isCommunityPortfolio, isHumanPortfolio } from '@/types/portfolio'
-import { getCurrentUserPendingActivityRequest, getCurrentUserPendingCommunityRequest } from '@/app/portfolio/[type]/[id]/actions'
+import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
+import {
+  getCurrentUserPendingActivityRequest,
+  getCurrentUserPendingCommunityRequest,
+} from '@/app/portfolio/[idOrSlug]/actions'
 import { notFound, redirect } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { PortfolioView } from '@/components/portfolio/PortfolioView'
@@ -9,50 +12,33 @@ import { checkAdmin } from '@/lib/auth/requireAdmin'
 
 interface PortfolioPageProps {
   params: {
-    type: string
+    idOrSlug: string
   }
 }
 
-export default async function PortfolioCanonicalPage({ params }: PortfolioPageProps) {
-  const idOrSlug = params.type
-
-  if (!idOrSlug || typeof idOrSlug !== 'string') {
-    notFound()
-  }
+export default async function PortfolioPage({ params }: PortfolioPageProps) {
+  const idOrSlug = params.idOrSlug
+  if (!idOrSlug || typeof idOrSlug !== 'string') notFound()
 
   const supabase = await createClient()
-
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
   let portfolio: Portfolio | null = null
 
-  // 1) Try fetch by id
-  const { data: byId } = await supabase
-    .from('portfolios')
-    .select('*')
-    .eq('id', idOrSlug)
-    .maybeSingle()
+  const { data: byId } = await supabase.from('portfolios').select('*').eq('id', idOrSlug).maybeSingle()
+  if (byId) portfolio = byId as Portfolio
 
-  if (byId) {
-    portfolio = byId as Portfolio
-  }
-
-  // 2) Try fetch by slug
   if (!portfolio) {
     const { data: bySlug } = await supabase
       .from('portfolios')
       .select('*')
       .eq('slug', idOrSlug)
       .maybeSingle()
-
-    if (bySlug) {
-      portfolio = bySlug as Portfolio
-    }
+    if (bySlug) portfolio = bySlug as Portfolio
   }
 
-  // 3) Human portfolio fallback: allow /portfolio/{user_id}
   if (!portfolio) {
     const { data: byUserId } = await supabase
       .from('portfolios')
@@ -60,17 +46,11 @@ export default async function PortfolioCanonicalPage({ params }: PortfolioPagePr
       .eq('type', 'human')
       .eq('user_id', idOrSlug)
       .maybeSingle()
-
-    if (byUserId) {
-      portfolio = byUserId as Portfolio
-    }
+    if (byUserId) portfolio = byUserId as Portfolio
   }
 
-  if (!portfolio) {
-    notFound()
-  }
+  if (!portfolio) notFound()
 
-  // Canonicalize visible URL to slug where available
   if (portfolio.slug && portfolio.slug !== idOrSlug) {
     redirect(`/portfolio/${portfolio.slug}`)
   }
@@ -100,7 +80,7 @@ export default async function PortfolioCanonicalPage({ params }: PortfolioPagePr
   }
 
   let hasPendingCommunityApplication = false
-  if (user && isCommunityPortfolio(portfolio)) {
+  if (user && portfolio.type !== 'human') {
     const res = await getCurrentUserPendingCommunityRequest(portfolio.id)
     if (res.success && res.hasPending) hasPendingCommunityApplication = true
   }

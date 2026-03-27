@@ -591,7 +591,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                   {isApproved && (
                     <div className="mt-2 flex justify-center">
                       <Link
-                        href="/portfolio/create/projects"
+                        href="/portfolio/create"
                         className="flex flex-col items-center gap-2 py-2 px-4 hover:opacity-80 transition-opacity"
                         onClick={() => setShowProjectSelector(false)}
                       >
@@ -610,7 +610,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                             />
                           </svg>
                         </div>
-                        <UIText className="text-center max-w-[120px] truncate">Create Project</UIText>
+                        <UIText className="text-center max-w-[120px] truncate">Create Portfolio</UIText>
                       </Link>
                     </div>
                   )}

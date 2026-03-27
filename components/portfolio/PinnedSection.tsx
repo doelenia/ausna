@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getPinnedItems } from '@/app/portfolio/[type]/[id]/actions'
+import { getPinnedItems } from '@/app/portfolio/[idOrSlug]/actions'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { Title, Content, UIText, UIButtonText } from '@/components/ui'

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, isActivityPortfolio, isCommunityPortfolio, isProjectPortfolio } from '@/types/portfolio'
+import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
 import { notFound, redirect } from 'next/navigation'
 import { isPortfolioManager, isPortfolioCreator, getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { MembersPageClient } from '@/components/portfolio/MembersPageClient'
@@ -7,7 +7,7 @@ import { Title, UIText } from '@/components/ui'
 
 interface MembersPageProps {
   params: {
-    type: string
+    idOrSlug: string
   }
   searchParams?: Promise<{ tab?: string }> | { tab?: string }
 }
@@ -25,22 +25,16 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
         ? 'subscribers'
         : 'members'
 
-  const idOrSlug = params.type
+  const idOrSlug = params.idOrSlug
   if (!idOrSlug) notFound()
 
   const supabase = await createClient()
-
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
   let portfolio: Portfolio | null = null
-
-  const { data: byId } = await supabase
-    .from('portfolios')
-    .select('*')
-    .eq('id', idOrSlug)
-    .maybeSingle()
+  const { data: byId } = await supabase.from('portfolios').select('*').eq('id', idOrSlug).maybeSingle()
   if (byId) portfolio = byId as Portfolio
 
   if (!portfolio) {
@@ -52,17 +46,13 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
     if (bySlug) portfolio = bySlug as Portfolio
   }
 
-  if (!portfolio) {
-    notFound()
-  }
+  if (!portfolio) notFound()
 
   if (portfolio.slug && portfolio.slug !== idOrSlug) {
     redirect(`/portfolio/${portfolio.slug}/members?tab=${initialTab}`)
   }
 
-  if (!isProjectPortfolio(portfolio) && !isActivityPortfolio(portfolio) && !isCommunityPortfolio(portfolio)) {
-    notFound()
-  }
+  if (isHumanPortfolio(portfolio)) notFound()
 
   const isCreator = user ? await isPortfolioCreator(portfolio.id, user.id) : false
   const isManager = user ? await isPortfolioManager(portfolio.id, user.id) : false
@@ -95,7 +85,7 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
           avatar: memberBasic.avatar || memberMetadata?.avatar_url || null,
           isManager: managers.includes(memberId),
           isCreator: portfolio.user_id === memberId,
-          role: role,
+          role,
         }
       }
       return {
@@ -105,7 +95,7 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
         avatar: null,
         isManager: managers.includes(memberId),
         isCreator: portfolio.user_id === memberId,
-        role: role,
+        role,
       }
     })
   )
@@ -133,7 +123,6 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
     .from('subscriptions')
     .select('user_id')
     .eq('portfolio_id', portfolio.id)
-
   const subscriberIds = (subscriptions || []).map((sub: any) => sub.user_id)
 
   const subscriberDetails = await Promise.all(
@@ -155,12 +144,7 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
           avatar: subscriberBasic.avatar || subscriberMetadata?.avatar_url || null,
         }
       }
-      return {
-        id: subscriberId,
-        username: null,
-        name: null,
-        avatar: null,
-      }
+      return { id: subscriberId, username: null, name: null, avatar: null }
     })
   )
 
@@ -181,7 +165,9 @@ export default async function MembersPage({ params, searchParams }: MembersPageP
       .eq('portfolio_id', portfolio.id)
       .order('created_at', { ascending: false })
 
-    const applicantIds = Array.from(new Set((requestRows || []).map((r: any) => r.applicant_user_id as string)))
+    const applicantIds = Array.from(
+      new Set((requestRows || []).map((r: any) => r.applicant_user_id as string))
+    )
     const applicantInfoMap = new Map<
       string,
       { id: string; username: string | null; name: string | null; avatar: string | null }

@@ -66,17 +66,17 @@ export async function POST(request: NextRequest) {
       // 5. Store note vectors
       await storeNoteVectors(noteId, summaryVector, compoundTextVector)
 
-      // 6. Get assigned projects and human portfolio
+      // 6. Get assigned portfolios and human portfolio
       const assignedPortfolios = note.assigned_portfolios || []
       
-      // Filter to only project portfolios
+      // Filter to only non-human portfolios
       const { data: portfolios } = await supabase
         .from('portfolios')
         .select('id, type')
         .in('id', assignedPortfolios)
       
       const assignedProjectIds = (portfolios || [])
-        .filter((p) => p.type === 'projects')
+        .filter((p) => p.type === 'portfolio')
         .map((p) => p.id)
 
       // Get human portfolio of note owner
