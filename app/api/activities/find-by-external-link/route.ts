@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     const { data: portfolios, error } = await supabase
       .from('portfolios')
       .select('id, metadata, slug')
-      .eq('type', 'activities')
+      .eq('type', 'portfolio')
 
     if (error) {
       console.error('Find by external link error:', error)

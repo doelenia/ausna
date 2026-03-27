@@ -146,7 +146,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           .from('portfolios')
           .select('id, user_id, metadata')
           .eq('id', PROJECT_ID)
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .maybeSingle()
 
         if (projectError || !project) {

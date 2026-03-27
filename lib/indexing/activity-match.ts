@@ -216,7 +216,7 @@ async function enrichAsksAndNonAsks(userId: string): Promise<{
     const { data: allProjects } = await supabase
       .from('portfolios')
       .select('id, metadata, user_id')
-      .eq('type', 'projects')
+      .eq('type', 'portfolio')
 
     const relatedProjects =
       allProjects?.filter((p: any) => {

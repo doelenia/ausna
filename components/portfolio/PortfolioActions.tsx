@@ -113,13 +113,13 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         const { data: allCommunities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'community')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         if (!allProjects) {

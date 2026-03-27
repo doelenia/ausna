@@ -21,9 +21,7 @@ interface PortfolioCreatedCardProps {
 }
 
 function getPortfolioTypeLabel(portfolio: Portfolio) {
-  if (portfolio.type === 'projects') return 'project'
-  if (portfolio.type === 'activities') return 'activity'
-  return 'community'
+  return portfolio.type === 'human' ? 'profile' : 'portfolio'
 }
 
 export function PortfolioCreatedCard({

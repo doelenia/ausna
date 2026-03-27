@@ -400,7 +400,7 @@ export async function createPortfolio(
       const { data: projects, error: hostError } = await supabase
         .from('portfolios')
         .select('id, user_id, metadata, type')
-        .eq('type', 'projects')
+        .eq('type', 'portfolio')
         .in('id', hostProjectIds)
 
       if (hostError || !projects?.length) {
@@ -435,7 +435,7 @@ export async function createPortfolio(
       const { data: communities, error: hostError } = await supabase
         .from('portfolios')
         .select('id, user_id, metadata, type')
-        .eq('type', 'community')
+        .eq('type', 'portfolio')
         .in('id', hostCommunityIds)
 
       if (hostError || !communities?.length) {

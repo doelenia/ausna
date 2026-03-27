@@ -86,19 +86,21 @@ export async function GET(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       )
     } else {
-      // Project/Community/Activity: fetch notes assigned to this portfolio OR to activities hosted by it
+      // Non-human portfolio: fetch notes assigned to this portfolio OR to hosted portfolios
       const validPortfolioIds = new Set<string>([portfolioId])
-      if (portfolio.type === 'projects' || portfolio.type === 'community') {
-        const hostField =
-          portfolio.type === 'projects' ? 'host_project_ids' : 'host_community_ids'
+      if (portfolio.type !== 'human') {
         const { data: hostedActivities } = await supabase
           .from('portfolios')
           .select('id, metadata')
-          .eq('type', 'activities')
+          .eq('type', 'portfolio')
         const hostedIds = (hostedActivities || [])
           .filter((a: any) => {
-            const ids = (a.metadata as any)?.properties?.[hostField]
-            return Array.isArray(ids) && ids.includes(portfolioId)
+            const hostProjectIds = (a.metadata as any)?.properties?.host_project_ids
+            const hostCommunityIds = (a.metadata as any)?.properties?.host_community_ids
+            return (
+              (Array.isArray(hostProjectIds) && hostProjectIds.includes(portfolioId)) ||
+              (Array.isArray(hostCommunityIds) && hostCommunityIds.includes(portfolioId))
+            )
           })
           .map((a: any) => a.id)
         hostedIds.forEach((id) => validPortfolioIds.add(id))

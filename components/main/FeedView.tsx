@@ -119,7 +119,7 @@ export function FeedView({
         if (currentUserId) {
           const activityIds = newItems
             .filter((i): i is FeedItem & { kind: 'portfolio_created' } => i.kind === 'portfolio_created')
-            .filter((i) => (i.portfolio as any)?.type === 'activities')
+            .filter((i) => (i.portfolio as any)?.type !== 'human')
             .map((i) => i.portfolio.id)
           if (activityIds.length > 0) {
             try {
@@ -289,7 +289,7 @@ export function FeedView({
                             creator={item.creator_profile}
                             flatOnMobile={true}
                             highlight={
-                              (item.portfolio as any)?.type === 'activities'
+                              (item.portfolio as any)?.type !== 'human'
                                 ? activityHighlights[item.portfolio.id]
                                 : undefined
                             }

@@ -62,7 +62,7 @@ async function getUserCommunitiesMap(
   const { data: allCommunities } = await supabase
     .from('portfolios')
     .select('id, user_id, metadata')
-    .eq('type', 'community')
+    .eq('type', 'portfolio')
   const communitiesMap = new Map<string, { id: string; name: string; members: string[] }>()
   allCommunities?.forEach((community: any) => {
     const metadata = community.metadata as any

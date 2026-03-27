@@ -211,7 +211,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         const { data: ownedProjectsData, error: ownedError } = await supabase
           .from('portfolios')
           .select('id, type, slug, metadata, visibility')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .in('id', ownedProjectsList)
 
         if (!ownedError && ownedProjectsData) {
@@ -232,14 +232,14 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
       const { data: allProjects, error: projectsError } = await supabase
         .from('portfolios')
         .select('id, type, slug, metadata, user_id, visibility')
-        .eq('type', 'projects')
+        .eq('type', 'portfolio')
         .order('created_at', { ascending: false })
         .limit(100)
 
       const { data: allCommunities, error: communitiesError } = await supabase
         .from('portfolios')
         .select('id, type, slug, metadata')
-        .eq('type', 'community')
+        .eq('type', 'portfolio')
         .order('created_at', { ascending: false })
         .limit(100)
 
@@ -645,7 +645,7 @@ export async function updatePortfolio(
             const { data: projects } = await supabase
               .from('portfolios')
               .select('id, user_id, metadata, type')
-              .eq('type', 'projects')
+              .eq('type', 'portfolio')
               .in('id', ids)
             if (projects?.length) {
               for (const proj of projects) {
@@ -680,7 +680,7 @@ export async function updatePortfolio(
             const { data: communities } = await supabase
               .from('portfolios')
               .select('id, user_id, metadata, type')
-              .eq('type', 'community')
+              .eq('type', 'portfolio')
               .in('id', ids)
             if (communities?.length) {
               for (const comm of communities) {

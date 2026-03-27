@@ -76,7 +76,7 @@ export async function DELETE(
     }
 
     // Projects, communities, and activities can have members
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community' && portfolio.type !== 'activities') {
+    if (portfolio.type === 'human') {
       return NextResponse.json(
         { error: 'Only projects, communities, and activities can have members' },
         { status: 400 }
@@ -85,7 +85,7 @@ export async function DELETE(
 
     const metadata = portfolio.metadata as any
     const properties = metadata?.properties || {}
-    const isExternalActivity = portfolio.type === 'activities' && properties.external === true
+    const isExternalActivity = properties.external === true
 
     // External activities: owner/manager cannot remove other members (only self-removal/leave allowed)
     if (!isSelfRemoval && isExternalActivity) {

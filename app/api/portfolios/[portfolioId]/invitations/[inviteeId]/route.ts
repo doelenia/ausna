@@ -117,11 +117,7 @@ export async function PUT(
     }
 
     // Only projects, activities, and communities can have members
-    if (
-      portfolio.type !== 'projects' &&
-      portfolio.type !== 'activities' &&
-      portfolio.type !== 'community'
-    ) {
+    if (portfolio.type === 'human') {
       return NextResponse.json(
         { error: 'Only projects, activities, and communities can have members' },
         { status: 400 }
@@ -224,11 +220,7 @@ export async function PUT(
       const basic = metadata?.basic || {}
       const portfolioName = basic.name || 'this portfolio'
       const portfolioTypeLabel =
-        portfolio.type === 'projects'
-          ? 'project'
-          : portfolio.type === 'activities'
-          ? 'activity'
-          : 'community'
+      'portfolio'
 
       // Send acceptance message for manager invitation
       await supabase
@@ -345,11 +337,7 @@ export async function PUT(
     const basic = metadata?.basic || {}
     const portfolioName = basic.name || 'this portfolio'
     const portfolioTypeLabel =
-      portfolio.type === 'projects'
-        ? 'project'
-        : portfolio.type === 'activities'
-        ? 'activity'
-        : 'community'
+      'portfolio'
 
     // Send acceptance message
     await supabase
@@ -361,7 +349,7 @@ export async function PUT(
       })
 
       // Add portfolio topics to joining user's interests (weight 0.1) for project/activity
-      if (portfolio.type === 'projects' || portfolio.type === 'activities') {
+      if (portfolio.type !== 'human') {
         try {
           const { addPortfolioTopicsToUserInterests } = await import('@/lib/indexing/interest-tracking')
           await addPortfolioTopicsToUserInterests(portfolioId, user.id)

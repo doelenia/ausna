@@ -214,14 +214,14 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'projects')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         // Fetch all activities
         const { data: allActivities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata, host_project_id')
-          .eq('type', 'activities')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
 
         if (!allProjects) {

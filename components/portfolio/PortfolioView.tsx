@@ -239,7 +239,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       const { data: projects } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'projects')
+        .eq('type', 'portfolio')
         .in('id', ids)
       if (cancelled || !projects?.length) {
         if (!cancelled) setActivityHostProjects([])
@@ -277,7 +277,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       const { data: communities } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'community')
+        .eq('type', 'portfolio')
         .in('id', ids)
       if (cancelled || !communities?.length) {
         if (!cancelled) setActivityHostCommunities([])
@@ -536,7 +536,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
         const { data: allCommunities } = await supabase
           .from('portfolios')
           .select('id, metadata')
-          .eq('type', 'community')
+          .eq('type', 'portfolio')
           .order('created_at', { ascending: false })
           .limit(200)
 

@@ -15,23 +15,12 @@ function isPublicPortfolio(p: any) {
   return v === undefined || v === null || v === 'public'
 }
 
-function isActivityHostedByPortfolio(activityPortfolio: any, hostPortfolioType: string, hostPortfolioId: string) {
-  if (activityPortfolio?.type !== 'activities') return false
+function isActivityHostedByPortfolio(activityPortfolio: any, hostPortfolioId: string) {
+  if (activityPortfolio?.type === 'human') return false
   const props = ((activityPortfolio?.metadata as any)?.properties as any) || {}
   const hostProjectIds = Array.isArray(props.host_project_ids) ? props.host_project_ids : []
   const hostCommunityIds = Array.isArray(props.host_community_ids) ? props.host_community_ids : []
-
-  if (hostPortfolioType === 'projects') {
-    return hostProjectIds.includes(hostPortfolioId)
-  }
-  if (hostPortfolioType === 'community') {
-    return hostCommunityIds.includes(hostPortfolioId)
-  }
-  if (hostPortfolioType === 'activities') {
-    // Defensive fallback: if activities become valid hosts, support either host bucket.
-    return hostProjectIds.includes(hostPortfolioId) || hostCommunityIds.includes(hostPortfolioId)
-  }
-  return false
+  return hostProjectIds.includes(hostPortfolioId) || hostCommunityIds.includes(hostPortfolioId)
 }
 
 export async function GET(
@@ -72,7 +61,7 @@ export async function GET(
     const members = Array.isArray(meta?.members) ? (meta.members as string[]) : []
     const managers = Array.isArray(meta?.managers) ? (meta.managers as string[]) : []
     const isExternalActivity =
-      type === 'activities' && ((meta?.properties as any)?.external === true)
+      type !== 'human' && ((meta?.properties as any)?.external === true)
     const includeCreator = !isExternalActivity || members.includes(ownerId)
 
     const memberUserIds =
@@ -104,7 +93,7 @@ export async function GET(
       supabase
         .from('portfolios')
         .select('*')
-        .in('type', ['projects', 'activities', 'community'])
+        .eq('type', 'portfolio')
         .in('user_id', memberUserIds)
         .order('created_at', { ascending: false })
         .limit(poolLimit),
@@ -116,28 +105,15 @@ export async function GET(
     ])
 
     const memberSet = new Set(memberUserIds)
-    // For projects, activities, and community: only show notes assigned to this portfolio OR to hosted activities
-    const mustBeAssigned = ['projects', 'activities', 'community'].includes(type)
-    const validPortfolioIds = new Set<string>([portfolioId])
-    if (mustBeAssigned && (type === 'projects' || type === 'community')) {
-      const hostField = type === 'projects' ? 'host_project_ids' : 'host_community_ids'
-      const { data: hostedActivities } = await supabase
-        .from('portfolios')
-        .select('id, metadata')
-        .eq('type', 'activities')
-      ;(hostedActivities || []).forEach((a: any) => {
-        const ids = (a.metadata as any)?.properties?.[hostField]
-        if (Array.isArray(ids) && ids.includes(portfolioId)) {
-          validPortfolioIds.add(a.id)
-        }
-      })
-    }
+    // For non-human portfolios: only show notes assigned directly to this portfolio.
+    // (Hosted portfolios are only considered for portfolio_created items below.)
+    const mustBeAssigned = type !== 'human'
     const filteredNotesRaw = (notesRes.data || []).filter((note: any) => {
       if (note?.type === 'open_call') return false
       if (note?.type === 'resource') return false
       if (mustBeAssigned) {
         const assigned = Array.isArray(note.assigned_portfolios) ? note.assigned_portfolios : []
-        if (!assigned.some((id: string) => validPortfolioIds.has(id))) return false
+        if (!assigned.includes(portfolioId)) return false
       }
       const ownerId = String(note.owner_account_id || '')
       if (memberSet.has(ownerId)) return true
@@ -172,10 +148,10 @@ export async function GET(
     })
 
     let rawPortfolios = (portfoliosRes.data || []).filter(isPublicPortfolio)
-    // For portfolio feeds: only show created activity portfolios hosted by this portfolio.
-    if (['projects', 'community', 'activities'].includes(type)) {
+    // For non-human portfolio feeds: only show created portfolios hosted by this portfolio.
+    if (type !== 'human') {
       rawPortfolios = rawPortfolios.filter((p: any) =>
-        isActivityHostedByPortfolio(p, type, portfolioId)
+        isActivityHostedByPortfolio(p, portfolioId)
       )
     }
     const portfolioItems: FeedItem[] = rawPortfolios.map((p: any) => {

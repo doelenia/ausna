@@ -75,7 +75,7 @@ export async function POST(
     }
 
     // Only projects, activities, and communities can have members
-    if (portfolio.type !== 'projects' && portfolio.type !== 'community' && portfolio.type !== 'activities') {
+    if (portfolio.type === 'human') {
       return NextResponse.json(
         { error: 'Only projects, activities, and communities can have members' },
         { status: 400 }
@@ -163,7 +163,7 @@ export async function POST(
       .insert({
         sender_id: user.id,
         receiver_id: userId,
-        text: `invited you to join ${portfolioName} (${portfolio.type === 'projects' ? 'project' : portfolio.type === 'activities' ? 'activity' : 'community'})${customMessage}`,
+        text: `invited you to join ${portfolioName} (portfolio)${customMessage}`,
       })
 
     if (messageError) {

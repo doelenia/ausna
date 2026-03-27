@@ -141,7 +141,7 @@ function ConversationViewContent() {
         const { data: portfolios, error } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'activities')
+          .eq('type', 'portfolio')
           .in('id', missingIds)
 
         if (error || !portfolios || cancelled) {
