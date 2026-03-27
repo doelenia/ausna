@@ -283,7 +283,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         const basic = getPortfolioBasic(p as Portfolio)
         return {
           id: p.id,
-          type: 'projects' as const,
+          type: 'portfolio' as const,
           name: basic.name,
           avatar: basic.avatar,
           slug: p.slug,
@@ -312,7 +312,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
           const basic = getPortfolioBasic(p as Portfolio)
           return {
             id: p.id,
-            type: 'community' as const,
+            type: 'portfolio' as const,
             name: basic.name,
             avatar: basic.avatar,
             slug: p.slug,

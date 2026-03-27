@@ -97,7 +97,7 @@ export async function createPortfolio(
       }
     }
 
-    const normalizedType = type === 'human' ? 'human' : 'portfolio'
+    const normalizedType: 'portfolio' = 'portfolio'
 
     // Validate name
     if (!name || !name.trim()) {
