@@ -159,7 +159,7 @@ export function PortfolioCreatedCard({
 
       <ActivityCard
         activity={activityLike}
-        hrefOverride={getPortfolioUrl(portfolio.slug || portfolio.id)}
+        hrefOverride={getPortfolioUrl(portfolio)}
         hideMetaRow={!isActivity}
         memberLabel={memberLabel}
         memberUserIds={memberUserIds}

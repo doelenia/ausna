@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getPortfolioUrl, getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { getUrlDisplayInfo, getFaviconUrl } from '@/lib/notes/url-helpers'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -1500,7 +1500,7 @@ export function NoteCard({
 
     return (
       <Link
-        href={getPortfolioUrl(portfolio.slug || portfolio.id)}
+        href={getPortfolioUrl(portfolio)}
         onClick={(e) => e.stopPropagation()}
         className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-gray-100"
       >
@@ -1703,7 +1703,7 @@ export function NoteCard({
                 </div>
               ) : authorIds.length <= 1 ? (
                 <Link
-                  href={`/portfolio/human/${note.owner_account_id}`}
+                  href={getHumanProfileUrl(note.owner_account_id)}
                   onClick={(e) => e.stopPropagation()}
                   className="flex items-center gap-2 hover:opacity-80 transition-colors"
                 >
@@ -1739,7 +1739,7 @@ export function NoteCard({
                 const meta = projectPortfolio.metadata as any
                 return (
                   <Link
-                    href={getPortfolioUrl(projectPortfolio.slug || projectPortfolio.id)}
+                    href={getPortfolioUrl(projectPortfolio)}
                     onClick={(e) => e.stopPropagation()}
                     className="inline-flex items-center gap-2 hover:opacity-80 transition-colors flex-shrink-0"
                   >
@@ -1803,7 +1803,7 @@ export function NoteCard({
                 </div>
               ) : authorIds.length <= 1 ? (
                 <Link
-                  href={`/portfolio/human/${note.owner_account_id}`}
+                  href={getHumanProfileUrl(note.owner_account_id)}
                   onClick={(e) => e.stopPropagation()}
                   className="flex items-center gap-2 hover:opacity-80 transition-opacity"
                 >
@@ -2256,7 +2256,7 @@ export function NoteCard({
                   return (
                     <div key={item.id} className="flex items-center justify-between py-2 gap-3">
                       <Link
-                        href={`/portfolio/human/${item.userId}`}
+                        href={getHumanProfileUrl(item.userId)}
                         onClick={(e) => e.stopPropagation()}
                         className="flex items-center gap-3 hover:opacity-80 transition-opacity"
                       >
@@ -2307,7 +2307,7 @@ export function NoteCard({
                 {interestedProfilesList.map((p) => (
                   <Link
                     key={p.id}
-                    href={`/portfolio/human/${p.id}`}
+                    href={getHumanProfileUrl(p.id)}
                     onClick={(e) => e.stopPropagation()}
                     className="flex items-center gap-3 py-2 hover:opacity-80 transition-opacity"
                   >
@@ -2341,7 +2341,7 @@ export function NoteCard({
                 {authorProfiles.map((author) => (
                   <Link
                     key={author.id}
-                    href={`/portfolio/human/${author.id}`}
+                    href={getHumanProfileUrl(author.id)}
                     onClick={(e) => e.stopPropagation()}
                     className="flex items-center gap-3 py-2 hover:opacity-80 transition-opacity"
                   >
@@ -2456,7 +2456,7 @@ export function NoteCard({
                 {authorProfiles.map((author, index) => (
                   <div key={author.id} className="flex items-center justify-between gap-3 py-2">
                     <Link
-                      href={`/portfolio/human/${author.id}`}
+                      href={getHumanProfileUrl(author.id)}
                       onClick={(e) => e.stopPropagation()}
                       className="flex items-center gap-3 hover:opacity-80 transition-opacity min-w-0"
                     >

@@ -12,7 +12,7 @@ import type { NoteVisibility } from '@/types/note'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getPortfolioUrl, getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { UIText, Button, Content, UIButtonText, Card, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import Link from 'next/link'
@@ -279,19 +279,19 @@ export function CreateNoteForm({
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         const { data: allActivities } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         const { data: allCommunities } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         const projects = (allProjects || [])
@@ -1127,7 +1127,9 @@ export function CreateNoteForm({
   const ownerBasic = ownerPortfolio ? getPortfolioBasic(ownerPortfolio) : null
   const ownerName = ownerBasic?.name || 'You'
   const ownerUrl = currentUserId
-    ? getPortfolioUrl(ownerPortfolio?.slug || ownerPortfolio?.id || currentUserId)
+    ? ownerPortfolio
+      ? getPortfolioUrl(ownerPortfolio)
+      : getHumanProfileUrl(currentUserId)
     : '#'
 
   return (
@@ -1698,7 +1700,7 @@ export function CreateNoteForm({
         return (
           <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-100">
             <Link
-              href={getPortfolioUrl(context.slug || context.id)}
+              href={getPortfolioUrl(context)}
               className="flex items-start gap-3 flex-1 min-w-0 overflow-hidden"
             >
               <div className="flex-shrink-0">

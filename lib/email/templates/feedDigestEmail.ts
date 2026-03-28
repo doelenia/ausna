@@ -53,10 +53,12 @@ function openCallDaysLeft(meta: OpenCallMetadata | undefined): number | null {
 }
 
 function portfolioTypeWord(type: Portfolio['type']): string {
+  if (type === 'human') return 'human'
   if (type === 'projects') return 'project'
   if (type === 'activities') return 'activity'
   if (type === 'community') return 'community'
-  return 'portfolio'
+  if (type === 'space' || type === 'portfolio') return 'space'
+  return 'space'
 }
 
 function avatarCell(siteUrl: string, avatarUrl: string | null | undefined): string {
@@ -192,7 +194,7 @@ function renderNoteCard(siteUrl: string, item: FeedItem & { kind: 'note' }): str
 function renderPortfolioCreatedCard(siteUrl: string, item: FeedItem & { kind: 'portfolio_created' }): string {
   const { portfolio, creator_profile } = item
   const typeWord = portfolioTypeWord(portfolio.type)
-  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(portfolio.slug || portfolio.id))
+  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(portfolio as Portfolio))
   const meta = (portfolio.metadata as any) || {}
   const basic = meta.basic || {}
   const name = (basic.name as string)?.trim() || 'Untitled'

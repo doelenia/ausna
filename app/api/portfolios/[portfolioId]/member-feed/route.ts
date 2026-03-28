@@ -93,7 +93,7 @@ export async function GET(
       supabase
         .from('portfolios')
         .select('*')
-        .eq('type', 'portfolio')
+        .in('type', ['portfolio', 'space'])
         .in('user_id', memberUserIds)
         .order('created_at', { ascending: false })
         .limit(poolLimit),

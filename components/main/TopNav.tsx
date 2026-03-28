@@ -7,6 +7,7 @@ import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-au
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
+import { getHumanProfileUrl, getSpaceCreateUrl } from '@/lib/portfolio/routes'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
 import { Home, MessageCircle, Plus, Search, Balloon, LogIn } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
@@ -214,14 +215,14 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         // Fetch all activities
         const { data: allActivities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata, host_project_id')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         if (!allProjects) {
@@ -482,10 +483,10 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                       variant="secondary"
                       onClick={() => {
                         setShowCreateMenu(false)
-                        window.location.href = '/portfolio/create'
+                        window.location.href = getSpaceCreateUrl()
                       }}
                     >
-                      <UIText>Create portfolio</UIText>
+                      <UIText>Create space</UIText>
                     </Button>
                   </>
                 )}
@@ -591,7 +592,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                   {isApproved && (
                     <div className="mt-2 flex justify-center">
                       <Link
-                        href="/portfolio/create"
+                        href={getSpaceCreateUrl()}
                         className="flex flex-col items-center gap-2 py-2 px-4 hover:opacity-80 transition-opacity"
                         onClick={() => setShowProjectSelector(false)}
                       >
@@ -610,7 +611,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                             />
                           </svg>
                         </div>
-                        <UIText className="text-center max-w-[120px] truncate">Create Portfolio</UIText>
+                        <UIText className="text-center max-w-[120px] truncate">Create Space</UIText>
                       </Link>
                     </div>
                   )}
@@ -696,8 +697,8 @@ function UserAvatarClient({ userId }: { userId: string }) {
 
   // Link to human portfolio instead of account page
   const humanPortfolioUrl = humanPortfolio 
-    ? `/portfolio/${humanPortfolio.slug || humanPortfolio.id}`
-    : `/portfolio/${userId}`
+    ? getHumanProfileUrl(humanPortfolio.slug || humanPortfolio.id)
+    : getHumanProfileUrl(userId)
 
   if (loading) {
     return (

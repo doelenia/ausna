@@ -15,7 +15,7 @@ export function PortfolioPreviewCard({ portfolio, isSent = false }: PortfolioPre
 
   return (
     <Link
-      href={getPortfolioUrl(portfolio.slug || portfolio.id)}
+      href={getPortfolioUrl(portfolio)}
       className={`block mb-2 rounded-lg border-2 overflow-hidden transition-all ${
         isSent ? 'border-blue-400 bg-transparent' : 'border-gray-300 bg-transparent'
       }`}

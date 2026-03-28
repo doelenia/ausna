@@ -7,6 +7,7 @@ import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { generateSlug } from '@/lib/portfolio/utils'
 import { PortfolioType, PortfolioVisibility } from '@/types/portfolio'
 import { createPortfolio } from '@/app/portfolio/create/actions'
+import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { DescriptionEditorPopup } from './DescriptionPopups'
@@ -164,7 +165,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
 
       // Redirect to the new portfolio
       // Use window.location for a full page navigation to ensure fresh data
-      const redirectUrl = `/portfolio/${result.portfolioId}`
+      const redirectUrl = getSpaceUrl(result.portfolioId)
       if (process.env.NODE_ENV === 'development') {
         console.log('Redirecting to:', redirectUrl, { type, portfolioId: result.portfolioId })
       }

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { approveActivityJoinRequest, respondToActivityJoinRequest, approveCommunityJoinRequest, respondToCommunityJoinRequest } from '@/app/portfolio/[idOrSlug]/actions'
 
 interface UserInfo {
@@ -518,7 +519,7 @@ export function MembersPageClient({
             <UIText as="h2" className="mb-3">Uploader</UIText>
             <div className="flex items-center justify-between p-3 bg-amber-50 rounded-md">
               <Link
-                href={`/portfolio/human/${creator.id}`}
+                href={getHumanProfileUrl(creator.id)}
                 className="flex items-center gap-3 hover:opacity-80"
               >
                 <img
@@ -576,7 +577,7 @@ export function MembersPageClient({
                     className={`flex items-center justify-between p-3 ${bgColor} rounded-md`}
                   >
                     <Link
-                      href={`/portfolio/human/${member.id}`}
+                      href={getHumanProfileUrl(member.id)}
                       className="flex items-center gap-3 hover:opacity-80"
                     >
                       <img
@@ -717,7 +718,7 @@ export function MembersPageClient({
                   className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
                 >
                   <Link
-                    href={`/portfolio/human/${subscriber.id}`}
+                    href={getHumanProfileUrl(subscriber.id)}
                     className="flex items-center gap-3 hover:opacity-80"
                   >
                     <img

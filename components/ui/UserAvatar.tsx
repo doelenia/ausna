@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo } from 'react'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 
 export interface UserAvatarProps {
   userId: string
@@ -62,7 +63,7 @@ export function UserAvatar({
 }: UserAvatarProps) {
   const initials = useMemo(() => getInitials(name), [name])
   const avatarUrl = avatar || null
-  const portfolioUrl = href || `/portfolio/human/${userId}`
+  const portfolioUrl = href || getHumanProfileUrl(userId)
 
   const sizeStyle = {
     width: `${size}px`,

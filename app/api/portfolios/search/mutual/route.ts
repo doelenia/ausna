@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
       const { data: userCommunities } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'portfolio')
+        .in('type', ['portfolio', 'space'])
         .limit(100)
 
       if (userCommunities) {

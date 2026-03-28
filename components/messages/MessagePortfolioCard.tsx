@@ -28,7 +28,6 @@ export function MessagePortfolioCard({ portfolioType, portfolioIdentifier, isSen
           .from('portfolios')
           .select('*')
           .eq('id', portfolioIdentifier)
-          .eq('type', portfolioType)
           .maybeSingle()
         if (cancelled) return
         if (byId) {
@@ -41,7 +40,6 @@ export function MessagePortfolioCard({ portfolioType, portfolioIdentifier, isSen
           .from('portfolios')
           .select('*')
           .eq('slug', portfolioIdentifier)
-          .eq('type', portfolioType)
           .maybeSingle()
         if (cancelled) return
         if (!bySlug) {
@@ -68,7 +66,7 @@ export function MessagePortfolioCard({ portfolioType, portfolioIdentifier, isSen
   if (loading) {
     return (
       <div className={`max-w-xs lg:max-w-md p-3 rounded-lg ${isSent ? 'bg-blue-50' : 'bg-gray-100'}`}>
-        <p className="text-sm text-gray-500">Loading portfolio...</p>
+        <p className="text-sm text-gray-500">Loading…</p>
       </div>
     )
   }
@@ -76,7 +74,7 @@ export function MessagePortfolioCard({ portfolioType, portfolioIdentifier, isSen
   if (notFound || !portfolio) {
     return (
       <div className={`max-w-xs lg:max-w-md p-3 rounded-lg border border-gray-300 ${isSent ? 'bg-blue-50' : 'bg-gray-100'}`}>
-        <p className="text-sm text-gray-500 italic">Portfolio is no longer available</p>
+        <p className="text-sm text-gray-500 italic">This space or profile is no longer available</p>
       </div>
     )
   }

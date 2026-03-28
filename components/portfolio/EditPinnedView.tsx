@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react'
 import { getEligibleItemsForPinning, updatePinnedList } from '@/app/portfolio/[idOrSlug]/actions'
 import { PinnedItem } from '@/types/portfolio'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
+import { normalizePortfolioType } from '@/types/portfolio'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, UIText, Button } from '@/components/ui'
@@ -25,6 +26,11 @@ interface EditPinnedViewProps {
 }
 
 export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewProps) {
+  const portfolioHomeUrl =
+    normalizePortfolioType(portfolioType) === 'human'
+      ? getHumanProfileUrl(portfolioId)
+      : getSpaceUrl(portfolioId)
+
   const [activeTab, setActiveTab] = useState<'notes' | 'portfolios'>('notes')
   const [notes, setNotes] = useState<EligibleItem[]>([])
   const [portfolios, setPortfolios] = useState<EligibleItem[]>([])
@@ -115,7 +121,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
     const result = await updatePinnedList(portfolioId, pinnedItems)
 
     if (result.success) {
-      router.push(`/portfolio/${portfolioId}`)
+      router.push(portfolioHomeUrl)
       router.refresh()
     } else {
       setError(result.error || 'Failed to save pinned list')
@@ -338,7 +344,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
         <Button
           variant="secondary"
           asLink
-          href={`/portfolio/${portfolioId}`}
+          href={portfolioHomeUrl}
         >
           <UIText>Cancel</UIText>
         </Button>

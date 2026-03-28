@@ -311,7 +311,7 @@ export function PortfolioEditor({
         const { data: projects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
         const list = (projects || []).filter((p: any) => {
           const meta = p.metadata as any
@@ -349,7 +349,7 @@ export function PortfolioEditor({
         const { data: communities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
         const list = (communities || []).filter((c: any) => {
           const meta = c.metadata as any

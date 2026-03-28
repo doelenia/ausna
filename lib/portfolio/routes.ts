@@ -1,43 +1,78 @@
 /**
- * Portfolio routing utilities
- * Provides type-safe routing helpers for portfolio pages
+ * Human / Space routing — canonical URLs under /human and /space.
  */
 
-import { PortfolioType } from '@/types/portfolio'
+import type { Portfolio } from '@/types/portfolio'
+import { isHumanPortfolio, type PortfolioType } from '@/types/portfolio'
+
+const LEGACY_PREFIX = '/portfolio'
+
+export function getHumanProfileUrl(idOrSlug: string): string {
+  return `/human/${encodeURIComponent(idOrSlug)}`
+}
+
+export function getHumanFriendsUrl(idOrSlug: string): string {
+  return `/human/${encodeURIComponent(idOrSlug)}/friends`
+}
+
+export function getHumanCommunitiesUrl(idOrSlug: string): string {
+  return `/human/${encodeURIComponent(idOrSlug)}/communities`
+}
+
+export function getHumanPinnedUrl(idOrSlug: string): string {
+  return `/human/${encodeURIComponent(idOrSlug)}/pinned`
+}
+
+export function getSpaceUrl(idOrSlug: string): string {
+  return `/space/${encodeURIComponent(idOrSlug)}`
+}
+
+export function getSpaceMembersUrl(idOrSlug: string, query?: string): string {
+  const base = `/space/${encodeURIComponent(idOrSlug)}/members`
+  return query ? `${base}?${query.replace(/^\?/, '')}` : base
+}
+
+export function getSpacePinnedUrl(idOrSlug: string): string {
+  return `/space/${encodeURIComponent(idOrSlug)}/pinned`
+}
+
+export function getSpaceCreateUrl(): string {
+  return '/space/create'
+}
 
 /**
- * Generate portfolio URL.
- *
- * Canonical URLs no longer include the portfolio type segment.
+ * Canonical URL for a portfolio row (human profile vs space).
  */
-export function getPortfolioUrl(idOrSlug: string): string
-export function getPortfolioUrl(type: PortfolioType, idOrSlug: string): string
-export function getPortfolioUrl(
-  typeOrId: PortfolioType | string,
-  idMaybe?: string
-): string {
-  if (typeof idMaybe === 'string') {
-    return `/portfolio/${idMaybe}`
+export function getPortfolioUrl(portfolio: Pick<Portfolio, 'type' | 'slug' | 'id'>): string {
+  const idOrSlug = portfolio.slug || portfolio.id
+  if (isHumanPortfolio(portfolio as Portfolio)) {
+    return getHumanProfileUrl(idOrSlug)
   }
-  return `/portfolio/${typeOrId}`
+  return getSpaceUrl(idOrSlug)
+}
+
+/** Assigned non-human portfolio in emails — always a space URL. */
+export function getSpaceUrlById(portfolioId: string): string {
+  return getSpaceUrl(portfolioId)
 }
 
 /**
- * Generate portfolio URL with slug (for SEO-friendly URLs)
+ * @deprecated Prefer `getPortfolioUrl(portfolio)` or human/space helpers. Kept for narrow legacy call sites.
  */
-export function getPortfolioUrlWithSlug(type: PortfolioType, slug: string): string {
-  return `/portfolio/${slug}`
+export function getPortfolioUrlLegacy(idOrSlug: string): string {
+  return `${LEGACY_PREFIX}/${idOrSlug}`
 }
 
-/**
- * Parse portfolio route parameters
- */
+export function getPortfolioUrlWithSlug(_type: PortfolioType, slug: string): string {
+  return getSpaceUrl(slug)
+}
+
 export function parsePortfolioRoute(
   type: string | undefined,
   id: string | undefined
 ): { type: PortfolioType | null; id: string | null; isValid: boolean } {
   const validTypes: PortfolioType[] = ['human', 'portfolio']
-  
+
   if (!type || !id) {
     return { type: null, id: null, isValid: false }
   }
@@ -52,29 +87,19 @@ export function parsePortfolioRoute(
   }
 }
 
-/**
- * Validate portfolio type
- */
 export function isValidPortfolioType(type: string): type is PortfolioType {
   const validTypes: PortfolioType[] = ['human', 'portfolio']
   return validTypes.includes(type.toLowerCase() as PortfolioType)
 }
 
-/**
- * Get all valid portfolio types
- */
 export function getPortfolioTypes(): PortfolioType[] {
   return ['human', 'portfolio']
 }
 
-/**
- * Get portfolio type display name
- */
 export function getPortfolioTypeDisplayName(type: PortfolioType): string {
   const displayNames: Record<PortfolioType, string> = {
     human: 'Human',
-    portfolio: 'Portfolio',
+    portfolio: 'Space',
   }
   return displayNames[type]
 }
-

@@ -310,7 +310,7 @@ export async function getExploreActivitiesService(userId: string): Promise<Explo
       supabase
         .from('portfolios')
         .select('id, user_id, host_project_id, visibility, metadata')
-        .eq('type', 'portfolio')
+        .in('type', ['portfolio', 'space'])
         .limit(500),
     ])
 
@@ -500,14 +500,14 @@ export async function computeAndStoreDailyExploreMatchService(
         ? supabase
             .from('portfolios')
             .select('id, metadata')
-            .eq('type', 'portfolio')
+            .in('type', ['portfolio', 'space'])
             .in('id', Array.from(hostProjectIdsAll))
         : Promise.resolve({ data: [] as any[], error: null }),
       hostCommunityIdsAll.size > 0
         ? supabase
             .from('portfolios')
             .select('id, metadata')
-            .eq('type', 'portfolio')
+            .in('type', ['portfolio', 'space'])
             .in('id', Array.from(hostCommunityIdsAll))
         : Promise.resolve({ data: [] as any[], error: null }),
       friendIdsAll.size > 0
@@ -518,7 +518,7 @@ export async function computeAndStoreDailyExploreMatchService(
             .in('user_id', Array.from(friendIdsAll))
         : Promise.resolve({ data: [] as any[], error: null }),
       supabase.from('portfolios').select('id, metadata').eq('type', 'human').eq('user_id', userId).maybeSingle(),
-      supabase.from('portfolios').select('metadata').eq('type', 'portfolio').eq('user_id', userId).limit(5),
+      supabase.from('portfolios').select('metadata').in('type', ['portfolio', 'space']).eq('user_id', userId).limit(5),
     ])
 
     const hostProjectMap = new Map<string, { name: string; avatar?: string | null; emoji?: string | null }>()

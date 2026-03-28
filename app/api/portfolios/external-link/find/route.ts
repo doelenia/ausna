@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     const { data: portfolios, error } = await supabase
       .from('portfolios')
       .select('id, metadata, slug')
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
 
     if (error) return NextResponse.json({ error: 'Failed to search' }, { status: 500 })
 

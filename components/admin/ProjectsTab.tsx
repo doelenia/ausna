@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { searchPortfolios, deletePortfolio } from '@/app/admin/actions'
 import Link from 'next/link'
+import { getSpaceUrl } from '@/lib/portfolio/routes'
 
 function IdCell({ id }: { id: string }) {
   const [copied, setCopied] = useState(false)
@@ -205,7 +206,7 @@ export function ProjectsTab() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm space-x-2">
                         <Link
-                          href={`/portfolio/${portfolio.id}`}
+                          href={getSpaceUrl(portfolio.id)}
                           className="text-blue-600 hover:text-blue-800"
                         >
                           View

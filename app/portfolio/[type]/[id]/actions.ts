@@ -8,6 +8,7 @@ import {
   PinnedItem,
   ActivityCallToJoinConfig,
   HumanAvailabilitySchedule,
+  DB_NON_HUMAN_TYPES,
 } from '@/types/portfolio'
 import { normalizeActivityDateTime } from '@/lib/datetime'
 import {
@@ -20,7 +21,8 @@ import {
   isNoteAssignedToPortfolio,
 } from '@/lib/portfolio/helpers'
 import { Note } from '@/types/note'
-import { revalidatePath } from 'next/cache'
+import { revalidatePortfolioPathsForIdAndSlug } from '@/lib/portfolio/revalidatePaths'
+import { getSpaceMembersUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 
 interface UpdatePortfolioResult {
   success: boolean
@@ -203,71 +205,95 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
       const humanMetadata = portfolioData.metadata as any
       const ownedProjectsList = humanMetadata?.owned_projects || []
 
-      // Fetch owned projects using the owned_projects list (ordered by most recent activity)
-      let ownedProjects: any[] = []
+      const selectInvolved =
+        'id, type, slug, metadata, user_id, visibility, created_at' as const
+
+      // 1) Owned rows ordered by human metadata list (activity order)
+      let ownedOrderedFromMetadata: any[] = []
       if (ownedProjectsList.length > 0) {
         const { data: ownedProjectsData, error: ownedError } = await supabase
           .from('portfolios')
-          .select('id, type, slug, metadata, visibility')
-          .eq('type', 'portfolio')
+          .select(selectInvolved)
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .in('id', ownedProjectsList)
 
-        if (!ownedError && ownedProjectsData) {
-          // Create a map to preserve order from owned_projects list
-          const projectMap = new Map(
-            ownedProjectsData.map((p: any) => [p.id, p])
-          )
-          
-          // Reorder according to owned_projects list
-          ownedProjects = ownedProjectsList
+        if (ownedError) {
+          return { success: false, error: 'Failed to fetch sub-portfolios' }
+        }
+        if (ownedProjectsData) {
+          const projectMap = new Map(ownedProjectsData.map((p: any) => [p.id, p]))
+          ownedOrderedFromMetadata = ownedProjectsList
             .map((id: string) => projectMap.get(id))
             .filter((p: any) => p !== undefined)
         }
       }
 
-      // Fetch all other projects where user is a member or manager (but not owner)
-      // Note: PostgREST doesn't have great support for JSONB array contains, so we fetch and filter
-      const { data: allProjects, error: projectsError } = await supabase
+      // 2) All spaces owned by this user (not only those in owned_projects — fixes empty/stale lists)
+      const { data: ownedByUserColumn, error: ownedColError } = await supabase
         .from('portfolios')
-        .select('id, type, slug, metadata, user_id, visibility')
-        .eq('type', 'portfolio')
+        .select(selectInvolved)
+        .in('type', [...DB_NON_HUMAN_TYPES])
+        .eq('user_id', userId)
         .order('created_at', { ascending: false })
-        .limit(100)
 
-      const { data: allCommunities, error: communitiesError } = await supabase
-        .from('portfolios')
-        .select('id, type, slug, metadata')
-        .eq('type', 'portfolio')
-        .order('created_at', { ascending: false })
-        .limit(100)
+      if (ownedColError) {
+        return { success: false, error: 'Failed to fetch sub-portfolios' }
+      }
 
-      if (projectsError || communitiesError) {
+      const ownedIdsFromMetadata = new Set(ownedOrderedFromMetadata.map((p: any) => p.id))
+      const ownedExtraFromColumn = (ownedByUserColumn || []).filter(
+        (p: any) => !ownedIdsFromMetadata.has(p.id)
+      )
+      const ownedProjects = [...ownedOrderedFromMetadata, ...ownedExtraFromColumn]
+      const allOwnedIds = new Set((ownedByUserColumn || []).map((p: any) => p.id))
+
+      // 3) Involvement via managers / members — do not use a global LIMIT 100 (misses older spaces)
+      const [managersResult, membersResult] = await Promise.all([
+        supabase
+          .from('portfolios')
+          .select(selectInvolved)
+          .in('type', [...DB_NON_HUMAN_TYPES])
+          .contains('metadata', { managers: [userId] }),
+        supabase
+          .from('portfolios')
+          .select(selectInvolved)
+          .in('type', [...DB_NON_HUMAN_TYPES])
+          .contains('metadata', { members: [userId] }),
+      ])
+
+      if (managersResult.error || membersResult.error) {
         return {
           success: false,
           error: 'Failed to fetch sub-portfolios',
         }
       }
 
-      // Filter projects where user is a member or manager (but not owner)
-      // Exclude projects that are already in ownedProjectsList
-      const memberProjects = (allProjects || [])
-        .filter((p: any) => {
-          // Skip if user is owner (already in ownedProjects)
-          if (p.user_id === userId) {
-            return false
-          }
-          // Skip if already in owned list
-          if (ownedProjectsList.includes(p.id)) {
-            return false
-          }
-          const metadata = p.metadata as any
-          const managers = metadata?.managers || []
-          const members = metadata?.members || []
-          return (Array.isArray(managers) && managers.includes(userId)) ||
-                 (Array.isArray(members) && members.includes(userId))
-        })
+      const involvementById = new Map<string, any>()
+      for (const p of managersResult.data || []) {
+        involvementById.set(p.id, p)
+      }
+      for (const p of membersResult.data || []) {
+        if (!involvementById.has(p.id)) involvementById.set(p.id, p)
+      }
 
-      // Combine owned projects (first, in order) with member projects
+      // Collaborator-only spaces (not owned by this user)
+      const memberProjects = [...involvementById.values()].filter((p: any) => {
+        if (p.user_id === userId) return false
+        if (allOwnedIds.has(p.id)) return false
+        const metadata = p.metadata as any
+        const managers = metadata?.managers || []
+        const members = metadata?.members || []
+        return (
+          (Array.isArray(managers) && managers.includes(userId)) ||
+          (Array.isArray(members) && members.includes(userId))
+        )
+      })
+      memberProjects.sort((a: any, b: any) => {
+        const ta = new Date(a.created_at || 0).getTime()
+        const tb = new Date(b.created_at || 0).getTime()
+        return tb - ta
+      })
+
       const allUserProjects = [...ownedProjects, ...memberProjects]
 
       // Map to result format
@@ -293,14 +319,16 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         }
       })
 
-      // Filter communities where user is a manager or member, and determine role
-      const communities = (allCommunities || [])
+      // Communities tab: manager or member (includes co-managed spaces; not limited to latest N rows globally)
+      const communities = [...involvementById.values()]
         .filter((p: any) => {
           const metadata = p.metadata as any
           const managers = metadata?.managers || []
           const members = metadata?.members || []
-          return (Array.isArray(managers) && managers.includes(userId)) ||
-                 (Array.isArray(members) && members.includes(userId))
+          return (
+            (Array.isArray(managers) && managers.includes(userId)) ||
+            (Array.isArray(members) && members.includes(userId))
+          )
         })
         .map((p: any) => {
           const metadata = p.metadata as any
@@ -408,7 +436,7 @@ export async function updatePortfolio(
     // Get portfolio for metadata access
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('metadata, type, user_id, visibility')
+      .select('metadata, type, user_id, visibility, slug')
       .eq('id', portfolioId)
       .single()
 
@@ -643,7 +671,7 @@ export async function updatePortfolio(
             const { data: projects } = await supabase
               .from('portfolios')
               .select('id, user_id, metadata, type')
-              .eq('type', 'portfolio')
+              .in('type', [...DB_NON_HUMAN_TYPES])
               .in('id', ids)
             if (projects?.length) {
               for (const proj of projects) {
@@ -678,7 +706,7 @@ export async function updatePortfolio(
             const { data: communities } = await supabase
               .from('portfolios')
               .select('id, user_id, metadata, type')
-              .eq('type', 'portfolio')
+              .in('type', [...DB_NON_HUMAN_TYPES])
               .in('id', ids)
             if (communities?.length) {
               for (const comm of communities) {
@@ -818,6 +846,8 @@ export async function updatePortfolio(
       }
     }
 
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
+
     // For non-human portfolios, notify members when time and/or location changes.
     if (portfolio.type !== 'human' && (activityTimeChanged || activityLocationChanged)) {
       try {
@@ -845,7 +875,7 @@ export async function updatePortfolio(
 
           const baseUrl =
             process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-          const activityPath = `/portfolio/${portfolioId}`
+          const activityPath = getSpaceUrl(portfolioId)
           const activityUrl = `${baseUrl}${activityPath}`
 
           const text = `updated the ${changeLabel} for ${activityName} (portfolio). View details: ${activityPath}`
@@ -958,10 +988,7 @@ export async function updatePortfolio(
           })
           .eq('id', portfolioId)
         
-        // Revalidate Next.js cache for this portfolio page
-        revalidatePath(`/portfolio/${portfolioId}`)
-        revalidatePath(`/portfolio/${portfolioId}/members`)
-        revalidatePath(`/portfolio/${portfolioId}/pinned`)
+        revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
       } catch (avatarError: any) {
         // Avatar upload failed, but portfolio was updated
         console.error('Failed to upload avatar:', avatarError)
@@ -1017,7 +1044,7 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
     // Check portfolio type and get user_id
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('type, user_id')
+      .select('type, user_id, slug')
       .eq('id', portfolioId)
       .single()
 
@@ -1027,6 +1054,8 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
         error: 'Portfolio not found',
       }
     }
+
+    const slugForRevalidate = (portfolio as { slug?: string }).slug
 
     // Prevent deletion of human portfolios
     if (portfolio.type === 'human') {
@@ -1048,6 +1077,8 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
         error: deleteError.message || 'Failed to delete portfolio',
       }
     }
+
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, slugForRevalidate)
 
     // If this was a non-human portfolio, remove it from owner's owned list
     if (portfolio.type !== 'human') {
@@ -1114,7 +1145,7 @@ export async function updateActivityCallToJoin(
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
 
@@ -1210,10 +1241,7 @@ export async function updateActivityCallToJoin(
       }
     }
 
-    // Canonical route + legacy typed route (typed redirects but may still be cached)
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
 
     return { success: true }
   } catch (error: any) {
@@ -1236,7 +1264,7 @@ export async function getPendingJoinRequestsCount(
     const supabase = await createClient()
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
     if (!portfolio || portfolio.type === 'human') {
@@ -1323,7 +1351,7 @@ export async function respondToActivityJoinRequest(
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', activityId)
       .single()
 
@@ -1376,9 +1404,7 @@ export async function respondToActivityJoinRequest(
       .eq('user_id', request.applicant_user_id)
       .eq('partner_id', user.id)
 
-    revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${activityId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(activityId, (portfolio as { slug?: string }).slug)
 
     return { success: true }
   } catch (error: any) {
@@ -1509,7 +1535,7 @@ export async function applyToActivityCallToJoin(
       }
 
       // Notify owner; link directs to Requests tab
-      const requestsUrl = `/portfolio/${portfolioId}/members?tab=requests`
+      const requestsUrl = getSpaceMembersUrl((portfolio as { slug?: string }).slug || portfolioId, 'tab=requests')
       await sendMessage(
         portfolio.user_id,
         `applied to join ${portfolioName} (${label}). Review: ${requestsUrl}`
@@ -1606,9 +1632,7 @@ export async function applyToActivityCallToJoin(
       console.error('Failed to add portfolio topics to user interests:', interestError)
     }
 
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
 
     return { success: true }
   } catch (error: any) {
@@ -1647,7 +1671,7 @@ export async function approveActivityJoinRequest(
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', activityId)
       .single()
 
@@ -1772,9 +1796,7 @@ export async function approveActivityJoinRequest(
       console.error('Failed to add portfolio topics to user interests:', interestError)
     }
 
-    revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${activityId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(activityId, (portfolio as { slug?: string }).slug)
 
     return { success: true }
   } catch (error: any) {
@@ -1814,7 +1836,7 @@ export async function rejectActivityJoinRequest(
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', activityId)
       .single()
 
@@ -1872,9 +1894,7 @@ export async function rejectActivityJoinRequest(
         `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
       )
 
-    revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${activityId}`)
-    revalidatePath(`/portfolio/${activityId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(activityId, (portfolio as { slug?: string }).slug)
 
     return { success: true }
   } catch (error: any) {
@@ -1905,7 +1925,7 @@ export async function applyToCommunityJoin(
 
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
 
@@ -1947,7 +1967,7 @@ export async function applyToCommunityJoin(
 
     const basic = metadata?.basic || {}
     const communityName = (basic.name as string) || 'this portfolio'
-    const requestsUrl = `/portfolio/${portfolioId}/members?tab=requests`
+    const requestsUrl = getSpaceMembersUrl((portfolio as { slug?: string }).slug || portfolioId, 'tab=requests')
     await supabase.from('messages').insert({
       sender_id: user.id,
       receiver_id: portfolio.user_id,
@@ -1977,7 +1997,7 @@ export async function getPendingCommunityJoinRequestsCount(
     const supabase = await createClient()
     const { data: portfolio } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
     if (!portfolio || portfolio.type === 'human') {
@@ -2057,7 +2077,7 @@ export async function respondToCommunityJoinRequest(
     const portfolioId: string = request.portfolio_id
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
     if (portfolioError || !portfolio || portfolio.type === 'human') {
@@ -2094,8 +2114,7 @@ export async function respondToCommunityJoinRequest(
       .or(
         `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
       )
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message || 'An unexpected error occurred' }
@@ -2123,7 +2142,7 @@ export async function approveCommunityJoinRequest(requestId: string): Promise<Si
     const portfolioId: string = request.portfolio_id
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
     if (portfolioError || !portfolio || portfolio.type === 'human') {
@@ -2187,8 +2206,7 @@ export async function approveCommunityJoinRequest(requestId: string): Promise<Si
     .or(
       `and(user_id.eq.${applicantId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${applicantId})`
     )
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message || 'An unexpected error occurred' }
@@ -2219,7 +2237,7 @@ export async function rejectCommunityJoinRequest(
     const portfolioId: string = request.portfolio_id
     const { data: portfolio, error: portfolioError } = await supabase
       .from('portfolios')
-      .select('id, type, user_id, metadata')
+      .select('id, type, user_id, metadata, slug')
       .eq('id', portfolioId)
       .single()
     if (portfolioError || !portfolio || portfolio.type === 'human') {
@@ -2261,8 +2279,7 @@ export async function rejectCommunityJoinRequest(
     .or(
       `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
     )
-    revalidatePath(`/portfolio/${portfolioId}`)
-    revalidatePath(`/portfolio/${portfolioId}/members`)
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message || 'An unexpected error occurred' }

@@ -113,13 +113,13 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         const { data: allCommunities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         if (!allProjects) {
@@ -202,7 +202,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
     setShowSendModal(true)
   }
 
-  const portfolioPath = getPortfolioUrl(portfolio.slug || portfolio.id)
+  const portfolioPath = getPortfolioUrl(portfolio)
   const portfolioLink =
     typeof window !== 'undefined' ? `${window.location.origin}${portfolioPath}` : portfolioPath
   // Use a predictable reference so the Messages UI can render a clickable portfolio module.

@@ -45,7 +45,7 @@ async function main() {
   const { data: projects, error: projectsError } = await supabase
     .from('portfolios')
     .select('id, metadata')
-    .eq('type', 'portfolio')
+    .in('type', ['portfolio', 'space'])
 
   if (projectsError || !projects?.length) {
     if (projectsError) console.error('Failed to fetch projects:', projectsError)

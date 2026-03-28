@@ -9,7 +9,7 @@ import { ProjectTypeSelector } from '@/components/portfolio/ProjectTypeSelector'
 import { CreateHumanPortfolioInput } from '@/app/admin/actions'
 import { PublicUploadFormConfig, EmailCheckResponse } from '@/types/public-upload-form'
 import { createClient } from '@/lib/supabase/client'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getSpaceUrl } from '@/lib/portfolio/routes'
 
 interface ProjectMember {
   name: string
@@ -146,7 +146,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           .from('portfolios')
           .select('id, user_id, metadata')
           .eq('id', PROJECT_ID)
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .maybeSingle()
 
         if (projectError || !project) {
@@ -877,7 +877,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
               {/* Project Members */}
               {!projectMembersLoading && projectMembers.length > 0 && (
                 <Link
-                  href={getPortfolioUrl(PROJECT_ID)}
+                  href={getSpaceUrl(PROJECT_ID)}
                   className="inline-flex items-center gap-2 mt-3 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
                 >
                   <div className="flex -space-x-2">
@@ -920,7 +920,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
                 {/* Project Members */}
                 {!projectMembersLoading && projectMembers.length > 0 && (
                   <Link
-                    href={getPortfolioUrl(PROJECT_ID)}
+                    href={getSpaceUrl(PROJECT_ID)}
                     className="inline-flex items-center gap-2 mt-3 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors"
                   >
                     <div className="flex -space-x-2">

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { UserAvatar } from '@/components/ui'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio } from '@/types/portfolio'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 
 export function AuthNav() {
   const [user, setUser] = useState<any>(null)
@@ -193,8 +194,8 @@ function UserAvatarClient({ userId }: { userId: string }) {
 
   // Link to human portfolio instead of account page
   const humanPortfolioUrl = humanPortfolio 
-    ? `/portfolio/human/${humanPortfolio.id}`
-    : `/portfolio/human/${userId}`
+    ? getHumanProfileUrl(humanPortfolio.slug || humanPortfolio.id)
+    : getHumanProfileUrl(userId)
 
   if (loading) {
     return (

@@ -1,7 +1,7 @@
 import type { FeedItem } from '@/app/main/actions'
 import type { Note } from '@/types/note'
 import type { Portfolio } from '@/types/portfolio'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getSpaceUrlById } from '@/lib/portfolio/routes'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { escapeHtml } from '@/lib/email/templates/digestEmailShell'
 
@@ -127,7 +127,7 @@ export function renderDigestAssignedPortfolioBannerHtml(
 ): string {
   if (!banner) return ''
 
-  const href = toAbsoluteUrl(siteUrl, getPortfolioUrl(banner.portfolioId))
+  const href = toAbsoluteUrl(siteUrl, getSpaceUrlById(banner.portfolioId))
   const name = escapeHtml(banner.name)
   const typeLabel = banner.projectTypeLabel ? escapeHtml(banner.projectTypeLabel) : ''
   const descRaw = banner.description?.trim()

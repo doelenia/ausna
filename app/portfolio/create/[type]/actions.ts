@@ -8,6 +8,7 @@ import { addProjectToOwnedList } from '@/lib/portfolio/human'
 import { normalizeActivityDateTime } from '@/lib/datetime'
 import { normalizeExternalLink } from '@/lib/portfolio/normalizeExternalLink'
 import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 interface CreatePortfolioResult {
   success: boolean
@@ -97,7 +98,8 @@ export async function createPortfolio(
       }
     }
 
-    const normalizedType: 'portfolio' = 'portfolio'
+    /** Persisted DB enum after migration `add_space_portfolio_type`; app treats `space` like legacy `portfolio`. */
+    const normalizedType: 'space' = 'space'
 
     // Validate name
     if (!name || !name.trim()) {
@@ -128,7 +130,7 @@ export async function createPortfolio(
       const { data: portfolios } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'portfolio')
+        .in('type', [...DB_NON_HUMAN_TYPES])
 
       const duplicate = (portfolios || []).find((p: any) => {
         const props = p.metadata?.properties || {}
@@ -359,34 +361,32 @@ export async function createPortfolio(
       }
     }
 
-    // Normalize project/activity status
-    if (normalizedType === 'portfolio') {
-      if (projectStatusRaw) {
-        // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
-        const normalizedStatus =
-          projectStatusRaw === 'archived'
-            ? 'archived'
-            : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
-              ? 'live'
-              : undefined
-        if (normalizedStatus) {
-          metadata.status = normalizedStatus
-        }
-      } else {
-        // Non-human portfolios without datetime: default to live when no status set
-        if (metadata.status == null || metadata.status === '') {
-          metadata.status = 'live'
-        }
+    // Normalize project/activity status (non-human / space)
+    if (projectStatusRaw) {
+      // Map legacy 'in-progress' to 'live' and only persist 'live' or 'archived'
+      const normalizedStatus =
+        projectStatusRaw === 'archived'
+          ? 'archived'
+          : projectStatusRaw === 'live' || projectStatusRaw === 'in-progress'
+            ? 'live'
+            : undefined
+      if (normalizedStatus) {
+        metadata.status = normalizedStatus
+      }
+    } else {
+      // Non-human spaces without datetime: default to live when no status set
+      if (metadata.status == null || metadata.status === '') {
+        metadata.status = 'live'
       }
     }
 
     // For activities, optionally validate and resolve host projects (multiple)
     let resolvedHostProjectIds: string[] = []
-    if (normalizedType === 'portfolio' && hostProjectIds.length > 0) {
+    if (hostProjectIds.length > 0) {
       const { data: projects, error: hostError } = await supabase
         .from('portfolios')
         .select('id, user_id, metadata, type')
-        .eq('type', 'portfolio')
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .in('id', hostProjectIds)
 
       if (hostError || !projects?.length) {
@@ -417,11 +417,11 @@ export async function createPortfolio(
 
     // For activities, optionally validate and resolve host communities (multiple)
     let resolvedHostCommunityIds: string[] = []
-    if (normalizedType === 'portfolio' && hostCommunityIds.length > 0) {
+    if (hostCommunityIds.length > 0) {
       const { data: communities, error: hostError } = await supabase
         .from('portfolios')
         .select('id, user_id, metadata, type')
-        .eq('type', 'portfolio')
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .in('id', hostCommunityIds)
 
       if (hostError || !communities?.length) {
@@ -449,13 +449,13 @@ export async function createPortfolio(
       metadata.properties = { ...activityProps, host_community_ids: resolvedHostCommunityIds }
     }
 
-    const firstHostId = normalizedType === 'portfolio' && resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null
+    const firstHostId = resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null
 
     // Create portfolio
     const { data: portfolio, error: createError } = await supabase
       .from('portfolios')
       .insert({
-        type: normalizedType as 'portfolio' | 'human',
+        type: normalizedType as 'space' | 'human',
         slug,
         user_id: user.id,
         metadata,
@@ -548,7 +548,7 @@ export async function createPortfolio(
     }
 
     // Add new non-human portfolio to owner's owned list
-    if (normalizedType === 'portfolio') {
+    {
       try {
         await addProjectToOwnedList(user.id, portfolio.id)
       } catch (error) {

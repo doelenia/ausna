@@ -9,6 +9,7 @@ import { UsernameEditor } from '@/components/account/UsernameEditor'
 import { PasswordChanger } from '@/components/account/PasswordChanger'
 import { HumanPortfolio } from '@/types/portfolio'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { InterestTags } from '@/components/portfolio/InterestTags'
 import { Topic } from '@/types/indexing'
 import { Title, UIText, Button } from '@/components/ui'
@@ -249,10 +250,10 @@ export function ClientAccountPage({ userId, initialHumanPortfolio }: ClientAccou
                     <UIText as="dt">Portfolio Slug</UIText>
                     <dd className="mt-1">
                       <Link 
-                        href={`/portfolio/human/${humanPortfolio.id}`}
+                        href={getHumanProfileUrl(humanPortfolio.slug || humanPortfolio.id)}
                         className="text-blue-600 hover:text-blue-500"
                       >
-                        <UIText>/portfolio/human/{humanPortfolio.slug}</UIText>
+                        <UIText>/human/{humanPortfolio.slug}</UIText>
                       </Link>
                     </dd>
                   </div>
