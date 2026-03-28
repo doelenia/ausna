@@ -228,14 +228,6 @@ export async function DELETE(
       )
     }
 
-    // Managers cannot remove other managers (only creators can)
-    if (isManager && !currentUserIsCreator) {
-      return NextResponse.json(
-        { error: 'Managers cannot remove other managers' },
-        { status: 403 }
-      )
-    }
-
     // Check if user is a member
     if (!isMember) {
       return NextResponse.json(

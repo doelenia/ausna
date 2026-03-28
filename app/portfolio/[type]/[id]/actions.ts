@@ -1431,8 +1431,53 @@ export async function getCurrentUserPendingActivityRequest(
   }
 }
 
+/** Noun used in DM copy for unified join flows (`activities` → activity, `space` → space, else portfolio). */
+function portfolioJoinRequestMessageLabel(portfolioType: string | null | undefined): string {
+  const t = String(portfolioType || '').toLowerCase()
+  if (t === 'activities') return 'activity'
+  if (t === 'space') return 'space'
+  return 'portfolio'
+}
+
+/** Owner plus `metadata.managers`, deduped — for join / application alerts. */
+function getPortfolioLeadershipUserIds(portfolio: { user_id: string; metadata?: unknown }): string[] {
+  const managers = (portfolio.metadata as { managers?: unknown } | null | undefined)?.managers
+  const ids = new Set<string>()
+  ids.add(portfolio.user_id)
+  if (Array.isArray(managers)) {
+    for (const id of managers) {
+      if (typeof id === 'string' && id.length > 0) ids.add(id)
+    }
+  }
+  return [...ids]
+}
+
+async function notifyPortfolioLeadershipFromApplicant(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  applicantUserId: string,
+  portfolio: { user_id: string; metadata?: unknown },
+  text: string
+) {
+  const clearCompletion = async (receiverId: string) => {
+    await supabase
+      .from('conversation_completions')
+      .delete()
+      .or(
+        `and(user_id.eq.${receiverId},partner_id.eq.${applicantUserId}),and(user_id.eq.${applicantUserId},partner_id.eq.${receiverId})`
+      )
+  }
+  for (const receiverId of getPortfolioLeadershipUserIds(portfolio)) {
+    await supabase.from('messages').insert({
+      sender_id: applicantUserId,
+      receiver_id: receiverId,
+      text,
+    })
+    await clearCompletion(receiverId)
+  }
+}
+
 /**
- * Send a message to an applicant (activity join request) and mark the request as responded.
+ * Send a message to an applicant for any non-human portfolio join request and set `responded_at`.
  * Does not approve or reject; applicant remains pending. Owner/manager only.
  */
 export async function respondToActivityJoinRequest(
@@ -1477,7 +1522,7 @@ export async function respondToActivityJoinRequest(
     if (!isOwner && !isManager) {
       return {
         success: false,
-        error: 'Only the activity owner or managers can respond to requests',
+        error: 'Only the owner or managers can respond to requests',
       }
     }
 
@@ -1497,7 +1542,7 @@ export async function respondToActivityJoinRequest(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
+    const label = portfolioJoinRequestMessageLabel(portfolio.type)
     const text =
       message.trim().length > 0
         ? `Regarding your request to join ${portfolioName} (${label}): ${message.trim()}`
@@ -1592,23 +1637,9 @@ export async function applyToActivityCallToJoin(
     const activityRole = 'member'
     const memberRoleLabel = 'Member'
 
-    const sendMessage = async (receiverId: string, text: string) => {
-      await supabase.from('messages').insert({
-        sender_id: user.id,
-        receiver_id: receiverId,
-        text,
-      })
-      await supabase
-        .from('conversation_completions')
-        .delete()
-        .or(
-          `and(user_id.eq.${receiverId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${receiverId})`
-        )
-    }
-
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
+    const label = portfolioJoinRequestMessageLabel(portfolio.type)
 
     // External activities: always auto-join. Non-external with approval: create pending request.
     if (!isExternal && callToJoin?.require_approval) {
@@ -1644,10 +1675,12 @@ export async function applyToActivityCallToJoin(
         }
       }
 
-      // Notify owner; link directs to Requests tab
+      // Notify owner and all managers; link directs to Requests tab
       const requestsUrl = getSpaceMembersUrl((portfolio as { slug?: string }).slug || portfolioId, 'tab=requests')
-      await sendMessage(
-        portfolio.user_id,
+      await notifyPortfolioLeadershipFromApplicant(
+        supabase,
+        user.id,
+        portfolio,
         `applied to join ${portfolioName} (${label}). Review: ${requestsUrl}`
       )
 
@@ -1729,9 +1762,11 @@ export async function applyToActivityCallToJoin(
       approved_at: new Date().toISOString(),
     })
 
-    // Notify owner about the new member
-    await sendMessage(
-      portfolio.user_id,
+    // Notify owner and all managers about the new member
+    await notifyPortfolioLeadershipFromApplicant(
+      supabase,
+      user.id,
+      portfolio,
       `joined ${portfolioName} (${label}) as ${memberRoleLabel}`
     )
 
@@ -1754,7 +1789,7 @@ export async function applyToActivityCallToJoin(
 }
 
 /**
- * Approve an activity join request and add the applicant as a member/manager.
+ * Approve a join request for any non-human portfolio and add the applicant as a member (and manager when applicable).
  */
 export async function approveActivityJoinRequest(
   requestId: string
@@ -1797,7 +1832,7 @@ export async function approveActivityJoinRequest(
     if (!isOwner && !isManager) {
       return {
         success: false,
-        error: 'Only the activity owner or managers can approve requests',
+        error: 'Only the owner or managers can approve requests',
       }
     }
 
@@ -1862,7 +1897,7 @@ export async function approveActivityJoinRequest(
       if (metadataError) {
         return {
           success: false,
-          error: metadataError.message || 'Failed to update activity membership',
+          error: metadataError.message || 'Failed to update membership',
         }
       }
     }
@@ -1885,7 +1920,7 @@ export async function approveActivityJoinRequest(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
+    const label = portfolioJoinRequestMessageLabel(portfolio.type)
 
     await supabase.from('messages').insert({
       sender_id: user.id,
@@ -1918,7 +1953,7 @@ export async function approveActivityJoinRequest(
 }
 
 /**
- * Reject an activity join request and optionally send a message to the applicant.
+ * Reject a join request for any non-human portfolio and optionally send a message to the applicant.
  */
 export async function rejectActivityJoinRequest(
   requestId: string,
@@ -1962,7 +1997,7 @@ export async function rejectActivityJoinRequest(
     if (!isOwner && !isManager) {
       return {
         success: false,
-        error: 'Only the activity owner or managers can reject requests',
+        error: 'Only the owner or managers can reject requests',
       }
     }
 
@@ -1985,7 +2020,7 @@ export async function rejectActivityJoinRequest(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolio.type === 'activities' ? 'activity' : 'portfolio'
+    const label = portfolioJoinRequestMessageLabel(portfolio.type)
 
     let text = `rejected your request to join ${portfolioName} (${label})`
     if (rejectionMessage && rejectionMessage.trim().length > 0) {
@@ -2068,6 +2103,7 @@ export async function applyToCommunityJoin(
       portfolio_id: portfolioId,
       applicant_user_id: user.id,
       prompt_answer: promptAnswer?.trim() || null,
+      activity_role: 'member',
       status: 'pending',
     })
 
@@ -2077,18 +2113,14 @@ export async function applyToCommunityJoin(
 
     const basic = metadata?.basic || {}
     const communityName = (basic.name as string) || 'this portfolio'
+    const label = portfolioJoinRequestMessageLabel(portfolio.type)
     const requestsUrl = getSpaceMembersUrl((portfolio as { slug?: string }).slug || portfolioId, 'tab=requests')
-    await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: portfolio.user_id,
-      text: `applied to join ${communityName} (portfolio). Review: ${requestsUrl}`,
-    })
-    await supabase
-      .from('conversation_completions')
-      .delete()
-      .or(
-        `and(user_id.eq.${portfolio.user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${portfolio.user_id})`
-      )
+    await notifyPortfolioLeadershipFromApplicant(
+      supabase,
+      user.id,
+      portfolio,
+      `applied to join ${communityName} (${label}). Review: ${requestsUrl}`
+    )
 
     return { success: true }
   } catch (e: any) {
@@ -2163,237 +2195,25 @@ export async function getCurrentUserPendingCommunityRequest(
   }
 }
 
-/**
- * Respond to a community join request (message applicant, set responded_at). Owner/manager only.
- */
+/** Same implementation as respondToActivityJoinRequest; kept for existing imports. */
 export async function respondToCommunityJoinRequest(
   requestId: string,
   message: string
 ): Promise<SimpleResult> {
-  try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
-    const { data: request, error: requestError } = await supabase
-      .from('portfolio_join_requests')
-      .select('*')
-      .eq('id', requestId)
-      .single()
-    if (requestError || !request) {
-      return { success: false, error: 'Join request not found' }
-    }
-    if (request.status !== 'pending') {
-      return { success: false, error: 'Join request is not pending' }
-    }
-    const portfolioId: string = request.portfolio_id
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('id, type, user_id, metadata, slug')
-      .eq('id', portfolioId)
-      .single()
-    if (portfolioError || !portfolio || portfolio.type === 'human') {
-      return { success: false, error: 'Portfolio not found for this request' }
-    }
-    const metadata = (portfolio.metadata as any) || {}
-    const managers: string[] = metadata?.managers || []
-    const isOwner = portfolio.user_id === user.id
-    const isManager = Array.isArray(managers) && managers.includes(user.id)
-    if (!isOwner && !isManager) {
-      return { success: false, error: 'Only the portfolio owner or managers can respond to requests' }
-    }
-    const { error: updateRequestError } = await supabase
-      .from('portfolio_join_requests')
-      .update({ responded_at: new Date().toISOString() })
-      .eq('id', requestId)
-    if (updateRequestError) {
-      return { success: false, error: updateRequestError.message || 'Failed to update join request' }
-    }
-    const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this portfolio'
-    const text =
-      message.trim().length > 0
-        ? `Regarding your request to join ${communityName} (portfolio): ${message.trim()}`
-        : `We received your request to join ${communityName} (portfolio). We'll get back to you soon.`
-    await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: request.applicant_user_id,
-      text,
-    })
-    await supabase
-      .from('conversation_completions')
-      .delete()
-      .or(
-        `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
-      )
-    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
-    return { success: true }
-  } catch (e: any) {
-    return { success: false, error: e?.message || 'An unexpected error occurred' }
-  }
+  return respondToActivityJoinRequest(requestId, message)
 }
 
-/**
- * Approve a community join request and add the applicant as a member.
- */
+/** Same implementation as approveActivityJoinRequest; kept for existing imports. */
 export async function approveCommunityJoinRequest(requestId: string): Promise<SimpleResult> {
-  try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
-    const { data: request, error: requestError } = await supabase
-      .from('portfolio_join_requests')
-      .select('*')
-      .eq('id', requestId)
-      .single()
-    if (requestError || !request) {
-      return { success: false, error: 'Join request not found' }
-    }
-    if (request.status !== 'pending') {
-      return { success: false, error: 'Join request is not pending' }
-    }
-    const portfolioId: string = request.portfolio_id
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('id, type, user_id, metadata, slug')
-      .eq('id', portfolioId)
-      .single()
-    if (portfolioError || !portfolio || portfolio.type === 'human') {
-      return { success: false, error: 'Portfolio not found for this request' }
-    }
-    const metadata = (portfolio.metadata as any) || {}
-    const managers: string[] = metadata?.managers || []
-    const isOwner = portfolio.user_id === user.id
-    const isManager = Array.isArray(managers) && managers.includes(user.id)
-    if (!isOwner && !isManager) {
-      return { success: false, error: 'Only the portfolio owner or managers can approve requests' }
-    }
-    const applicantId: string = request.applicant_user_id
-    const currentMembers: string[] = metadata?.members || []
-    const nextMembers = currentMembers.includes(applicantId)
-      ? currentMembers
-      : [...currentMembers, applicantId]
-    const updatedMetadata = { ...metadata, members: nextMembers }
-    const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
-      portfolio_id: portfolioId,
-      new_members: nextMembers,
-    })
-    if (rpcError) {
-      const { error: directError } = await supabase
-        .from('portfolios')
-        .update({ metadata: updatedMetadata })
-        .eq('id', portfolioId)
-      if (directError) {
-        return { success: false, error: directError.message || 'Failed to update members' }
-      }
-    } else {
-      const { error: metadataError } = await supabase
-        .from('portfolios')
-        .update({ metadata: updatedMetadata })
-        .eq('id', portfolioId)
-      if (metadataError) {
-        return { success: false, error: metadataError.message || 'Failed to update membership' }
-      }
-    }
-    const { error: updateRequestError } = await supabase
-      .from('portfolio_join_requests')
-      .update({
-        status: 'approved',
-        approved_by: user.id,
-        approved_at: new Date().toISOString(),
-      })
-      .eq('id', requestId)
-    if (updateRequestError) {
-      return { success: false, error: updateRequestError.message || 'Failed to update request' }
-    }
-    const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this portfolio'
-  await supabase.from('messages').insert({
-    sender_id: user.id,
-    receiver_id: applicantId,
-    text: `approved your request to join ${communityName} (portfolio)`,
-  })
-  await supabase
-    .from('conversation_completions')
-    .delete()
-    .or(
-      `and(user_id.eq.${applicantId},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${applicantId})`
-    )
-    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
-    return { success: true }
-  } catch (e: any) {
-    return { success: false, error: e?.message || 'An unexpected error occurred' }
-  }
+  return approveActivityJoinRequest(requestId)
 }
 
-/**
- * Reject a community join request and optionally send a message to the applicant.
- */
+/** Same implementation as rejectActivityJoinRequest; kept for existing imports. */
 export async function rejectCommunityJoinRequest(
   requestId: string,
   rejectionMessage?: string
 ): Promise<SimpleResult> {
-  try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
-    const { data: request, error: requestError } = await supabase
-      .from('portfolio_join_requests')
-      .select('*')
-      .eq('id', requestId)
-      .single()
-    if (requestError || !request) {
-      return { success: false, error: 'Join request not found' }
-    }
-    if (request.status !== 'pending') {
-      return { success: false, error: 'Join request is not pending' }
-    }
-    const portfolioId: string = request.portfolio_id
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('id, type, user_id, metadata, slug')
-      .eq('id', portfolioId)
-      .single()
-    if (portfolioError || !portfolio || portfolio.type === 'human') {
-      return { success: false, error: 'Portfolio not found for this request' }
-    }
-    const metadata = (portfolio.metadata as any) || {}
-    const managers: string[] = metadata?.managers || []
-    const isOwner = portfolio.user_id === user.id
-    const isManager = Array.isArray(managers) && managers.includes(user.id)
-    if (!isOwner && !isManager) {
-      return { success: false, error: 'Only the portfolio owner or managers can reject requests' }
-    }
-    const { error: updateRequestError } = await supabase
-      .from('portfolio_join_requests')
-      .update({
-        status: 'rejected',
-        rejected_by: user.id,
-        rejected_at: new Date().toISOString(),
-        rejection_reason: rejectionMessage?.trim() || null,
-      })
-      .eq('id', requestId)
-    if (updateRequestError) {
-      return { success: false, error: updateRequestError.message || 'Failed to update join request' }
-    }
-    const basic = metadata?.basic || {}
-    const communityName = (basic.name as string) || 'this portfolio'
-    let text = `rejected your request to join ${communityName} (portfolio)`
-    if (rejectionMessage && rejectionMessage.trim().length > 0) {
-      text += `: ${rejectionMessage.trim()}`
-    }
-    await supabase.from('messages').insert({
-      sender_id: user.id,
-      receiver_id: request.applicant_user_id,
-      text,
-    })
-  await supabase
-    .from('conversation_completions')
-    .delete()
-    .or(
-      `and(user_id.eq.${request.applicant_user_id},partner_id.eq.${user.id}),and(user_id.eq.${user.id},partner_id.eq.${request.applicant_user_id})`
-    )
-    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
-    return { success: true }
-  } catch (e: any) {
-    return { success: false, error: e?.message || 'An unexpected error occurred' }
-  }
+  return rejectActivityJoinRequest(requestId, rejectionMessage)
 }
 
 interface PinnedItemWithData {

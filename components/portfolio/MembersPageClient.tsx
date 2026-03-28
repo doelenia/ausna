@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
 import { getHumanProfileUrl } from '@/lib/portfolio/routes'
-import { approveActivityJoinRequest, respondToActivityJoinRequest, approveCommunityJoinRequest, respondToCommunityJoinRequest } from '@/app/portfolio/[idOrSlug]/actions'
+import { approveActivityJoinRequest, respondToActivityJoinRequest } from '@/app/portfolio/[idOrSlug]/actions'
+import { normalizePortfolioType } from '@/types/portfolio'
 
 interface UserInfo {
   id: string
@@ -80,7 +81,11 @@ export function MembersPageClient({
   const [requestError, setRequestError] = useState<string | null>(null)
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null)
   const [respondMessage, setRespondMessage] = useState('')
-  
+
+  /** Non-human portfolios (space, portfolio, legacy activities/community/projects) use join requests + this tab. */
+  const canShowJoinRequestsTab =
+    normalizePortfolioType(portfolioType) === 'portfolio' && canManage
+
   // Filter members to separate creators, managers, and regular members
   const creator = creatorInfo
   const creatorInMembers = creator ? members.find(m => m.id === creator.id) : null
@@ -409,7 +414,7 @@ export function MembersPageClient({
         >
           <UIText as="span">Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
         </button>
-        {(portfolioType === 'activities' || portfolioType === 'community') && canManage && (
+        {canShowJoinRequestsTab && (
           <button
             onClick={(e) => {
               e.preventDefault()
@@ -743,8 +748,8 @@ export function MembersPageClient({
         </div>
       )}
 
-      {/* Requests Tab (activities and community, managers/owner) */}
-      {activeTab === 'requests' && (portfolioType === 'activities' || portfolioType === 'community') && canManage && (
+      {/* Requests & invites: same UI and server actions for all non-human portfolio types */}
+      {activeTab === 'requests' && canShowJoinRequestsTab && (
         <div>
           <div className="mb-3 flex items-center gap-2 flex-wrap">
             <UIText as="h2">Join requests {joinRequests.length > 0 && `(${joinRequests.length})`}</UIText>
@@ -785,10 +790,7 @@ export function MembersPageClient({
                   setProcessingRequestId(req.id)
                   setRequestError(null)
                   try {
-                    const result =
-                      portfolioType === 'community'
-                        ? await approveCommunityJoinRequest(req.id)
-                        : await approveActivityJoinRequest(req.id)
+                    const result = await approveActivityJoinRequest(req.id)
                     if (!result || !result.success) {
                       setRequestError(result?.error || 'Failed to approve request')
                       return
@@ -813,10 +815,10 @@ export function MembersPageClient({
                   setProcessingRequestId(req.id)
                   setRequestError(null)
                   try {
-                    const result =
-                      portfolioType === 'community'
-                        ? await respondToCommunityJoinRequest(respondingRequestId, respondMessage)
-                        : await respondToActivityJoinRequest(respondingRequestId, respondMessage)
+                    const result = await respondToActivityJoinRequest(
+                      respondingRequestId,
+                      respondMessage
+                    )
                     if (!result || !result.success) {
                       setRequestError(result?.error || 'Failed to send message')
                       return
