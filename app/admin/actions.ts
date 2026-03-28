@@ -13,7 +13,11 @@ import {
   addProjectToOwnedListById,
 } from '@/lib/portfolio/admin-helpers'
 import { generateSlug } from '@/lib/portfolio/helpers'
-import { HumanPortfolioMetadata, ProjectPortfolioMetadata } from '@/types/portfolio'
+import {
+  DB_NON_HUMAN_TYPES,
+  HumanPortfolioMetadata,
+  ProjectPortfolioMetadata,
+} from '@/types/portfolio'
 import {
   getDemoDisplayName,
   maskDescription,
@@ -1190,6 +1194,32 @@ export async function searchNotes(
 }
 
 /**
+ * `project_type_general` values from CommunityTypeSelector (used to split admin Projects vs Communities tabs).
+ * Non-human DB `type` is `space` (Deploy 2); legacy `portfolio` / `community` rows are included via DB_NON_HUMAN_TYPES.
+ */
+const COMMUNITY_GENERAL_CATEGORY_NAMES = new Set<string>([
+  'Social & Connection',
+  'Professional & Career',
+  'Learning & Education',
+  'Creative & Arts',
+  'Local & Regional',
+  'Online & Digital',
+  'Activism & Change',
+  'Wellness & Health',
+  'Spiritual & Religious',
+  'Economic & Mutual Aid',
+  'Cultural & Identity',
+  'Others',
+])
+
+function matchesAdminSpaceListTab(tab: 'projects' | 'community', metadata: unknown): boolean {
+  const m = metadata as { project_type_general?: string } | null | undefined
+  const g = typeof m?.project_type_general === 'string' ? m.project_type_general : ''
+  const looksCommunity = g !== '' && COMMUNITY_GENERAL_CATEGORY_NAMES.has(g)
+  return tab === 'community' ? looksCommunity : !looksCommunity
+}
+
+/**
  * Search portfolios (projects or communities) by creator name, name, or id
  * If no query, fetch all portfolios of the type paginated
  */
@@ -1226,12 +1256,11 @@ export async function searchPortfolios(
 
     // If no query, fetch all portfolios with pagination
     if (!query || query.trim().length === 0) {
-      const { data: portfolios, error: portfoliosError, count } = await supabase
+      const { data: allNonHuman, error: portfoliosError } = await supabase
         .from('portfolios')
-        .select('id, type, user_id, created_at, metadata', { count: 'exact' })
-        .eq('type', type)
+        .select('id, type, user_id, created_at, metadata')
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .order('created_at', { ascending: false })
-        .range((page - 1) * pageSize, page * pageSize - 1)
 
       if (portfoliosError) {
         return {
@@ -1240,7 +1269,15 @@ export async function searchPortfolios(
         }
       }
 
-      const formattedPortfolios = (portfolios || []).map((portfolio) => {
+      const tabPortfolios = (allNonHuman || []).filter((p) =>
+        matchesAdminSpaceListTab(type, p.metadata)
+      )
+      const total = tabPortfolios.length
+      const totalPages = Math.ceil(total / pageSize)
+      const start = (page - 1) * pageSize
+      const portfolios = tabPortfolios.slice(start, start + pageSize)
+
+      const formattedPortfolios = portfolios.map((portfolio) => {
         const metadata = portfolio.metadata as any
         const members = metadata?.members || []
         const membersCount = Array.isArray(members) ? members.length : 0
@@ -1257,9 +1294,6 @@ export async function searchPortfolios(
         }
       })
 
-      const total = count || 0
-      const totalPages = Math.ceil(total / pageSize)
-
       return {
         success: true,
         portfolios: formattedPortfolios,
@@ -1273,10 +1307,10 @@ export async function searchPortfolios(
     const searchTerm = query.trim().toLowerCase()
 
     // Get all portfolios of the specified type for filtering
-    const { data: allPortfolios, error: portfoliosError } = await supabase
+    const { data: allPortfoliosRaw, error: portfoliosError } = await supabase
       .from('portfolios')
       .select('id, type, user_id, created_at, metadata')
-      .eq('type', type)
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .order('created_at', { ascending: false })
 
     if (portfoliosError) {
@@ -1286,8 +1320,12 @@ export async function searchPortfolios(
       }
     }
 
+    const allPortfolios = (allPortfoliosRaw || []).filter((p) =>
+      matchesAdminSpaceListTab(type, p.metadata)
+    )
+
     // Filter portfolios by search term
-    const matchingPortfolios = (allPortfolios || [])
+    const matchingPortfolios = allPortfolios
       .filter((portfolio) => {
         const portfolioId = portfolio.id.toLowerCase()
         const metadata = portfolio.metadata as any
@@ -1748,7 +1786,7 @@ export async function createHumanPortfolioWithProjects(
       const { data: projectPortfolio, error: projectError } = await supabase
         .from('portfolios')
         .insert({
-          type: 'projects',
+          type: 'space',
           slug,
           user_id: humanPortfolio.user_id,
           is_pseudo: projectIsPseudo,
