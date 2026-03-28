@@ -10,6 +10,7 @@ import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { UIText, Button, Card, Content, UIButtonText } from '@/components/ui'
+import { DescriptionFieldSection } from './DescriptionPopups'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ActivityDateTimeField, ActivityLocationField } from './activity-fields'
@@ -30,6 +31,30 @@ interface HostCommunityOption {
   name: string
   avatar?: string
   emoji?: string
+}
+
+const DEFAULT_SPACE_EMOJIS = [
+  '🚀',
+  '✨',
+  '🌟',
+  '💡',
+  '🎯',
+  '📌',
+  '🏠',
+  '🌈',
+  '🎉',
+  '🧩',
+  '📣',
+  '🤝',
+  '🌱',
+  '🔭',
+  '🎨',
+  '🛠',
+] as const
+
+function pickRandomDefaultEmoji(): string {
+  const i = Math.floor(Math.random() * DEFAULT_SPACE_EMOJIS.length)
+  return DEFAULT_SPACE_EMOJIS[i]
 }
 
 export function CreateActivityForm({
@@ -80,6 +105,10 @@ export function CreateActivityForm({
   const [isExternal, setIsExternal] = useState(false)
   const [externalLink, setExternalLink] = useState('')
   const [extractingLink, setExtractingLink] = useState(false)
+  const [autoFillModalOpen, setAutoFillModalOpen] = useState(false)
+  const [autoFillUrl, setAutoFillUrl] = useState('')
+  const [autoFillModalError, setAutoFillModalError] = useState<string | null>(null)
+  const [autofillFaviconUrl, setAutofillFaviconUrl] = useState<string | null>(null)
   const [description, setDescription] = useState('')
   const [existingActivity, setExistingActivity] = useState<{
     id: string
@@ -88,32 +117,41 @@ export function CreateActivityForm({
     emoji?: string
     slug?: string
   } | null>(null)
-  const [linkVerified, setLinkVerified] = useState(false)
   const [iAmGoing, setIAmGoing] = useState(true)
 
   const entityLabel = mode === 'portfolio' ? 'portfolio' : 'activity'
   const entityLabelTitle = mode === 'portfolio' ? 'Portfolio' : 'Activity'
+  const externalKindLabel = mode === 'portfolio' ? 'space' : 'activity'
   const showHosts = mode !== 'portfolio'
 
-  const handleContinue = async () => {
-    const url = externalLink.trim()
+  useEffect(() => {
+    if (mode !== 'portfolio') return
+    setSelectedEmoji((prev) => prev ?? pickRandomDefaultEmoji())
+  }, [mode])
+
+  const closeAutoFillModal = () => {
+    setAutoFillModalOpen(false)
+    setAutoFillUrl('')
+    setAutoFillModalError(null)
+    setExistingActivity(null)
+  }
+
+  const runAutoFillFromLink = async () => {
+    const url = autoFillUrl.trim()
     if (!url) {
-      setError('Please enter a link')
+      setAutoFillModalError('Please enter a link')
       return
     }
     setExtractingLink(true)
-    setError(null)
+    setAutoFillModalError(null)
     setExistingActivity(null)
     try {
-      // Check for duplicate link first
       const checkRes = await fetch(
         `/api/portfolios/external-link/find?url=${encodeURIComponent(url)}`
       )
       const checkData = await checkRes.json()
       if (checkData.existing && checkData.portfolio) {
         setExistingActivity(checkData.portfolio)
-        setLinkVerified(false)
-        setExtractingLink(false)
         return
       }
 
@@ -124,7 +162,7 @@ export function CreateActivityForm({
       })
       const data = await res.json()
       if (!res.ok) {
-        setError(data.error || 'Failed to extract event information')
+        setAutoFillModalError(data.error || 'Could not read details from that link')
         return
       }
       if (data.title) setName(data.title)
@@ -145,9 +183,26 @@ export function CreateActivityForm({
       } else if (data.location) {
         setActivityLocation({ line1: data.location })
       }
-      setLinkVerified(true)
+      if (isExternal) {
+        setExternalLink(url)
+      }
+      const fav = getFaviconUrl(url.trim())
+      if (fav) {
+        setAvatarFile(null)
+        setAvatarPreview(null)
+        setSelectedEmoji(null)
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
+        if (!isExternal) {
+          setAutofillFaviconUrl(fav)
+        } else {
+          setAutofillFaviconUrl(null)
+        }
+      }
+      closeAutoFillModal()
     } catch (err: any) {
-      setError(err.message || 'Failed to extract event information')
+      setAutoFillModalError(err.message || 'Could not read details from that link')
     } finally {
       setExtractingLink(false)
     }
@@ -293,6 +348,7 @@ export function CreateActivityForm({
 
         setAvatarFile(compatibleFile)
         setSelectedEmoji(null)
+        setAutofillFaviconUrl(null)
 
         const reader = new FileReader()
         reader.onloadend = () => {
@@ -313,6 +369,7 @@ export function CreateActivityForm({
     setSelectedEmoji(emoji)
     setAvatarFile(null)
     setAvatarPreview(null)
+    setAutofillFaviconUrl(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -327,7 +384,7 @@ export function CreateActivityForm({
       return
     }
 
-    if (!isExternal && !avatarFile && !selectedEmoji) {
+    if (!isExternal && !avatarFile && !selectedEmoji && !autofillFaviconUrl) {
       setError('Please upload an image or select an emoji')
       return
     }
@@ -341,12 +398,7 @@ export function CreateActivityForm({
     }
 
     if (isExternal && !externalLink.trim()) {
-      setError('Event link is required for external activities')
-      return
-    }
-
-    if (isExternal && existingActivity) {
-      setError('This event already exists. Use the link above to view it.')
+      setError(`Official link is required for external ${externalKindLabel}s`)
       return
     }
 
@@ -382,6 +434,8 @@ export function CreateActivityForm({
         const faviconUrl = getFaviconUrl(externalLink.trim())
         if (faviconUrl) formData.append('avatar_url', faviconUrl)
         formData.append('i_am_going', iAmGoing ? 'true' : 'false')
+      } else if (!isExternal && autofillFaviconUrl) {
+        formData.append('avatar_url', autofillFaviconUrl)
       }
 
       if (!isExternal && projectTypeGeneral && projectTypeSpecific) {
@@ -501,101 +555,20 @@ export function CreateActivityForm({
         />
       )}
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* External toggle */}
-        <div className="flex items-center justify-between">
-          <UIText as="label" className="block">
-            External {entityLabel}
-          </UIText>
-          <button
+        {mode === 'portfolio' && (
+          <Button
             type="button"
-            role="switch"
-            aria-checked={isExternal}
+            variant="secondary"
             onClick={() => {
-              setIsExternal((prev) => !prev)
-              if (!isExternal) {
-                setExternalLink('')
-                setExistingActivity(null)
-                setLinkVerified(false)
-                setIAmGoing(true)
-                setHostProjectIds([])
-                setHostCommunityIds([])
-                setVisibility('public')
-              }
-              setError(null)
+              setAutoFillModalError(null)
+              setAutoFillUrl('')
+              setExistingActivity(null)
+              setAutoFillModalOpen(true)
             }}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-              isExternal ? 'bg-blue-600' : 'bg-gray-200'
-            }`}
+            disabled={loading}
           >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
-                isExternal ? 'translate-x-5' : 'translate-x-1'
-              }`}
-            />
-          </button>
-        </div>
-        <UIText as="p" className="text-xs text-gray-500 -mt-2">
-          External {entityLabel}s link to items on other sites. Anyone can join without approval.
-        </UIText>
-
-        {isExternal && (
-          <div className="space-y-4">
-            <div>
-              <UIText as="label" className="block mb-2">
-                Event link
-              </UIText>
-              <div className="flex gap-2">
-                <input
-                  type="url"
-                  value={externalLink}
-                  onChange={(e) => {
-                    setExternalLink(e.target.value)
-                    setExistingActivity(null)
-                    setLinkVerified(false)
-                  }}
-                  placeholder="https://..."
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={loading}
-                />
-                <Button
-                  type="button"
-                  variant="primary"
-                  onClick={handleContinue}
-                  disabled={extractingLink || !externalLink.trim()}
-                >
-                  <UIText>{extractingLink ? 'Extracting...' : 'Continue'}</UIText>
-                </Button>
-              </div>
-            </div>
-            {existingActivity && (
-              <Link
-                href={getSpaceUrl(existingActivity.slug || existingActivity.id)}
-                className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
-              >
-                <div className="flex-shrink-0">
-                  <StickerAvatar
-                    src={existingActivity.avatar}
-                    alt={existingActivity.name}
-                    type="activities"
-                    size={48}
-                    emoji={existingActivity.emoji}
-                    name={existingActivity.name}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <UIText as="div" className="text-amber-800 font-medium mb-0.5">
-                    This event already exists
-                  </UIText>
-                  <Content className="text-amber-700 mb-1">
-                    {existingActivity.name}
-                  </Content>
-                  <UIText as="span" className="text-amber-600 text-sm">
-                    View existing activity →
-                  </UIText>
-                </div>
-              </Link>
-            )}
-          </div>
+            <UIText>Auto fill with a link</UIText>
+          </Button>
         )}
 
         {error && (
@@ -604,7 +577,6 @@ export function CreateActivityForm({
           </div>
         )}
 
-        {(!isExternal || linkVerified) && (
         <>
         <div>
           <UIText as="label" className="block mb-2">
@@ -618,14 +590,20 @@ export function CreateActivityForm({
                   alt="Avatar preview"
                   className="h-20 w-20 rounded-full object-cover border-2 border-gray-300"
                 />
-              ) : selectedEmoji ? (
-                <StickerAvatar alt={name || 'Preview'} type="activities" size={80} emoji={selectedEmoji} />
               ) : isExternal && externalLink.trim() ? (
                 <img
                   src={getFaviconUrl(externalLink.trim(), 128)}
                   alt="Site favicon"
                   className="h-20 w-20 rounded-full object-cover border-2 border-gray-300 bg-white"
                 />
+              ) : autofillFaviconUrl ? (
+                <img
+                  src={autofillFaviconUrl}
+                  alt="Site favicon from autofill"
+                  className="h-20 w-20 rounded-full object-cover border-2 border-gray-300 bg-white"
+                />
+              ) : selectedEmoji ? (
+                <StickerAvatar alt={name || 'Preview'} type="activities" size={80} emoji={selectedEmoji} />
               ) : (
                 <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
                   <svg
@@ -670,7 +648,7 @@ export function CreateActivityForm({
                   <UIText>{selectedEmoji ? 'Change Emoji' : 'Select Emoji'}</UIText>
                 </Button>
               </div>
-              {(avatarFile || selectedEmoji) && (
+              {(avatarFile || selectedEmoji || autofillFaviconUrl) && (
                 <Button
                   type="button"
                   variant="text"
@@ -678,6 +656,7 @@ export function CreateActivityForm({
                     setAvatarFile(null)
                     setAvatarPreview(null)
                     setSelectedEmoji(null)
+                    setAutofillFaviconUrl(null)
                     if (fileInputRef.current) {
                       fileInputRef.current.value = ''
                     }
@@ -688,7 +667,9 @@ export function CreateActivityForm({
                 </Button>
               )}
               <UIText as="p" className="text-xs text-gray-500">
-                {isExternal ? 'Uses site favicon by default. Upload or select emoji to override.' : 'Please upload an image or select an emoji'}
+                {isExternal
+                  ? 'Uses site favicon by default. Upload or select emoji to override.'
+                  : 'Upload an image, pick an emoji, or use Auto fill with a link to apply that site’s favicon.'}
               </UIText>
             </div>
           </div>
@@ -711,40 +692,19 @@ export function CreateActivityForm({
           />
         </div>
 
-        {isExternal && (
-          <div>
-            <UIText as="label" className="block mb-2">
-              Description
+        <DescriptionFieldSection
+          value={description}
+          onChange={setDescription}
+          disabled={loading}
+          helperContent={
+            <UIText as="p" className="text-gray-500">
+              Optional. You can add relevant links (not LinkedIn). This text helps build your knowledge graph and
+              recommendations.
             </UIText>
-            <UIText as="p" className="text-xs text-gray-500 mb-2">
-              You can also add relevant linnks (NOT LinkedIn!) This description will be used to build the advance knowledge graph that help us to find the best opportunities for you.
-            </UIText>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              placeholder="Short description of the event"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              disabled={loading}
-            />
-          </div>
-        )}
-
-        {isExternal && (
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="i_am_going"
-              checked={iAmGoing}
-              onChange={(e) => setIAmGoing(e.target.checked)}
-              disabled={loading}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            <UIText as="label" htmlFor="i_am_going" className="cursor-pointer">
-              I&apos;m going to this event
-            </UIText>
-          </div>
-        )}
+          }
+          previewEmptyText="Click to add a description (optional)"
+          editorPlaceholder={`Describe this ${entityLabel}…`}
+        />
 
         {showHosts && !isExternal && (
         <div>
@@ -870,8 +830,7 @@ export function CreateActivityForm({
           </div>
         </div>
 
-        {/* Advanced settings: category, visibility, call to join, role — collapsed by default (hidden for external) */}
-        {!isExternal && (
+        {/* Advanced: external space (membership model) vs category, visibility, call to join, role */}
         <div className="border border-gray-200 rounded-lg overflow-hidden">
           <button
             type="button"
@@ -895,130 +854,313 @@ export function CreateActivityForm({
           {advancedOpen && (
             <div className="p-4 pt-2 space-y-4 border-t border-gray-200">
               <div>
-                <UIText as="label" className="block mb-2">
-                  Category
-                </UIText>
-                <ProjectTypeSelector
-                  generalCategory={projectTypeGeneral}
-                  specificType={projectTypeSpecific}
-                  onSelect={(general, specific) => {
-                    setProjectTypeGeneral(general)
-                    setProjectTypeSpecific(specific)
-                  }}
-                  disabled={loading}
-                />
-              </div>
-
-              <div>
-                <UIText as="label" className="block mb-2">
-                  Visibility
-                </UIText>
-                <div className="flex flex-wrap gap-2">
-                  {(['public', 'private'] as const).map((v) => (
-                    <button
-                      key={v}
-                      type="button"
-                      onClick={() => setVisibility(v)}
-                      className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                        visibility === v
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                <div className="flex items-center justify-between gap-3">
+                  <UIText as="label" className="block" id="external-space-label">
+                    External {externalKindLabel}
+                  </UIText>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-labelledby="external-space-label"
+                    aria-checked={isExternal}
+                    onClick={() => {
+                      setIsExternal((prev) => {
+                        const next = !prev
+                        if (next) {
+                          setAdvancedOpen(true)
+                        } else {
+                          setExternalLink('')
+                          setExistingActivity(null)
+                          setIAmGoing(true)
+                          setHostProjectIds([])
+                          setHostCommunityIds([])
+                          setVisibility('public')
+                        }
+                        return next
+                      })
+                      setError(null)
+                    }}
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      isExternal ? 'bg-blue-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                        isExternal ? 'translate-x-5' : 'translate-x-1'
                       }`}
-                      disabled={loading}
-                    >
-                      {v === 'public' && 'Public'}
-                      {v === 'private' && 'Private'}
-                    </button>
-                  ))}
+                    />
+                  </button>
                 </div>
-                <UIText as="p" className="text-xs text-gray-500 mt-1">
-                  Private activities are only visible to you and will not appear in search or feeds.
-                </UIText>
+                <Content className="mt-2">
+                  {isExternal
+                    ? 'External spaces point to a listing on another site. Visibility, call to join, and your role here are replaced by external-space rules: the space stays public, members and join behavior follow the external listing (and the options below).'
+                    : 'Turn this on only when this space mainly lives on another website and should use external membership rules instead of Ausna visibility and call to join.'}
+                </Content>
               </div>
 
-              {/* Call to join; on when activity is public */}
-              {visibility !== 'private' && (
-                <div>
-                  <UIText as="label" className="block mb-2">
-                    Call to join
-                  </UIText>
-                  <UIText as="p" className="text-xs text-gray-500 mb-2">
-                    Public activities show a call-to-join card so visitors can apply. Configure it below.
-                  </UIText>
-                  <div className="mt-2">
-                    <Card variant="subtle" padding="sm">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <UIText as="h3" className="mb-1">
-                            Call to join preview
-                          </UIText>
-                          <Content className="mb-1">
-                            {callToJoinDescription || 'Join this activity.'}
-                          </Content>
-                          <UIText className="text-gray-600 text-xs">
-                            {callToJoinJoinByLocal
-                              ? `Join by: ${new Date(callToJoinJoinByLocal).toLocaleString()}`
-                              : 'No join-by date: applications close when the activity ends or is archived.'}
-                          </UIText>
-                          <UIText className="text-gray-600 text-xs mt-1">
-                            {callToJoinRequireApproval ? 'Requires approval' : 'Auto-join'}
-                          </UIText>
-                        </div>
-                        <div className="flex-shrink-0">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setShowCallToJoinModal(true)}
-                            disabled={loading}
-                          >
-                            <UIText>Edit</UIText>
-                          </Button>
-                        </div>
-                      </div>
-                    </Card>
+              {isExternal && (
+                <>
+                  <Card variant="subtle" padding="sm">
+                    <Content>
+                      Category, visibility, call to join, and “Your role” are hidden because they do not apply to external
+                      spaces. Use the official link and the attendance option below (description stays above).
+                    </Content>
+                  </Card>
+
+                  <div>
+                    <UIText as="label" className="block mb-2">
+                      Official link <span className="text-red-500">*</span>
+                    </UIText>
+                    <input
+                      type="url"
+                      value={externalLink}
+                      onChange={(e) => {
+                        setExternalLink(e.target.value)
+                        setExistingActivity(null)
+                      }}
+                      placeholder="https://..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={loading}
+                    />
                   </div>
-                </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="i_am_going"
+                      checked={iAmGoing}
+                      onChange={(e) => setIAmGoing(e.target.checked)}
+                      disabled={loading}
+                      className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <UIText as="label" htmlFor="i_am_going" className="cursor-pointer">
+                      I&apos;m going to this event
+                    </UIText>
+                  </div>
+                </>
               )}
 
-              <div>
-                <UIText as="label" htmlFor="creator_role" className="block mb-2">
-                  Your Role <span className="text-gray-500">(optional, defaults to &quot;Creator&quot;)</span>
-                </UIText>
-                <input
-                  type="text"
-                  id="creator_role"
-                  value={creatorRole}
-                  onChange={(e) => setCreatorRole(e.target.value)}
-                  maxLength={50}
-                  placeholder="Creator"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={loading}
-                />
-                <UIText as="p" className="text-xs text-gray-500 mt-1">
-                  Your role in this activity (max 2 words)
-                </UIText>
-              </div>
+              {!isExternal && (
+                <>
+                  <div>
+                    <UIText as="label" className="block mb-2">
+                      Category
+                    </UIText>
+                    <ProjectTypeSelector
+                      generalCategory={projectTypeGeneral}
+                      specificType={projectTypeSpecific}
+                      onSelect={(general, specific) => {
+                        setProjectTypeGeneral(general)
+                        setProjectTypeSpecific(specific)
+                      }}
+                      disabled={loading}
+                    />
+                  </div>
+
+                  <div>
+                    <UIText as="label" className="block mb-2">
+                      Visibility
+                    </UIText>
+                    <div className="flex flex-wrap gap-2">
+                      {(['public', 'private'] as const).map((v) => (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => setVisibility(v)}
+                          className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                            visibility === v
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                          disabled={loading}
+                        >
+                          {v === 'public' && 'Public'}
+                          {v === 'private' && 'Private'}
+                        </button>
+                      ))}
+                    </div>
+                    <UIText as="p" className="text-xs text-gray-500 mt-1">
+                      Private activities are only visible to you and will not appear in search or feeds.
+                    </UIText>
+                  </div>
+
+                  {visibility !== 'private' && (
+                    <div>
+                      <UIText as="label" className="block mb-2">
+                        Call to join
+                      </UIText>
+                      <UIText as="p" className="text-xs text-gray-500 mb-2">
+                        Public activities show a call-to-join card so visitors can apply. Configure it below.
+                      </UIText>
+                      <div className="mt-2">
+                        <Card variant="subtle" padding="sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <UIText as="h3" className="mb-1">
+                                Call to join preview
+                              </UIText>
+                              <Content className="mb-1">
+                                {callToJoinDescription || 'Join this activity.'}
+                              </Content>
+                              <UIText className="text-gray-600 text-xs">
+                                {callToJoinJoinByLocal
+                                  ? `Join by: ${new Date(callToJoinJoinByLocal).toLocaleString()}`
+                                  : 'No join-by date: applications close when the activity ends or is archived.'}
+                              </UIText>
+                              <UIText className="text-gray-600 text-xs mt-1">
+                                {callToJoinRequireApproval ? 'Requires approval' : 'Auto-join'}
+                              </UIText>
+                            </div>
+                            <div className="flex-shrink-0">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setShowCallToJoinModal(true)}
+                                disabled={loading}
+                              >
+                                <UIText>Edit</UIText>
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <UIText as="label" htmlFor="creator_role" className="block mb-2">
+                      Your Role <span className="text-gray-500">(optional, defaults to &quot;Creator&quot;)</span>
+                    </UIText>
+                    <input
+                      type="text"
+                      id="creator_role"
+                      value={creatorRole}
+                      onChange={(e) => setCreatorRole(e.target.value)}
+                      maxLength={50}
+                      placeholder="Creator"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={loading}
+                    />
+                    <UIText as="p" className="text-xs text-gray-500 mt-1">
+                      Your role in this activity (max 2 words)
+                    </UIText>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
-        )}
 
         <div className="flex gap-4">
           <Button
             type="submit"
             variant="primary"
             fullWidth
-            disabled={loading || !!existingActivity || !name.trim() || (!isExternal && !avatarFile && !selectedEmoji)}
+            disabled={
+              loading ||
+              !name.trim() ||
+              (!isExternal && !avatarFile && !selectedEmoji && !autofillFaviconUrl) ||
+              (isExternal && !externalLink.trim())
+            }
           >
-            <UIText>
-              {existingActivity ? 'Event already exists' : loading ? 'Creating...' : `Create ${entityLabelTitle}`}
-            </UIText>
+            <UIText>{loading ? 'Creating...' : `Create ${entityLabelTitle}`}</UIText>
           </Button>
         </div>
         </>
-        )}
       </form>
+
+      {autoFillModalOpen && (
+        <div
+          className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onClick={closeAutoFillModal}
+        >
+          <div
+            className="bg-white rounded-xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="autofill-modal-title"
+          >
+            <Card variant="default" padding="sm">
+              <UIText as="h2" id="autofill-modal-title" className="mb-2">
+                Fill the form from a link
+              </UIText>
+              <Content className="mb-4">
+                We use AI to read a public page about a project, community, activity, or event and fill this form. Date,
+                time, and location are only filled when the page is clearly a scheduled event; otherwise you get title
+                and description only. Edit anything afterwards. This does not enable External space unless you turn that
+                on in Advanced settings.
+              </Content>
+              <div className="space-y-3">
+                <div>
+                  <UIText as="label" className="block mb-1" htmlFor="autofill-url">
+                    Page URL
+                  </UIText>
+                  <input
+                    id="autofill-url"
+                    type="url"
+                    value={autoFillUrl}
+                    onChange={(e) => {
+                      setAutoFillUrl(e.target.value)
+                      setAutoFillModalError(null)
+                      setExistingActivity(null)
+                    }}
+                    placeholder="https://..."
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={extractingLink}
+                  />
+                </div>
+                {autoFillModalError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md">
+                    <UIText>{autoFillModalError}</UIText>
+                  </div>
+                )}
+                {existingActivity && (
+                  <Link
+                    href={getSpaceUrl(existingActivity.slug || existingActivity.id)}
+                    className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
+                  >
+                    <div className="flex-shrink-0">
+                      <StickerAvatar
+                        src={existingActivity.avatar}
+                        alt={existingActivity.name}
+                        type="activities"
+                        size={48}
+                        emoji={existingActivity.emoji}
+                        name={existingActivity.name}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <UIText as="div" className="text-amber-800 font-medium mb-0.5">
+                        This link is already used
+                      </UIText>
+                      <Content className="text-amber-700 mb-1">{existingActivity.name}</Content>
+                      <UIText as="span" className="text-amber-600 text-sm">
+                        View existing space →
+                      </UIText>
+                    </div>
+                  </Link>
+                )}
+                <div className="flex flex-wrap justify-end gap-2 pt-2">
+                  <Button type="button" variant="secondary" onClick={closeAutoFillModal} disabled={extractingLink}>
+                    <UIText>Cancel</UIText>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => void runAutoFillFromLink()}
+                    disabled={extractingLink || !autoFillUrl.trim()}
+                  >
+                    <UIText>{extractingLink ? 'Working…' : 'Extract and apply'}</UIText>
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {showHostSelector && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">

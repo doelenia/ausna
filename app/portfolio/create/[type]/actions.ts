@@ -160,8 +160,17 @@ export async function createPortfolio(
       }
     }
 
-    // Require either avatar, emoji, or (for external) favicon from link
-    if (!avatarFile && !emoji && !(isExternal && (avatarUrl || externalLink))) {
+    // Avatar: file, emoji, favicon from external link, or client-supplied favicon URL (e.g. autofill from a page URL)
+    let storedAvatarFromUrl = ''
+    if (!avatarFile && !emoji?.trim()) {
+      if (isExternal && externalLink) {
+        storedAvatarFromUrl = avatarUrl || getFaviconUrl(externalLink)
+      } else if (!isExternal && avatarUrl) {
+        storedAvatarFromUrl = avatarUrl
+      }
+    }
+
+    if (!avatarFile && !emoji?.trim() && !storedAvatarFromUrl) {
       return {
         success: false,
         error: 'Please upload an image or select an emoji',
@@ -194,10 +203,6 @@ export async function createPortfolio(
     const visibility: 'public' | 'private' =
       isExternal ? 'public' : visibilityRaw === 'private' ? 'private' : 'public'
 
-    // For external portfolios, use favicon as avatar when no file/emoji provided
-    const externalAvatarUrl =
-      isExternal && !avatarFile && !emoji ? avatarUrl || getFaviconUrl(externalLink) : ''
-
     // For external portfolios, creator is only in members if they chose "I'm going"
     const initialMembers = isExternal ? (iAmGoing ? [user.id] : []) : [user.id]
     const initialMemberRoles: Record<string, string> = isExternal
@@ -211,7 +216,7 @@ export async function createPortfolio(
       basic: {
         name: name.trim(),
         description: descriptionTrimmed,
-        avatar: externalAvatarUrl || '',
+        avatar: storedAvatarFromUrl || '',
         emoji: emoji || '',
       },
       pinned: [],

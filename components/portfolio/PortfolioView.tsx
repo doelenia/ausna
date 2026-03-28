@@ -15,12 +15,20 @@ import { NotesFeed } from './NotesFeed'
 import { ResourcesSection } from './ResourcesSection'
 import { PortfolioActions } from './PortfolioActions'
 import { StickerAvatar } from './StickerAvatar'
-import { DescriptionViewerPopup } from './DescriptionPopups'
+import { DescriptionSpacePopup } from './DescriptionPopups'
 import { ImageViewerPopup } from './ImageViewerPopup'
 import { OpenCallStack } from '@/components/notes/OpenCallStack'
 import { Topic } from '@/types/indexing'
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { deletePortfolio, getSubPortfolios, applyToActivityCallToJoin, updateActivityCallToJoin, getPendingJoinRequestsCount, applyToCommunityJoin } from '@/app/portfolio/[idOrSlug]/actions'
+import {
+  deletePortfolio,
+  getSubPortfolios,
+  applyToActivityCallToJoin,
+  updateActivityCallToJoin,
+  getPendingJoinRequestsCount,
+  applyToCommunityJoin,
+  updatePortfolioDescription,
+} from '@/app/portfolio/[idOrSlug]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
@@ -58,6 +66,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDescriptionPopup, setShowDescriptionPopup] = useState(false)
+  const [displayDescription, setDisplayDescription] = useState(() => basic.description || '')
   const [showAvatarPopup, setShowAvatarPopup] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
   const [isManager, setIsManager] = useState(false)
@@ -88,7 +97,11 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState<number | null>(null)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
-  
+
+  useEffect(() => {
+    setDisplayDescription(basic.description || '')
+  }, [basic.description, portfolio.id])
+
   // Determine if user can create notes (for projects/communities, user must be owner or member)
   const canCreateNote =
     (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) &&
@@ -657,11 +670,22 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
         onClose={() => setShowAvatarPopup(false)}
       />
     )}
-    {basic.description && (
-      <DescriptionViewerPopup
+    {(displayDescription.trim() || isOwner || isManager) && (
+      <DescriptionSpacePopup
         open={showDescriptionPopup}
-        description={basic.description}
         onClose={() => setShowDescriptionPopup(false)}
+        description={displayDescription}
+        canEdit={isOwner || isManager}
+        onSave={
+          isOwner || isManager
+            ? (next) => updatePortfolioDescription(portfolio.id, next)
+            : undefined
+        }
+        onSaved={(trimmed) => {
+          setDisplayDescription(trimmed)
+          router.refresh()
+        }}
+        emptyViewHint="No description yet. Use the pencil to add one."
       />
     )}
     <div className="bg-transparent rounded-lg p-6">
@@ -841,16 +865,22 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             </div>
 
             {/* Description */}
-            {basic.description && (
+            {(displayDescription.trim() || isOwner || isManager) && (
               <button
                 type="button"
                 onClick={() => setShowDescriptionPopup(true)}
                 className="w-full text-left rounded-lg px-2 py-1 -mx-2 -my-1 hover:bg-gray-100 focus-visible:bg-gray-100 transition-colors"
-                aria-label="Open full description"
+                aria-label={displayDescription.trim() ? 'Open full description' : 'Add or edit description'}
               >
-                <Content className="mb-4 whitespace-pre-wrap line-clamp-5 cursor-pointer">
-                  {basic.description}
-                </Content>
+                {displayDescription.trim() ? (
+                  <Content className="mb-4 whitespace-pre-wrap line-clamp-5 cursor-pointer">
+                    {displayDescription}
+                  </Content>
+                ) : (
+                  <Content className="mb-4 text-gray-500 cursor-pointer">
+                    Click to add or edit description
+                  </Content>
+                )}
               </button>
             )}
 

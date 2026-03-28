@@ -1027,6 +1027,116 @@ export async function updatePortfolio(
   }
 }
 
+/** Update only `basic.description` (owner or manager). Revalidates and re-runs description indexing when text changes. */
+export async function updatePortfolioDescription(
+  portfolioId: string,
+  description: string
+): Promise<UpdatePortfolioResult> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+
+    if (!portfolioId?.trim()) {
+      return { success: false, error: 'Portfolio ID is required' }
+    }
+
+    const normalizedDescription = description.trim()
+    if (normalizedDescription.length > 3000) {
+      return { success: false, error: 'Description must be 3000 characters or less' }
+    }
+
+    const canEdit = await canEditPortfolio(portfolioId, user.id)
+    if (!canEdit) {
+      return { success: false, error: 'You do not have permission to update this portfolio' }
+    }
+
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('metadata, type, user_id, slug')
+      .eq('id', portfolioId)
+      .single()
+
+    if (!portfolio) {
+      return { success: false, error: 'Portfolio not found' }
+    }
+
+    const currentMetadata = (portfolio.metadata as any) || {}
+    const basicMetadata = currentMetadata.basic || {}
+    const oldDescription = (basicMetadata.description || '').trim()
+
+    const updatedMetadata = {
+      ...currentMetadata,
+      basic: {
+        ...basicMetadata,
+        description: normalizedDescription,
+      },
+    }
+
+    const { error: updateError } = await supabase
+      .from('portfolios')
+      .update({ metadata: updatedMetadata })
+      .eq('id', portfolioId)
+
+    if (updateError) {
+      return { success: false, error: updateError.message || 'Failed to update description' }
+    }
+
+    revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
+
+    const descriptionChanged = oldDescription !== normalizedDescription
+    if (descriptionChanged) {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+        if (portfolio.type === 'human') {
+          fetch(`${baseUrl}/api/index-human-description`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              portfolioId,
+              userId: user.id,
+              description: normalizedDescription,
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger human description processing:', error)
+          })
+        } else if (portfolio.type !== 'human') {
+          const activityProps =
+            (updatedMetadata?.properties as { external?: boolean; external_link?: string } | undefined) || {}
+          const externalLink =
+            activityProps.external === true ? activityProps.external_link ?? undefined : undefined
+          fetch(`${baseUrl}/api/index-activity-description`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              portfolioId,
+              userId: user.id,
+              description: normalizedDescription,
+              externalLink,
+            }),
+          }).catch((error) => {
+            console.error('Failed to trigger portfolio description processing:', error)
+          })
+        }
+      } catch (error) {
+        console.error('Error triggering background property processing:', error)
+      }
+    }
+
+    return { success: true }
+  } catch (error: any) {
+    if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
+      const digest = (error as any).digest || ''
+      if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
+        throw error
+      }
+    }
+    return {
+      success: false,
+      error: error.message || 'An unexpected error occurred',
+    }
+  }
+}
+
 export async function deletePortfolio(portfolioId: string): Promise<DeletePortfolioResult> {
   try {
     const { user } = await requireAuth()
