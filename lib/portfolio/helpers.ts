@@ -47,15 +47,15 @@ export async function isPortfolioCreator(
 }
 
 /**
- * Check if user is a manager of a portfolio (server-side)
- * For project/community portfolios: checks if user is in managers array
+ * Check if user is a manager of a portfolio (server-side).
+ * For any non-human portfolio: true when `metadata.managers` includes the user.
  */
 export async function isPortfolioManager(
   portfolioId: string,
   userId: string
 ): Promise<boolean> {
   const supabase = await createClient()
-  
+
   const { data: portfolio, error } = await supabase
     .from('portfolios')
     .select('type, metadata')
@@ -66,14 +66,13 @@ export async function isPortfolioManager(
     return false
   }
 
-  // Only project/community portfolios have managers
-  if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+  if (isHumanPortfolio(portfolio as Portfolio)) {
     return false
   }
 
   const metadata = portfolio.metadata as any
   const managers = metadata?.managers || []
-  
+
   return Array.isArray(managers) && managers.includes(userId)
 }
 
