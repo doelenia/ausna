@@ -26,7 +26,7 @@ export function UsernameEditor({ initialUsername, userId }: UsernameEditorProps)
     }
 
     // Validate username
-    const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/
+    const usernameRegex = /^[-a-zA-Z0-9_]{3,30}$/
     if (!usernameRegex.test(username)) {
       setError('Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens')
       return
@@ -84,7 +84,7 @@ export function UsernameEditor({ initialUsername, userId }: UsernameEditorProps)
             type="text"
             value={username}
             onChange={(e) => {
-              const value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+              const value = e.target.value.toLowerCase().replace(/[^-a-z0-9_]/g, '')
               setUsername(value)
               setError(null)
             }}

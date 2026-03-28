@@ -6,6 +6,7 @@ import {
   findHumanPortfolioByEmailWithService,
 } from '@/lib/portfolio/admin-helpers'
 import { sendContactInviteEmail } from '@/lib/email/contactInvite'
+import { PENDING_CONTACT_INVITE_META_KEY } from '@/lib/auth/contact-invite-metadata'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +162,7 @@ export async function POST(request: NextRequest) {
           user_metadata: {
             full_name: trimmedName,
             name: trimmedName,
+            [PENDING_CONTACT_INVITE_META_KEY]: true,
           },
         })
 

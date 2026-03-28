@@ -102,7 +102,7 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
 
       // Validate username if provided
       if (username) {
-        const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/
+        const usernameRegex = /^[-a-zA-Z0-9_]{3,30}$/
         if (!usernameRegex.test(username)) {
           setError(
             'Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens'
@@ -426,12 +426,12 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
                 type="text"
                 value={username}
                 onChange={(e) => {
-                  const value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                  const value = e.target.value.toLowerCase().replace(/[^-a-z0-9_]/g, '')
                   setUsername(value)
                 }}
                 minLength={3}
                 maxLength={30}
-                pattern="[a-zA-Z0-9_-]{3,30}"
+                pattern="[-a-zA-Z0-9_]{3,30}"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                 placeholder="username"
               />
