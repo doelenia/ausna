@@ -5,6 +5,7 @@ import {
   findHumanPortfolioByEmail,
   updateHumanPortfolioMetadataById,
 } from '@/lib/portfolio/admin-helpers'
+import { PENDING_CONTACT_INVITE_META_KEY } from '@/lib/auth/contact-invite-metadata'
 
 export const dynamic = 'force-dynamic'
 
@@ -177,11 +178,18 @@ export async function POST(
 
       if (existingUser) {
       authUserId = existingUser.id as string
-      // Update password and confirm email
+      const { data: existingAuth } = await serviceClient.auth.admin.getUserById(authUserId)
+      const mergedMeta = {
+        ...(existingAuth?.user?.user_metadata || {}),
+        full_name: trimmedName,
+        name: trimmedName,
+      } as Record<string, unknown>
+      delete mergedMeta[PENDING_CONTACT_INVITE_META_KEY]
       await serviceClient.auth.admin.updateUserById(authUserId, {
         email: normalizedEmail,
         email_confirm: true,
         password,
+        user_metadata: mergedMeta,
       } as any)
     } else {
       const { data: createdUser, error: createError } =

@@ -1,6 +1,10 @@
 'use server'
 
 import { createServiceClient } from '@/lib/supabase/service'
+import {
+  isPendingContactInviteUser,
+  PENDING_CONTACT_INVITE_META_KEY,
+} from '@/lib/auth/contact-invite-metadata'
 
 export type CheckEmailStatusResult =
   | { status: 'existing_user' }
@@ -102,6 +106,18 @@ export async function checkEmailStatus(email: string): Promise<CheckEmailStatusR
   }
 
   if (pseudoHumanPortfolioIds.length > 0) {
+    // Self-signup with unverified email also uses a pseudo human portfolio; do not
+    // activate here (email verification or signup completion should clear pseudo).
+    const { data: authRecord, error: authFetchError } =
+      await serviceClient.auth.admin.getUserById(userId)
+    if (authFetchError) {
+      console.error('Error loading auth user for pseudo check:', authFetchError)
+      return { status: 'existing_user' }
+    }
+    if (!isPendingContactInviteUser(authRecord?.user?.user_metadata as Record<string, unknown>)) {
+      return { status: 'existing_user' }
+    }
+
     const { error: updatePseudoError } = await serviceClient
       .from('portfolios')
       .update({ is_pseudo: false })
@@ -120,6 +136,17 @@ export async function checkEmailStatus(email: string): Promise<CheckEmailStatusR
 
     if (resetError) {
       return { status: 'existing_user' }
+    }
+
+    const clearedMeta = {
+      ...(authRecord?.user?.user_metadata || {}),
+    } as Record<string, unknown>
+    delete clearedMeta[PENDING_CONTACT_INVITE_META_KEY]
+    const { error: clearMetaError } = await serviceClient.auth.admin.updateUserById(userId, {
+      user_metadata: clearedMeta,
+    })
+    if (clearMetaError) {
+      console.error('Error clearing contact-invite flag after pseudo activation:', clearMetaError)
     }
 
     return {
