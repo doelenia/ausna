@@ -140,7 +140,7 @@ export async function GET(
     const { data: activitiesRaw } = await supabase
       .from('portfolios')
       .select('id, user_id, host_project_id, visibility, metadata')
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
       .limit(500)
 
     const activities = ((activitiesRaw || []) as ActivityRow[])

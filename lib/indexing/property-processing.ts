@@ -276,7 +276,7 @@ export async function processProjectDescription(
       .from('portfolios')
       .select('metadata, user_id')
       .eq('id', portfolioId)
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
       .single()
 
     if (error || !portfolio) {
@@ -455,7 +455,7 @@ export async function processProjectProperty(
       .from('portfolios')
       .select('metadata, user_id')
       .eq('id', portfolioId)
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
       .single()
 
     if (error || !portfolio) {
@@ -629,7 +629,7 @@ export async function processActivityDescription(
       .from('portfolios')
       .select('metadata, user_id')
       .eq('id', portfolioId)
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
       .single()
 
     if (error || !portfolio) {

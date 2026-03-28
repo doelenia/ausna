@@ -15,6 +15,7 @@ import {
 } from '@/app/onboarding/actions'
 import { applyToCommunityJoin } from '@/app/portfolio/[idOrSlug]/actions'
 import type { HumanAvailabilitySchedule } from '@/types/portfolio'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { Title, Content, UIText, Button, Card, UIButtonText, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { DoorOpen } from 'lucide-react'
@@ -851,7 +852,7 @@ function OnboardingAvailabilitiesStep({ onComplete }: { onComplete: () => void }
         schedule and adjust it as needed. You can edit this later in{' '}
         {profileUserId ? (
           <Link
-            href={`/portfolio/human/${profileUserId}`}
+            href={getHumanProfileUrl(profileUserId)}
             className="text-blue-600 hover:underline"
           >
             Edit Profile

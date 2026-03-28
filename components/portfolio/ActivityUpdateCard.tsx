@@ -23,7 +23,7 @@ export function ActivityUpdateCard({ portfolio }: ActivityUpdateCardProps) {
     return null
   }
 
-  const activityUrl = getPortfolioUrl(portfolio.slug || portfolio.id)
+  const activityUrl = getPortfolioUrl(portfolio)
 
   return (
     <Link

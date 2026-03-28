@@ -92,7 +92,7 @@ export async function GET(
         const { data: hostedActivities } = await supabase
           .from('portfolios')
           .select('id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
         const hostedIds = (hostedActivities || [])
           .filter((a: any) => {
             const hostProjectIds = (a.metadata as any)?.properties?.host_project_ids

@@ -42,7 +42,7 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
   
   // If portfolio was provided but is invalid, redirect
   if (searchParams.portfolio && !sourcePortfolio) {
-    redirect('/portfolio')
+    redirect('/space')
   }
   
   // Validate user is a member of the project if provided
@@ -50,7 +50,7 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
     const { isPortfolioMember } = await import('@/lib/notes/helpers')
     const isMember = await isPortfolioMember(sourcePortfolio.id, user.id)
     if (!isMember) {
-      redirect('/portfolio')
+      redirect('/space')
     }
   }
 

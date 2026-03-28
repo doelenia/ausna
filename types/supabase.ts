@@ -9,7 +9,7 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-import { Portfolio, PortfolioType } from './portfolio'
+import { Portfolio, DbPortfolioType } from './portfolio'
 import { Note } from './note'
 
 export interface Database {
@@ -34,7 +34,7 @@ export interface Database {
       // Add your function types here
     }
     Enums: {
-      portfolio_type: PortfolioType
+      portfolio_type: DbPortfolioType
       // Add your enum types here
     }
   }

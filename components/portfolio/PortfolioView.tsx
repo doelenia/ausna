@@ -1,7 +1,14 @@
 'use client'
 
 import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, isActivityPortfolio, ActivityCallToJoinConfig } from '@/types/portfolio'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import {
+  getPortfolioUrl,
+  getHumanProfileUrl,
+  getHumanFriendsUrl,
+  getSpaceCreateUrl,
+  getSpaceUrl,
+  getSpaceMembersUrl,
+} from '@/lib/portfolio/routes'
 import Link from 'next/link'
 import { PortfolioEditor } from './PortfolioEditor'
 import { NotesFeed } from './NotesFeed'
@@ -57,7 +64,18 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [isMember, setIsMember] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
-  const [projects, setProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string; role?: string; projectType?: string | null; visibility?: 'public' | 'private' }>>([])
+  const [projects, setProjects] = useState<
+    Array<{
+      id: string
+      name: string
+      avatar?: string
+      emoji?: string
+      slug?: string
+      role?: string
+      projectType?: string | null
+      visibility?: 'public' | 'private'
+    }>
+  >([])
   const [projectsLoading, setProjectsLoading] = useState(false)
   const [memberAvatars, setMemberAvatars] = useState<Array<{ id: string; avatar?: string; name?: string }>>([])
   const [memberAvatarsLoading, setMemberAvatarsLoading] = useState(false)
@@ -172,15 +190,54 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       setProjectsLoading(true)
       try {
         const result = await getSubPortfolios(portfolio.id)
-        if (result.success && result.projects) {
-          // Fetch full portfolio data for all projects in a single query to get emoji
-          const projectIds = result.projects.map(p => p.id)
+        if (result.success) {
+          const fromProjects = result.projects ?? []
+          const fromCommunities = result.communities ?? []
+          // Overview "Spaces" should list both owned/project rows and community involvements (deduped).
+          const seen = new Set<string>()
+          const combined: Array<{
+            id: string
+            name: string
+            avatar?: string
+            slug: string
+            role: string
+            projectType?: string | null
+            visibility: 'public' | 'private'
+          }> = []
+          for (const p of fromProjects) {
+            if (seen.has(p.id)) continue
+            seen.add(p.id)
+            combined.push({
+              id: p.id,
+              name: p.name,
+              avatar: p.avatar,
+              slug: p.slug,
+              role: p.role,
+              projectType: p.projectType,
+              visibility: (p as { visibility?: string }).visibility === 'private' ? 'private' : 'public',
+            })
+          }
+          for (const c of fromCommunities) {
+            if (seen.has(c.id)) continue
+            seen.add(c.id)
+            combined.push({
+              id: c.id,
+              name: c.name,
+              avatar: c.avatar,
+              slug: c.slug,
+              role: c.role,
+              projectType: c.projectType,
+              visibility: 'public',
+            })
+          }
+
+          const projectIds = combined.map((p) => p.id)
           if (projectIds.length > 0) {
             const { data: fullProjects } = await supabase
               .from('portfolios')
               .select('id, metadata')
               .in('id', projectIds)
-            
+
             const projectMap = new Map(
               (fullProjects || []).map((p: any) => {
                 const metadata = p.metadata as any
@@ -188,21 +245,21 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
               })
             )
 
-            const projectData = result.projects.map((p) => ({
+            const projectData = combined.map((p) => ({
               id: p.id,
               name: p.name,
               avatar: p.avatar,
               emoji: projectMap.get(p.id) as string | undefined,
               role: p.role,
               projectType: p.projectType,
-              visibility: ((p as any).visibility === 'private' ? 'private' : 'public') as 'public' | 'private',
+              visibility: p.visibility,
+              slug: p.slug,
             }))
             setProjects(projectData)
           } else {
             setProjects([])
           }
         } else {
-          // Log error if result was not successful
           if (result.error) {
             console.error('Failed to fetch projects:', result.error)
           }
@@ -236,7 +293,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       const { data: projects } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'portfolio')
+        .in('type', ['portfolio', 'space'])
         .in('id', ids)
       if (cancelled || !projects?.length) {
         if (!cancelled) setActivityHostProjects([])
@@ -274,7 +331,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
       const { data: communities } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .eq('type', 'portfolio')
+        .in('type', ['portfolio', 'space'])
         .in('id', ids)
       if (cancelled || !communities?.length) {
         if (!cancelled) setActivityHostCommunities([])
@@ -522,7 +579,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     const result = await deletePortfolio(portfolio.id)
 
     if (result.success) {
-      router.push('/portfolio')
+      router.push('/space')
       router.refresh()
     } else {
       alert(result.error || 'Failed to delete portfolio')
@@ -556,9 +613,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
           setIsEditing(false)
           // Force a full page reload to ensure fresh data is loaded
           // This ensures the server action completes and cache is cleared
-          const portfolioUrl = getPortfolioUrl(
-            portfolio.slug || (isHumanPortfolio(portfolio) ? portfolio.user_id : portfolio.id)
-          )
+          const portfolioUrl = getPortfolioUrl(portfolio)
           // Use window.location to force a full page reload with fresh data
           window.location.href = portfolioUrl
         }}
@@ -590,7 +645,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
     (humanProperties?.auto_city_location as ActivityLocationValue | undefined) || undefined
 
   // Determine tab label based on portfolio type
-  const tabLabel = isHumanPortfolio(portfolio) ? 'Portfolios' : 'Navigations'
+  const tabLabel = isHumanPortfolio(portfolio) ? 'Spaces' : 'Navigations'
 
   return (
     <>
@@ -621,7 +676,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                     alt={basic.name}
                     type={portfolio.type}
                     size={96}
-                    href={`/portfolio/human/${portfolio.user_id}`}
+                    href={getHumanProfileUrl(portfolio.user_id)}
                     className="flex-shrink-0"
                   />
                 ) : (
@@ -636,7 +691,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 )
               ) : isHumanPortfolio(portfolio) ? (
                 <Link
-                  href={`/portfolio/human/${portfolio.user_id}`}
+                  href={getHumanProfileUrl(portfolio.user_id)}
                   className="flex-shrink-0 h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300 hover:border-blue-500 transition-colors cursor-pointer"
                 >
                   <svg
@@ -660,7 +715,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                   size={96}
                   emoji={(metadata as any)?.basic?.emoji || '🎨'}
                   name={basic.name}
-                  href={getPortfolioUrl(portfolio.slug || portfolio.id)}
+                  href={getPortfolioUrl(portfolio)}
                   className="flex-shrink-0"
                 />
               )}
@@ -1065,7 +1120,10 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 setIsEditingCallToJoin(true)
               }
 
-              const membersRequestsUrl = `${getPortfolioUrl(portfolio.slug || portfolio.id)}/members?tab=requests`
+              const membersRequestsUrl = getSpaceMembersUrl(
+                portfolio.slug || portfolio.id,
+                'tab=requests'
+              )
               const pendingCount = pendingJoinRequestsCount ?? 0
 
               return (
@@ -1162,7 +1220,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
                   return (
                     <Link
-                      href={`/portfolio/human/${portfolio.user_id}/friends`}
+                      href={getHumanFriendsUrl(portfolio.user_id)}
                       className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
                       title={isVisitor ? 'View all mutual friends' : 'View all friends'}
                     >
@@ -1227,7 +1285,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                       </div>
                     ) : (
                       <Link
-                        href={`${getPortfolioUrl(portfolio.slug || portfolio.id)}/members`}
+                        href={getSpaceMembersUrl(portfolio.slug || portfolio.id)}
                         className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0"
                         title="View all members"
                       >
@@ -1265,7 +1323,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                   {/* Uploader pill (external activities only - shows owner where host would be) */}
                   {hasUploader && (
                     <Link
-                      href={`/portfolio/human/${portfolio.user_id}`}
+                      href={getHumanProfileUrl(portfolio.user_id)}
                       className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0"
                       title="Uploaded by"
                     >
@@ -1295,7 +1353,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         {activityHostProjects.slice(0, 5).map((proj) => (
                           <Link
                             key={`project-${proj.id}`}
-                            href={getPortfolioUrl(proj.id)}
+                            href={getSpaceUrl((proj as { slug?: string }).slug || proj.id)}
                             className="block hover:opacity-90"
                           >
                             <StickerAvatar
@@ -1313,7 +1371,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         {activityHostCommunities.slice(0, 5).map((comm) => (
                           <Link
                             key={`community-${comm.id}`}
-                            href={getPortfolioUrl(comm.id)}
+                            href={getSpaceUrl((comm as { slug?: string }).slug || comm.id)}
                             className="block hover:opacity-90"
                           >
                             <StickerAvatar
@@ -1434,7 +1492,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
             <div className="mt-4 mb-8 group">
               <div className="flex items-center gap-2 mb-4">
                 <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                <UIText>Portfolios</UIText>
+                <UIText>Spaces</UIText>
               </div>
               <div className="relative">
                 {/* Horizontal scroll buttons for mouse users */}
@@ -1480,7 +1538,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                           />
                         )}
                         <Link
-                              href={getPortfolioUrl(project.id)}
+                              href={getSpaceUrl((project as { slug?: string }).slug || project.id)}
                           className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
                         >
                           <div className="flex flex-col items-center gap-3">
@@ -1517,7 +1575,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         <div className="w-full rounded-2xl px-3 pt-3 pb-4">
                           <div className="flex flex-col items-center gap-3">
                             <Link
-                              href="/portfolio/create"
+                              href={getSpaceCreateUrl()}
                               className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                             >
                               <svg
@@ -1547,7 +1605,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                         <div className="w-full rounded-2xl px-3 pt-3 pb-4">
                           <div className="flex flex-col items-center gap-3">
                             <Link
-                              href="/portfolio/create"
+                              href={getSpaceCreateUrl()}
                               className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                             >
                               <svg

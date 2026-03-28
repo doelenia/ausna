@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { getPinnedItems } from '@/app/portfolio/[idOrSlug]/actions'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
+import { normalizePortfolioType } from '@/types/portfolio'
 import Link from 'next/link'
 import { Title, Content, UIText, UIButtonText } from '@/components/ui'
 
@@ -82,7 +83,11 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
             return (
               <Link
                 key={`portfolio-${item.id}`}
-                href={getPortfolioUrl((portfolio as any).slug || portfolio.id)}
+                href={
+                  normalizePortfolioType(portfolio.type) === 'human'
+                    ? getHumanProfileUrl(portfolio.slug || portfolio.id)
+                    : getSpaceUrl(portfolio.slug || portfolio.id)
+                }
                 className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
               >
                 {portfolio.avatar ? (

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { UserAvatar } from '@/components/ui'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { Content, UIText } from '@/components/ui'
 import Link from 'next/link'
 import { Crown, Shield } from 'lucide-react'
@@ -239,7 +240,7 @@ export function CommunityMembersGrid({
         {displayedMembers.map((member) => (
           <Link
             key={member.id}
-            href={`/portfolio/human/${member.id}`}
+            href={getHumanProfileUrl(member.id)}
             className="flex flex-col items-center rounded-2xl px-4 pt-4 pb-5 transition-colors hover:bg-gray-100"
           >
             <div className="flex flex-col items-center gap-3 w-full">

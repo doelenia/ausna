@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { ensureHumanPortfolio } from '@/lib/portfolio/human'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 
 export async function UserAvatar() {
   const supabase = await createClient()
@@ -26,9 +27,9 @@ export async function UserAvatar() {
   const finalAvatarUrl = avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
 
   // Link to human portfolio instead of account page
-  const humanPortfolioUrl = humanPortfolio 
-    ? `/portfolio/human/${humanPortfolio.id}`
-    : `/portfolio/human/${user.id}`
+  const humanPortfolioUrl = humanPortfolio
+    ? getHumanProfileUrl(humanPortfolio.slug || humanPortfolio.id)
+    : getHumanProfileUrl(user.id)
 
   return (
     <Link

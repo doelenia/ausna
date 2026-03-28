@@ -6,6 +6,7 @@ import { UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { Content, UIText, UIButtonText } from '@/components/ui'
 import { normalizePortfolioType } from '@/types/portfolio'
+import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 
 interface SearchResult {
   id: string
@@ -119,7 +120,9 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
   const portfolioUrl =
     normalizedType === 'human' && result.is_pseudo
       ? undefined
-      : `/portfolio/${result.id}`
+      : normalizedType === 'human'
+        ? getHumanProfileUrl(result.id)
+        : getSpaceUrl(result.id)
 
   const Wrapper: React.ComponentType<{ children: React.ReactNode }> = portfolioUrl
     ? (({ children }) => (

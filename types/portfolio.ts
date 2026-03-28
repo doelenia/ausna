@@ -7,12 +7,18 @@ export type PortfolioVisibility = 'public' | 'private'
  * Base portfolio types that all portfolio types extend
  */
 /**
- * Canonical portfolio discriminator.
+ * Canonical portfolio discriminator in application logic (non-human is always `portfolio`).
  *
- * We only distinguish "human" vs "portfolio" in application code.
- * Legacy DB values (projects/community/activities) should be migrated to 'portfolio'.
+ * The database may use `space` for non-human rows; `normalizePortfolioType` maps that to `portfolio`.
+ * Legacy DB values (projects/community/activities) map to `portfolio`.
  */
 export type PortfolioType = 'human' | 'portfolio'
+
+/** Values that may appear on `portfolios.type` from the database */
+export type DbPortfolioType =
+  | PortfolioType
+  | 'space'
+  | LegacyNonHumanPortfolioType
 
 export type LegacyNonHumanPortfolioType = 'projects' | 'community' | 'activities'
 
@@ -22,11 +28,23 @@ export function normalizePortfolioType(
   if (!type) return null
   const t = String(type).toLowerCase()
   if (t === 'human') return 'human'
-  if (t === 'portfolio') return 'portfolio'
+  if (t === 'portfolio' || t === 'space') return 'portfolio'
   // Backward compatibility while DB migration is pending
   if (t === 'projects' || t === 'community' || t === 'activities') return 'portfolio'
   return null
 }
+
+/**
+ * DB `type` values that mean non-human (for Supabase `.in('type', …)`).
+ * Do not include `projects` — that enum label was renamed to `portfolio` in
+ * unify_non_human_portfolio_types.sql; passing `projects` makes Postgres reject the query.
+ */
+export const DB_NON_HUMAN_TYPES: readonly string[] = [
+  'portfolio',
+  'space',
+  'community',
+  'activities',
+]
 
 /**
  * Basic metadata fields shared by all portfolios
@@ -261,7 +279,7 @@ export type ActivityPortfolioMetadata = PortfolioEntityMetadata
  */
 export interface BasePortfolio {
   id: string
-  type: PortfolioType | LegacyNonHumanPortfolioType
+  type: DbPortfolioType
   slug: string
   user_id: string
   host_project_id?: string | null
@@ -281,7 +299,7 @@ export interface HumanPortfolio extends BasePortfolio {
 }
 
 export interface PortfolioEntity extends BasePortfolio {
-  type: 'portfolio' | LegacyNonHumanPortfolioType
+  type: 'portfolio' | 'space' | LegacyNonHumanPortfolioType
   metadata: PortfolioEntityMetadata
 }
 
@@ -320,7 +338,7 @@ export function isCommunityPortfolio(portfolio: Portfolio): portfolio is Portfol
  * Portfolio creation input type
  */
 export interface CreatePortfolioInput {
-  type: 'portfolio'
+  type: 'portfolio' | 'space'
   name: string
   avatar?: string // Optional avatar URL
 }

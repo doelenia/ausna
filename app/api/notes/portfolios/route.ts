@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
         .from('portfolios')
         .select('*')
         .in('id', portfolioIds)
-        .eq('type', 'portfolio')
+        .in('type', ['portfolio', 'space'])
       
       if (assignedError) {
         console.error('[API /notes/portfolios] Error fetching assigned portfolios:', assignedError)

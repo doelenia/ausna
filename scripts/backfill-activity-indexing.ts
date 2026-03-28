@@ -22,7 +22,7 @@ async function main() {
   const { data: portfolios, error } = await supabase
     .from('portfolios')
     .select('id, user_id, metadata')
-    .eq('type', 'portfolio')
+    .in('type', ['portfolio', 'space'])
 
   if (error) {
     console.error('Failed to fetch activities:', error)

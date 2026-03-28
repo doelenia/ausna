@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
 import { createPortfolio } from '@/app/portfolio/create/actions'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { UIText, Button, Card, Content, UIButtonText } from '@/components/ui'
@@ -178,7 +178,7 @@ export function CreateActivityForm({
         const { data: projects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         const options: HostProjectOption[] =
@@ -233,7 +233,7 @@ export function CreateActivityForm({
         const { data: communities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .order('created_at', { ascending: false })
 
         const options: HostCommunityOption[] =
@@ -480,7 +480,7 @@ export function CreateActivityForm({
         return
       }
 
-      const redirectUrl = `/portfolio/${result.portfolioId}`
+      const redirectUrl = getSpaceUrl(result.portfolioId)
       if (process.env.NODE_ENV === 'development') {
         console.log('Redirecting to:', redirectUrl, { type: targetType, portfolioId: result.portfolioId })
       }
@@ -569,7 +569,7 @@ export function CreateActivityForm({
             </div>
             {existingActivity && (
               <Link
-                href={getPortfolioUrl(existingActivity.slug || existingActivity.id)}
+                href={getSpaceUrl(existingActivity.slug || existingActivity.id)}
                 className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 hover:bg-amber-100 transition-colors"
               >
                 <div className="flex-shrink-0">

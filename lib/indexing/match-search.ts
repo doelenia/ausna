@@ -794,7 +794,7 @@ export async function performMatchSearch(userId: string): Promise<{
     const { data: allProjects } = await supabase
       .from('portfolios')
       .select('id, metadata, user_id')
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
 
     const relatedProjects =
       allProjects?.filter((p: any) => {

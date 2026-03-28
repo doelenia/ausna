@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { getPortfolioUrl } from '@/lib/portfolio/routes'
+import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { getSubPortfolios } from '@/app/portfolio/[idOrSlug]/actions'
 
 interface SubPortfolio {
@@ -82,7 +82,7 @@ export function SubPortfoliosTab({
             {communities.slice(0, 10).map((community) => (
               <Link
                 key={community.id}
-                href={getPortfolioUrl(community.id)}
+                href={getSpaceUrl(community.slug || community.id)}
                 className="flex-shrink-0 w-64 bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
               >
                 {community.avatar ? (
@@ -136,7 +136,7 @@ export function SubPortfoliosTab({
           {projects.map((project) => (
             <Link
               key={project.id}
-              href={getPortfolioUrl(project.id)}
+              href={getSpaceUrl(project.slug || project.id)}
               className="block bg-transparent rounded-lg border border-gray-200 transition-opacity hover:opacity-80 overflow-hidden"
             >
               <div className="flex gap-4">

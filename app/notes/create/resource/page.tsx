@@ -33,13 +33,13 @@ export default async function CreateResourcePage({ searchParams }: CreateResourc
   }
 
   if (searchParams.portfolio && !sourcePortfolio) {
-    redirect('/portfolio')
+    redirect('/space')
   }
 
   if (sourcePortfolio) {
     const { canCreateResourceInPortfolio } = await import('@/lib/notes/helpers')
     const canCreate = await canCreateResourceInPortfolio(sourcePortfolio.id, user.id)
-    if (!canCreate) redirect('/portfolio')
+    if (!canCreate) redirect('/space')
   }
 
   const portfolios: Portfolio[] = sourcePortfolio ? [sourcePortfolio] : []

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button, Card, Title, Content, UIText, UIButtonText, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
+import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { formatActivityLocation } from '@/lib/formatActivityLocation'
 import { Calendar, MapPin, Globe, ChevronDown, ChevronRight, Balloon } from 'lucide-react'
 import { isActivityLive } from '@/lib/activityLive'
@@ -398,7 +399,7 @@ export function ActivityCard({
   const locationStr = formatLocationShort(activity.location)
   const hasDate = !!dateStr
   const hasLocation = !!locationStr
-  const href = hrefOverride ?? `/portfolio/${activity.id}`
+  const href = hrefOverride ?? getSpaceUrl(activity.id)
   const avatarType = avatarTypeOverride ?? 'portfolio'
 
   return (

@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { ActivityUpdateCard } from '@/components/portfolio/ActivityUpdateCard'
 import { Portfolio } from '@/types/portfolio'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { MessagePortfolioCard } from '@/components/messages/MessagePortfolioCard'
 import { NoteCollaborationInvitationCard } from '@/components/notes/NoteCollaborationInvitationCard'
@@ -141,7 +142,7 @@ function ConversationViewContent() {
         const { data: portfolios, error } = await supabase
           .from('portfolios')
           .select('*')
-          .eq('type', 'portfolio')
+          .in('type', ['portfolio', 'space'])
           .in('id', missingIds)
 
         if (error || !portfolios || cancelled) {
@@ -860,7 +861,7 @@ function ConversationViewContent() {
       {/* Header */}
       <div className="flex items-center gap-4 p-4 border-b border-gray-200">
         <Link
-          href={`/portfolio/human/${userId}`}
+          href={getHumanProfileUrl(userId)}
           className="flex items-center gap-3 flex-1"
         >
           <img

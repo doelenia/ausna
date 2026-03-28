@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Note, type NoteReference, type ImageReference, type UrlReference } from '@/types/note'
 import { UserAvatar } from '@/components/ui'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { UIText, UIButtonText, Content } from '@/components/ui'
 import { AnnotationComposer } from './AnnotationComposer'
 import { deleteNote, type AnnotationWithReplies } from '@/app/notes/actions'
@@ -170,7 +171,7 @@ export function CommentThread({
       {/* Comment */}
       <div className="flex gap-3">
         <Link
-          href={`/portfolio/human/${comment.owner_account_id}`}
+          href={getHumanProfileUrl(comment.owner_account_id)}
           className="flex-shrink-0"
         >
           <UserAvatar
@@ -184,7 +185,7 @@ export function CommentThread({
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 mb-1">
             <Link
-              href={`/portfolio/human/${comment.owner_account_id}`}
+              href={getHumanProfileUrl(comment.owner_account_id)}
               className="hover:text-blue-600"
             >
               <UIText as="span" className="font-medium">{authorName}</UIText>

@@ -273,8 +273,8 @@ export function CreateHumanPortfolioForm({
       <Card variant="default">
         <div className="space-y-4">
           <div>
-            <Title>Human Portfolio</Title>
-            <UIText className="mt-1">Create or update a human portfolio with associated projects</UIText>
+            <Title>Human profile</Title>
+            <UIText className="mt-1">Create or update a human profile with associated spaces</UIText>
           </div>
 
           {error && (
@@ -324,13 +324,13 @@ export function CreateHumanPortfolioForm({
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Human portfolio description"
+                placeholder="Human profile description"
               />
             </div>
 
             <div>
               <label htmlFor="joined_community" className="block mb-1">
-                <UIText>Joined Community (Portfolio ID)</UIText>
+                <UIText>Joined community (space ID)</UIText>
               </label>
               <input
                 id="joined_community"
@@ -338,7 +338,7 @@ export function CreateHumanPortfolioForm({
                 value={joinedCommunity}
                 onChange={(e) => setJoinedCommunity(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Community portfolio ID (optional)"
+                placeholder="Community space ID (optional)"
               />
             </div>
 
@@ -428,7 +428,7 @@ export function CreateHumanPortfolioForm({
         <div className="flex items-center justify-between">
           <div>
             <Subtitle>Projects</Subtitle>
-            <UIText className="mt-1">Add projects owned by this human portfolio</UIText>
+            <UIText className="mt-1">Add spaces owned by this human</UIText>
           </div>
           <Button type="button" variant="secondary" onClick={addProject}>
             Add Project
@@ -704,7 +704,7 @@ export function CreateHumanPortfolioForm({
           </Button>
         )}
         <Button type="submit" variant="primary" disabled={loading}>
-          {loading ? 'Creating...' : 'Create Human Portfolio'}
+          {loading ? 'Creating...' : 'Create human profile'}
         </Button>
       </div>
     </form>

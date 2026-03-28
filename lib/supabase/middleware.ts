@@ -148,7 +148,8 @@ export async function updateSession(request: NextRequest) {
   const requiresAuthRoute =
     request.nextUrl.pathname.startsWith('/account') ||
     request.nextUrl.pathname.startsWith('/notes/create') ||
-    request.nextUrl.pathname.startsWith('/portfolio/create')
+    request.nextUrl.pathname.startsWith('/portfolio/create') ||
+    request.nextUrl.pathname.startsWith('/space/create')
 
   // Public routes: viewing pages that don't require authentication
   // These include login, signup, main, auth callback, and viewing pages
@@ -157,8 +158,10 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/signup') ||
     request.nextUrl.pathname.startsWith('/main') ||
     request.nextUrl.pathname.startsWith('/auth') ||
-    // Portfolio viewing pages are public (but /portfolio/create requires auth)
+    // Portfolio legacy routes redirect; human/space viewing is public (create requires auth)
     (request.nextUrl.pathname.startsWith('/portfolio') && !request.nextUrl.pathname.startsWith('/portfolio/create')) ||
+    request.nextUrl.pathname.startsWith('/human') ||
+    (request.nextUrl.pathname.startsWith('/space') && !request.nextUrl.pathname.startsWith('/space/create')) ||
     // Note viewing pages are public (but /notes/create requires auth)
     (request.nextUrl.pathname.startsWith('/notes') && !request.nextUrl.pathname.startsWith('/notes/create'))
 
@@ -254,6 +257,8 @@ async function maybeUpdateHumanCityLocation(
     pathname === '/main' ||
     pathname === '/' ||
     pathname.startsWith('/portfolio') ||
+    pathname.startsWith('/human') ||
+    pathname.startsWith('/space') ||
     pathname.startsWith('/notes')
   if (!isPrimaryPage) return
 

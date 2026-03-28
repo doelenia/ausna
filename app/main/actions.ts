@@ -284,7 +284,7 @@ async function getCommunityMemberIds(
     .from('portfolios')
     .select('user_id, metadata')
     .eq('id', communityId)
-    .eq('type', 'portfolio')
+    .in('type', ['portfolio', 'space'])
     .maybeSingle()
 
   if (!community) {
@@ -314,7 +314,7 @@ async function getUserCommunitiesMap(
   const { data: allCommunities } = await supabase
     .from('portfolios')
     .select('id, user_id, metadata')
-    .eq('type', 'portfolio')
+    .in('type', ['portfolio', 'space'])
 
   const communitiesMap = new Map<string, { id: string; name: string; members: string[] }>()
 
@@ -1128,7 +1128,7 @@ export async function getUserCommunities(): Promise<GetUserCommunitiesResult> {
     const { data: allCommunities, error } = await supabase
       .from('portfolios')
       .select('id, user_id, slug, metadata')
-      .eq('type', 'portfolio')
+      .in('type', ['portfolio', 'space'])
       .order('created_at', { ascending: false })
 
     if (error) {
