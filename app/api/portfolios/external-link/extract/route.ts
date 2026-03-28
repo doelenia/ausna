@@ -60,20 +60,33 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are an expert at extracting event information from URLs.
-Extract title, time(start/end ISO), location, locationStructured(city/region/state/country/countryCode), description.
-Return ONLY a valid JSON object with optional fields.`,
+          content: `You extract structured information from public web pages about projects, communities, programs, activities, or scheduled events (after using search to open the URL).
+
+Decide if the page is primarily a **scheduled event**: a specific happening with explicit date/time (and often a venue or online session time)—e.g. a meetup, talk, show, workshop session, or ticketed occurrence.
+
+Return ONLY a valid JSON object. Optional fields:
+- title: clear name of the project, community, activity, or event.
+- description: concise summary; omit boilerplate/navigation.
+
+**If and only if** it is a scheduled event:
+- time: { "start": ISO8601 string, "end"?: ISO8601 string } from the page when stated; otherwise omit time entirely.
+- location: short human-readable place or address line when the event has a real-world or named online venue; omit if none.
+- locationStructured: when location applies, object with optional city, region or state, country, countryCode (ISO 2-letter), line1 if needed; align with the location string.
+
+**If it is NOT a scheduled event** (e.g. general project site, community homepage, program overview, club page, portfolio, or no specific session time)—you MUST omit \`time\`, \`location\`, and \`locationStructured\` completely. Do not guess or invent dates, times, or places.
+
+Never fill time/location for non-event pages.`,
         },
         {
           role: 'user',
-          content: `Extract event information from this URL and return valid JSON only:\n\n${normalizedUrl}`,
+          content: `Extract information from this URL for someone creating a space (project, community, or activity). Return valid JSON only:\n\n${normalizedUrl}`,
         },
       ],
       max_completion_tokens: 1000,
     })
 
     const content = completion.choices[0]?.message?.content
-    if (!content) return NextResponse.json({ error: 'No response from extraction' }, { status: 500 })
+    if (!content) return NextResponse.json({ error: 'No response from the model' }, { status: 500 })
 
     let jsonText = content.trim()
     const jsonMatch = jsonText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/)
@@ -93,7 +106,7 @@ Return ONLY a valid JSON object with optional fields.`,
     })
   } catch (error: any) {
     return NextResponse.json(
-      { error: error.message || 'Failed to extract event information' },
+      { error: error.message || 'Failed to extract information from that link' },
       { status: 500 }
     )
   }

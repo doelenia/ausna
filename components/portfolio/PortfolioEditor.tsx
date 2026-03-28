@@ -16,7 +16,12 @@ import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { updatePortfolio, updateActivityCallToJoin } from '@/app/portfolio/[idOrSlug]/actions'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
-import { DescriptionEditorPopup } from './DescriptionPopups'
+import {
+  DescriptionFieldSection,
+  HUMAN_DESCRIPTION_HELP_TEXT,
+  HUMAN_DESCRIPTION_PLACEHOLDER,
+  SPACE_DESCRIPTION_HELP_TEXT,
+} from './DescriptionPopups'
 import { ImageViewerPopup } from './ImageViewerPopup'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
@@ -53,12 +58,6 @@ const HUMAN_AVAILABILITY_DAY_LABELS: Record<keyof HumanAvailabilitySchedule, str
   saturday: 'Sat',
   sunday: 'Sun',
 }
-
-const HUMAN_DESCRIPTION_HELP_TEXT =
-  'Tell us a bit about what you’re working on, what you care about, and what kinds of opportunities you’d like to find. You can also add links to projects, portfolios, websites, or other work that represents you (please do not put LinkedIn links here).\n\nThis helps us recommend more relevant opportunities to you.'
-
-const HUMAN_DESCRIPTION_PLACEHOLDER =
-  'Student into climate tech, design, and community projects. Also love cafes, creative ideas, and meeting people. Currently working on hackathons and startup-related projects in Tokyo. Looking for collaborators!'
 
 function createDefaultAvailabilitySchedule(): HumanAvailabilitySchedule {
   const schedule: HumanAvailabilitySchedule = {}
@@ -224,7 +223,6 @@ export function PortfolioEditor({
   const metadata = portfolio.metadata as any
   const [name, setName] = useState(basic.name)
   const [description, setDescription] = useState(basic.description || '')
-  const [showDescriptionEditor, setShowDescriptionEditor] = useState(false)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(basic.avatar || null)
   const [showAvatarPopup, setShowAvatarPopup] = useState(false)
@@ -697,13 +695,6 @@ export function PortfolioEditor({
           onClose={() => setShowEmojiPicker(false)}
         />
       )}
-      <DescriptionEditorPopup
-        open={showDescriptionEditor}
-        value={description}
-        onChange={setDescription}
-        onClose={() => setShowDescriptionEditor(false)}
-        placeholder={isHumanPortfolio(portfolio) ? HUMAN_DESCRIPTION_PLACEHOLDER : undefined}
-      />
       {avatarPreview && (
         <ImageViewerPopup
           open={showAvatarPopup}
@@ -825,40 +816,26 @@ export function PortfolioEditor({
               />
             </div>
 
-            {/* Description (preview + popup editor) */}
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <UIText as="label" className="block">
-                  Description
-                </UIText>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowDescriptionEditor(true)}
-                  disabled={loading}
-                >
-                  <UIText>{description.trim().length > 0 ? 'Edit' : 'Add'}</UIText>
-                </Button>
-              </div>
-              <UIText as="p" className="text-xs text-gray-500 mb-2">
-                {isHumanPortfolio(portfolio)
-                  ? HUMAN_DESCRIPTION_HELP_TEXT
-                  : 'You can add relevant links (NOT LinkedIn!) This description helps us build the knowledge graph to find better opportunities for you.'}
-              </UIText>
-              {description.trim().length > 0 ? (
-                <Card variant="subtle" padding="sm">
-                  <UIText as="div" className="text-xs text-gray-500 mb-2">
-                    Preview (truncated)
+            <DescriptionFieldSection
+              value={description}
+              onChange={setDescription}
+              disabled={loading}
+              helperContent={
+                isHumanPortfolio(portfolio) ? (
+                  <UIText as="p" className="whitespace-pre-wrap text-gray-500">
+                    {HUMAN_DESCRIPTION_HELP_TEXT}
                   </UIText>
-                  <Content className="whitespace-pre-wrap line-clamp-5">{description}</Content>
-                </Card>
-              ) : (
-                <UIText as="p" className="text-xs text-gray-500">
-                  Add a description with paragraphs (max 3000 characters).
-                </UIText>
-              )}
-            </div>
+                ) : (
+                  <UIText as="p" className="text-gray-500">
+                    {SPACE_DESCRIPTION_HELP_TEXT}
+                  </UIText>
+                )
+              }
+              previewEmptyText="Click to add or edit description"
+              editorPlaceholder={
+                isHumanPortfolio(portfolio) ? HUMAN_DESCRIPTION_PLACEHOLDER : undefined
+              }
+            />
 
             {/* Type Selection (projects and communities only; activities use Advanced) */}
             {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (

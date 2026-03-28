@@ -10,11 +10,11 @@ import { createPortfolio } from '@/app/portfolio/create/actions'
 import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
-import { DescriptionEditorPopup } from './DescriptionPopups'
+import { DescriptionFieldSection, SPACE_DESCRIPTION_HELP_TEXT } from './DescriptionPopups'
 import { ImageViewerPopup } from './ImageViewerPopup'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { CommunityTypeSelector } from './CommunityTypeSelector'
-import { UIText, Button, Card, Content } from '@/components/ui'
+import { UIText, Button } from '@/components/ui'
 
 interface CreatePortfolioFormProps {
   type: 'projects' | 'community'
@@ -23,7 +23,6 @@ interface CreatePortfolioFormProps {
 export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [showDescriptionEditor, setShowDescriptionEditor] = useState(false)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [showAvatarPopup, setShowAvatarPopup] = useState(false)
@@ -185,12 +184,6 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           onClose={() => setShowEmojiPicker(false)}
         />
       )}
-      <DescriptionEditorPopup
-        open={showDescriptionEditor}
-        value={description}
-        onChange={setDescription}
-        onClose={() => setShowDescriptionEditor(false)}
-      />
       {avatarPreview && (
         <ImageViewerPopup
           open={showAvatarPopup}
@@ -307,35 +300,18 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
         />
       </div>
 
-      {/* Description (preview + popup editor) */}
-      <div>
-        <div className="flex items-center justify-between gap-2 mb-2">
-          <UIText as="label" className="block">
-            Description
+      <DescriptionFieldSection
+        value={description}
+        onChange={setDescription}
+        disabled={loading}
+        helperContent={
+          <UIText as="p" className="text-gray-500">
+            {SPACE_DESCRIPTION_HELP_TEXT}
           </UIText>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowDescriptionEditor(true)}
-            disabled={loading}
-          >
-            <UIText>{description.trim().length > 0 ? 'Edit' : 'Add'}</UIText>
-          </Button>
-        </div>
-        {description.trim().length > 0 ? (
-          <Card variant="subtle" padding="sm">
-            <UIText as="div" className="text-xs text-gray-500 mb-2">
-              Preview (truncated)
-            </UIText>
-            <Content className="whitespace-pre-wrap line-clamp-5">{description}</Content>
-          </Card>
-        ) : (
-          <UIText as="p" className="text-xs text-gray-500">
-            Add a description with paragraphs (max 3000 characters).
-          </UIText>
-        )}
-      </div>
+        }
+        previewEmptyText="Click to add or edit description"
+        editorPlaceholder={`Describe this ${type === 'projects' ? 'project' : 'community'}…`}
+      />
 
       {/* Type Selection */}
       <div>
