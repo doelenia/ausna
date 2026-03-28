@@ -8,6 +8,13 @@ const nextConfig = {
       bodySizeLimit: '50mb',
     },
   },
+  // Deploy 2: static legacy paths → canonical `/human` and `/space` (dynamic `/portfolio/[slug]` still handled in route handlers)
+  async redirects() {
+    return [
+      { source: '/portfolio', destination: '/space', permanent: true },
+      { source: '/portfolio/create', destination: '/space/create', permanent: true },
+    ]
+  },
 }
 
 module.exports = nextConfig
