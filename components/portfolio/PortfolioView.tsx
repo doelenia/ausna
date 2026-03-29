@@ -36,6 +36,7 @@ import {
   getPendingJoinRequestsCount,
   applyToCommunityJoin,
   updatePortfolioDescription,
+  updatePortfolio,
 } from '@/app/portfolio/[idOrSlug]/actions'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -679,8 +680,11 @@ export function PortfolioView({
   const [isApplying, setIsApplying] = useState(false)
   const [applyFeedback, setApplyFeedback] = useState<string | null>(null)
   const [isLoginRequiredModalOpen, setIsLoginRequiredModalOpen] = useState(false)
+  const [orgJoinEligible, setOrgJoinEligible] = useState<boolean>(false)
+  const [orgJoinEligibilityChecked, setOrgJoinEligibilityChecked] = useState<boolean>(false)
   const [isEditingCallToJoin, setIsEditingCallToJoin] = useState(false)
   const [editCallToJoinDraft, setEditCallToJoinDraft] = useState<ActivityCallToJoinConfig | null>(null)
+  const [editOrgMembershipEmailSuffixes, setEditOrgMembershipEmailSuffixes] = useState<string>('')
   const [isCommunityJoinModalOpen, setIsCommunityJoinModalOpen] = useState(false)
   const [communityJoinPromptAnswer, setCommunityJoinPromptAnswer] = useState('')
   const [isSubmittingCommunityJoin, setIsSubmittingCommunityJoin] = useState(false)
@@ -716,6 +720,54 @@ export function PortfolioView({
     activityProperties?.call_to_join || null
   const isExternalActivity = activityProperties?.external === true
   const externalLink = (activityProperties?.external_link as string) || ''
+
+  useEffect(() => {
+    // Check if user is verified for one-click org join on this space.
+    // Only relevant for visitors when call-to-join requires approval.
+    const requiresApproval = activityCallToJoin?.require_approval ?? true
+    if (!isAuthenticated || isOwner || isManager || isMember) {
+      setOrgJoinEligible(false)
+      setOrgJoinEligibilityChecked(true)
+      return
+    }
+    if (!activityCallToJoin || !requiresApproval) {
+      setOrgJoinEligible(false)
+      setOrgJoinEligibilityChecked(true)
+      return
+    }
+    if ((portfolio as any).visibility === 'private') {
+      setOrgJoinEligible(false)
+      setOrgJoinEligibilityChecked(true)
+      return
+    }
+
+    let cancelled = false
+    setOrgJoinEligibilityChecked(false)
+    fetch(`/api/spaces/org-eligibility?portfolioId=${encodeURIComponent(portfolio.id)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return
+        setOrgJoinEligible(Boolean(data?.eligible))
+        setOrgJoinEligibilityChecked(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setOrgJoinEligible(false)
+        setOrgJoinEligibilityChecked(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    portfolio.id,
+    (portfolio as any).visibility,
+    isAuthenticated,
+    isOwner,
+    isManager,
+    isMember,
+    activityCallToJoin?.require_approval,
+    Boolean(activityCallToJoin),
+  ])
   const activityHostProjectIds: string[] =
     (activityProperties?.host_project_ids as string[] | undefined) ||
     ((portfolio as any).host_project_id ? [(portfolio as any).host_project_id] : [])
@@ -1223,7 +1275,8 @@ export function PortfolioView({
 
                 // When approval is required, open the confirmation/prompt modal.
                 // When no approval is required, auto-join directly (no popup).
-                if (requiresApproval) {
+                // When approval is required but user is org-verified, also auto-join (no popup).
+                if (requiresApproval && !orgJoinEligible) {
                   handleOpenApply()
                   return
                 }
@@ -1265,6 +1318,15 @@ export function PortfolioView({
                   ],
                   join_by_auto_managed: config.join_by_auto_managed ?? true,
                 })
+                const org = (activityProperties?.org_membership || null) as
+                  | { email_suffixes?: unknown }
+                  | null
+                const suffixes = Array.isArray(org?.email_suffixes)
+                  ? (org!.email_suffixes as unknown[])
+                      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+                      .join(', ')
+                  : ''
+                setEditOrgMembershipEmailSuffixes(suffixes)
                 setIsEditingCallToJoin(true)
               }
 
@@ -1318,8 +1380,19 @@ export function PortfolioView({
                                 onClick={handleApplyClick}
                                 disabled={!joinWindowOpen}
                               >
-                                <UIText>{requiresApproval ? 'Apply to join' : 'Join'}</UIText>
+                                <UIText>
+                                  {requiresApproval
+                                    ? orgJoinEligible
+                                      ? 'Join'
+                                      : 'Apply to join'
+                                    : 'Join'}
+                                </UIText>
                               </Button>
+                              {requiresApproval && orgJoinEligible && (
+                                <UIText className="text-green-700">
+                                  You are verified as part of {((portfolio.metadata as any)?.basic?.name as string) || 'this space'}, please join with one click!
+                                </UIText>
+                              )}
                               {applyFeedback && (
                                 <UIText className="text-gray-600">{applyFeedback}</UIText>
                               )}
@@ -1745,7 +1818,7 @@ export function PortfolioView({
                               </svg>
                             </Link>
                             <UIText className="text-center max-w-[140px] mx-auto truncate">
-                              Create Portfolio
+                              Create Space
                             </UIText>
                           </div>
                         </div>
@@ -1775,7 +1848,7 @@ export function PortfolioView({
                               </svg>
                             </Link>
                             <UIText className="text-center max-w-[140px] mx-auto truncate">
-                              Create Portfolio
+                              Create Space
                             </UIText>
                           </div>
                         </div>
@@ -2078,6 +2151,16 @@ export function PortfolioView({
                 return
               }
 
+              // Persist org_membership suffixes via shared updatePortfolio API.
+              const meta = (portfolio.metadata as any) || {}
+              const basic = meta.basic || {}
+              const formData = new FormData()
+              formData.set('portfolioId', portfolio.id)
+              formData.set('name', (basic.name as string) || '')
+              formData.set('description', (basic.description as string) || '')
+              formData.set('org_membership_email_suffixes', editOrgMembershipEmailSuffixes || '')
+              await updatePortfolio(formData)
+
               setIsEditingCallToJoin(false)
               router.refresh()
             } catch (error) {
@@ -2155,6 +2238,23 @@ export function PortfolioView({
                       Require approval
                     </UIText>
                   </div>
+                  {draft.require_approval && (
+                    <div>
+                      <UIText as="label" className="block mb-1">
+                        Organization email suffixes (optional)
+                      </UIText>
+                      <input
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        value={editOrgMembershipEmailSuffixes}
+                        onChange={(e) => setEditOrgMembershipEmailSuffixes(e.target.value)}
+                        placeholder="e.g. company.com, school.edu"
+                        autoComplete="off"
+                      />
+                      <UIText as="p" className="text-xs text-gray-500 mt-1">
+                        People with matching email domains can join without approval.
+                      </UIText>
+                    </div>
+                  )}
                   {draft.require_approval && (
                     <div>
                       <UIText as="label" className="block mb-1">

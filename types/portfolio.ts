@@ -198,6 +198,12 @@ export interface PortfolioProperties {
    * non-human portfolio to use the same model.
    */
   call_to_join?: ActivityCallToJoinConfig
+  /**
+   * Optional organizational membership rule:
+   * if enabled, users whose email matches one of the configured suffixes
+   * can join without approval (even when call-to-join requires approval).
+   */
+  org_membership?: OrgMembershipConfig
   /** When true, this portfolio represents an external item linked elsewhere. */
   external?: boolean
   /** URL to the external item (when external is true). */
@@ -241,6 +247,15 @@ export interface ActivityCallToJoinConfig {
    * Once a user explicitly edits the join_by value, this should be set to false.
    */
   join_by_auto_managed?: boolean
+}
+
+export interface OrgMembershipConfig {
+  enabled: boolean
+  /**
+   * Email suffixes/domains, e.g. ["company.com", "@school.edu"].
+   * Matching is case-insensitive and normalized at runtime.
+   */
+  email_suffixes: string[]
 }
 
 /**

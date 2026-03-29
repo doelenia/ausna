@@ -436,7 +436,7 @@ export function CreatePortfolioForm({ type }: CreatePortfolioFormProps) {
           fullWidth
           disabled={loading || !name.trim() || (!avatarFile && !selectedEmoji)}
         >
-          <UIText>{loading ? 'Creating...' : 'Create Portfolio'}</UIText>
+          <UIText>{loading ? 'Creating...' : 'Create Space'}</UIText>
         </Button>
       </div>
     </form>
