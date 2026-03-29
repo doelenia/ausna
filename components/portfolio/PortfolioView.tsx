@@ -60,9 +60,23 @@ interface PortfolioViewProps {
   hasPendingApplication?: boolean
   /** When true, current user has a pending community join request; show "under review" for community */
   hasPendingCommunityApplication?: boolean
+  /** Pending invite to join this space (member or manager) — visitor should see accept card, not call-to-join */
+  hasPendingPortfolioInvitation?: boolean
+  pendingPortfolioInvitationType?: 'member' | 'manager' | null
 }
 
-export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, currentUserId, topInterests = [], isAdmin = false, hasPendingApplication = false, hasPendingCommunityApplication = false }: PortfolioViewProps) {
+export function PortfolioView({
+  portfolio,
+  basic,
+  isOwner: serverIsOwner,
+  currentUserId,
+  topInterests = [],
+  isAdmin = false,
+  hasPendingApplication = false,
+  hasPendingCommunityApplication = false,
+  hasPendingPortfolioInvitation = false,
+  pendingPortfolioInvitationType = null,
+}: PortfolioViewProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDescriptionPopup, setShowDescriptionPopup] = useState(false)
@@ -95,8 +109,37 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
   const [activityHostProjects, setActivityHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [activityHostCommunities, setActivityHostCommunities] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
   const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState<number | null>(null)
+  const [acceptingPortfolioInvitation, setAcceptingPortfolioInvitation] = useState(false)
+  const [acceptPortfolioInvitationError, setAcceptPortfolioInvitationError] = useState<string | null>(null)
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
+
+  const effectivePendingApplication = hasPendingApplication && !hasPendingPortfolioInvitation
+  const effectivePendingCommunityApplication =
+    hasPendingCommunityApplication && !hasPendingPortfolioInvitation
+
+  const handleAcceptPortfolioInvitation = async () => {
+    if (!currentUserId) return
+    setAcceptingPortfolioInvitation(true)
+    setAcceptPortfolioInvitationError(null)
+    try {
+      const res = await fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}`, {
+        method: 'PUT',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAcceptPortfolioInvitationError(
+          typeof data.error === 'string' ? data.error : 'Could not accept invitation'
+        )
+        return
+      }
+      router.refresh()
+    } catch {
+      setAcceptPortfolioInvitationError('Could not accept invitation')
+    } finally {
+      setAcceptingPortfolioInvitation(false)
+    }
+  }
 
   useEffect(() => {
     setDisplayDescription(basic.description || '')
@@ -1019,8 +1062,53 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 )
               })()}
 
+            {/* Pending invitation — accept before joining any other way */}
+            {portfolio.type !== 'human' &&
+              hasPendingPortfolioInvitation &&
+              !isOwner &&
+              !isManager &&
+              !isMember &&
+              currentUserId && (
+                <Card variant="subtle" padding="sm" className="mb-4 self-start max-w-lg">
+                  <div className="flex flex-col gap-1.5 text-left">
+                    <div className="flex items-center gap-1.5">
+                      <Megaphone className="w-4 h-4 text-gray-500 flex-shrink-0" aria-hidden />
+                      <UIText as="span" className="text-gray-600">
+                        Invitation
+                      </UIText>
+                    </div>
+                    <Content className="my-1.5">
+                      {pendingPortfolioInvitationType === 'manager'
+                        ? 'You have been invited to become a manager of this space.'
+                        : 'You have been invited to join this space.'}
+                    </Content>
+                    {acceptPortfolioInvitationError && (
+                      <UIText className="text-red-600">{acceptPortfolioInvitationError}</UIText>
+                    )}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => void handleAcceptPortfolioInvitation()}
+                        disabled={acceptingPortfolioInvitation}
+                      >
+                        <UIText>
+                          {acceptingPortfolioInvitation ? 'Accepting...' : 'Accept invitation'}
+                        </UIText>
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
             {/* External activity Join card (simple Join button, no approval) */}
-            {isActivityPortfolio(portfolio) && isExternalActivity && !isOwner && !isManager && !isMember && (() => {
+            {isActivityPortfolio(portfolio) &&
+              isExternalActivity &&
+              !isOwner &&
+              !isManager &&
+              !isMember &&
+              !hasPendingPortfolioInvitation &&
+              (() => {
               const handleJoinClick = async () => {
                 if (!isAuthenticated) {
                   setIsLoginRequiredModalOpen(true)
@@ -1081,10 +1169,12 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 !isOwner &&
                 !isManager &&
                 !isMember &&
-                joinWindowOpen
-              const canSeeVisitorCard = canApplyAsVisitor || (!canSeeOwnerManagerCard && !joinWindowOpen)
+                joinWindowOpen &&
+                !hasPendingPortfolioInvitation
+              const visitorShouldSeeCallToJoinCard =
+                canSeeOwnerManagerCard || effectivePendingApplication || canApplyAsVisitor
 
-              if (!canSeeOwnerManagerCard && !canSeeVisitorCard) {
+              if (!visitorShouldSeeCallToJoinCard) {
                 return null
               }
 
@@ -1183,7 +1273,7 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                           </div>
                         )}
                       </div>
-                      {hasPendingApplication ? (
+                      {effectivePendingApplication ? (
                         <Content className="my-1.5">
                           Your application is received and under review.
                         </Content>
@@ -1192,21 +1282,16 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                           <Content className="my-1.5">
                             {config.description?.trim() || 'Join this portfolio.'}
                           </Content>
-                          {(canApplyAsVisitor || (!canSeeOwnerManagerCard && !joinWindowOpen)) && (
+                          {canApplyAsVisitor && (
                             <div className="flex items-center gap-2 mt-0.5">
-                              {canApplyAsVisitor && (
-                                <Button
-                                  variant="primary"
-                                  size="sm"
-                                  onClick={handleApplyClick}
-                                  disabled={!joinWindowOpen}
-                                >
-                                  <UIText>{requiresApproval ? 'Apply to join' : 'Join'}</UIText>
-                                </Button>
-                              )}
-                              {!canApplyAsVisitor && !joinWindowOpen && (
-                                <UIText className="text-gray-500">Join window closed</UIText>
-                              )}
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={handleApplyClick}
+                                disabled={!joinWindowOpen}
+                              >
+                                <UIText>{requiresApproval ? 'Apply to join' : 'Join'}</UIText>
+                              </Button>
                               {applyFeedback && (
                                 <UIText className="text-gray-600">{applyFeedback}</UIText>
                               )}
@@ -1434,9 +1519,14 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
 
             {/* Buttons */}
             <div className="mb-6">
-              {isCommunityPortfolio(portfolio) && !isOwner && !isMember && hasPendingCommunityApplication && (
-                <Content className="mb-2 text-gray-600">Your application is received and under review.</Content>
-              )}
+              {isCommunityPortfolio(portfolio) &&
+                !isOwner &&
+                !isMember &&
+                effectivePendingCommunityApplication && (
+                  <Content className="mb-2 text-gray-600">
+                    Your application is received and under review.
+                  </Content>
+                )}
               <PortfolioActions
                 portfolio={portfolio}
                 isOwner={isOwner}
@@ -1449,7 +1539,11 @@ export function PortfolioView({ portfolio, basic, isOwner: serverIsOwner, curren
                 onDelete={handleDelete}
                 isDeleting={isDeleting}
                 onOpenCommunityJoin={
-                  isCommunityPortfolio(portfolio) && !isOwner && !isMember && !hasPendingCommunityApplication
+                  isCommunityPortfolio(portfolio) &&
+                  !isOwner &&
+                  !isMember &&
+                  !effectivePendingCommunityApplication &&
+                  !hasPendingPortfolioInvitation
                     ? () => {
                         if (!isAuthenticated) setIsCommunityLoginRequiredOpen(true)
                         else {

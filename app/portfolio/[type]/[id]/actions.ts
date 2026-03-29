@@ -1431,6 +1431,46 @@ export async function getCurrentUserPendingActivityRequest(
   }
 }
 
+/**
+ * Whether the current user has a pending portfolio invitation (member or manager) for this portfolio.
+ */
+export async function getCurrentUserPendingPortfolioInvitation(
+  portfolioId: string
+): Promise<{
+  success: boolean
+  hasPending?: boolean
+  invitationType?: 'member' | 'manager'
+  error?: string
+}> {
+  try {
+    const { user } = await requireAuth()
+    const supabase = await createClient()
+    const { data: portfolio } = await supabase
+      .from('portfolios')
+      .select('id, type')
+      .eq('id', portfolioId)
+      .single()
+    if (!portfolio || portfolio.type === 'human') {
+      return { success: false, error: 'Not found' }
+    }
+    const { data: inv, error } = await supabase
+      .from('portfolio_invitations')
+      .select('id, invitation_type')
+      .eq('portfolio_id', portfolioId)
+      .eq('invitee_id', user.id)
+      .eq('status', 'pending')
+      .maybeSingle()
+    if (error) return { success: false, error: error.message }
+    if (!inv) {
+      return { success: true, hasPending: false }
+    }
+    const invitationType = inv.invitation_type === 'manager' ? 'manager' : 'member'
+    return { success: true, hasPending: true, invitationType }
+  } catch (e: any) {
+    return { success: false, error: e?.message || 'Failed to check invitation' }
+  }
+}
+
 /** Noun used in DM copy for unified join flows (`activities` → activity, `space` → space, else portfolio). */
 function portfolioJoinRequestMessageLabel(portfolioType: string | null | undefined): string {
   const t = String(portfolioType || '').toLowerCase()
@@ -1656,6 +1696,22 @@ export async function applyToActivityCallToJoin(
         return {
           success: false,
           error: 'You already have a pending request for this portfolio',
+        }
+      }
+
+      const { data: pendingInvite } = await supabase
+        .from('portfolio_invitations')
+        .select('id')
+        .eq('portfolio_id', portfolioId)
+        .eq('invitee_id', user.id)
+        .eq('status', 'pending')
+        .maybeSingle()
+
+      if (pendingInvite) {
+        return {
+          success: false,
+          error:
+            'You already have a pending invitation for this space. Accept it below, or decline it from your messages.',
         }
       }
 
@@ -2097,6 +2153,22 @@ export async function applyToCommunityJoin(
 
     if (existingRequest) {
       return { success: false, error: 'You already have a pending request for this portfolio' }
+    }
+
+    const { data: pendingInvite } = await supabase
+      .from('portfolio_invitations')
+      .select('id')
+      .eq('portfolio_id', portfolioId)
+      .eq('invitee_id', user.id)
+      .eq('status', 'pending')
+      .maybeSingle()
+
+    if (pendingInvite) {
+      return {
+        success: false,
+        error:
+          'You already have a pending invitation for this space. Accept it on the space page, or decline it from your messages.',
+      }
     }
 
     const { error: insertError } = await supabase.from('portfolio_join_requests').insert({

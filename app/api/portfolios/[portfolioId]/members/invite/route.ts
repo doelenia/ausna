@@ -109,6 +109,24 @@ export async function POST(
       )
     }
 
+    const { data: existingJoinRequest } = await supabase
+      .from('portfolio_join_requests')
+      .select('id')
+      .eq('portfolio_id', portfolioId)
+      .eq('applicant_user_id', userId)
+      .eq('status', 'pending')
+      .maybeSingle()
+
+    if (existingJoinRequest) {
+      return NextResponse.json(
+        {
+          error:
+            'This user has a pending join request. Approve or dismiss it before sending an invitation.',
+        },
+        { status: 400 }
+      )
+    }
+
     // Check if there's already a pending invitation
     const { data: existingInvitation } = await supabase
       .from('portfolio_invitations')

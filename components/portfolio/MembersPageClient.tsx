@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
@@ -29,6 +28,21 @@ interface ActivityJoinRequest {
   respondedAt?: string | null
 }
 
+interface SentPortfolioInvitation {
+  id: string
+  invitee: UserInfo
+  inviter: UserInfo
+  status: string
+  invitation_type: string
+  role: string | null
+  createdAt: string
+  message: string | null
+}
+
+type UnifiedActiveRow =
+  | { kind: 'request'; request: ActivityJoinRequest }
+  | { kind: 'invite'; invite: SentPortfolioInvitation }
+
 interface MembersPageClientProps {
   portfolioId: string
   portfolioName: string
@@ -39,6 +53,8 @@ interface MembersPageClientProps {
   canManage: boolean
   currentUserId?: string
   joinRequests?: ActivityJoinRequest[]
+  /** Outgoing invitations for this portfolio (managers/creator) */
+  sentInvitations?: SentPortfolioInvitation[]
   /** When e.g. ?tab=requests is in the URL, open directly to that tab */
   initialTab?: 'members' | 'subscribers' | 'requests'
   /** When true, owner/manager cannot remove other members (external activities) */
@@ -55,6 +71,7 @@ export function MembersPageClient({
   canManage,
   currentUserId,
   joinRequests = [],
+  sentInvitations = [],
   initialTab = 'members',
   isExternalActivity = false,
 }: MembersPageClientProps) {
@@ -67,7 +84,6 @@ export function MembersPageClient({
   const [searching, setSearching] = useState(false)
   const [inviting, setInviting] = useState<string | null>(null)
   const [invitingManager, setInvitingManager] = useState<string | null>(null)
-  const [invitedManagers, setInvitedManagers] = useState<Set<string>>(new Set())
   const [removing, setRemoving] = useState<string | null>(null)
   const [inviteRoleInputs, setInviteRoleInputs] = useState<{ [userId: string]: string }>({})
   const [inviteMessageInputs, setInviteMessageInputs] = useState<{ [userId: string]: string }>({})
@@ -81,10 +97,58 @@ export function MembersPageClient({
   const [requestError, setRequestError] = useState<string | null>(null)
   const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null)
   const [respondMessage, setRespondMessage] = useState('')
+  const [cancellingInviteeId, setCancellingInviteeId] = useState<string | null>(null)
 
   /** Non-human portfolios (space, portfolio, legacy activities/community/projects) use join requests + this tab. */
   const canShowJoinRequestsTab =
     normalizePortfolioType(portfolioType) === 'portfolio' && canManage
+
+  const pendingManagerInviteeIds = useMemo(() => {
+    return new Set(
+      sentInvitations
+        .filter((i) => i.invitation_type === 'manager' && i.status === 'pending')
+        .map((i) => i.invitee.id)
+    )
+  }, [sentInvitations])
+
+  /** Pending join requests and pending invitations, one row per user (request wins over invite). */
+  const unifiedActiveRows = useMemo((): UnifiedActiveRow[] => {
+    const pendingReqs = joinRequests.filter((r) => r.status === 'pending')
+    const applicantIds = new Set(pendingReqs.map((r) => r.applicant.id))
+    const pendingInvs = sentInvitations.filter(
+      (i) => i.status === 'pending' && !applicantIds.has(i.invitee.id)
+    )
+    const rank = (r: ActivityJoinRequest) => {
+      if (r.status !== 'pending') return 2
+      if (!r.respondedAt) return 0
+      return 1
+    }
+    const sortedReqs = [...pendingReqs].sort((a, b) => {
+      const d = rank(a) - rank(b)
+      if (d !== 0) return d
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
+    const sortedInvs = [...pendingInvs].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )
+    const rows: UnifiedActiveRow[] = [
+      ...sortedReqs.map((request) => ({ kind: 'request' as const, request })),
+      ...sortedInvs.map((invite) => ({ kind: 'invite' as const, invite })),
+    ]
+    rows.sort((a, b) => {
+      const ta = a.kind === 'request' ? a.request.createdAt : a.invite.createdAt
+      const tb = b.kind === 'request' ? b.request.createdAt : b.invite.createdAt
+      return new Date(tb).getTime() - new Date(ta).getTime()
+    })
+    return rows
+  }, [joinRequests, sentInvitations])
+
+  const requestsTabAttentionCount = unifiedActiveRows.filter((row) => {
+    if (row.kind === 'request') {
+      return row.request.status === 'pending' && !row.request.respondedAt
+    }
+    return true
+  }).length
 
   // Filter members to separate creators, managers, and regular members
   const creator = creatorInfo
@@ -127,15 +191,7 @@ export function MembersPageClient({
       const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`)
       if (response.ok) {
         const data = await response.json()
-        // Filter out users who are already members
-        const existingMemberIds = new Set(members.map((m) => m.id))
-        if (creator) {
-          existingMemberIds.add(creator.id)
-        }
-        const filtered = (data.users || []).filter(
-          (u: UserInfo) => !existingMemberIds.has(u.id)
-        )
-        setSearchResults(filtered)
+        setSearchResults(data.users || [])
       } else {
         console.error('Search failed')
         setSearchResults([])
@@ -156,33 +212,6 @@ export function MembersPageClient({
     return () => clearTimeout(timeoutId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery])
-
-  // Load pending manager invitations on mount
-  useEffect(() => {
-    const loadPendingInvitations = async () => {
-      try {
-        const supabase = createClient()
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
-
-        const { data: invitations } = await supabase
-          .from('portfolio_invitations')
-          .select('invitee_id')
-          .eq('portfolio_id', portfolioId)
-          .eq('status', 'pending')
-          .eq('invitation_type', 'manager')
-
-        if (invitations) {
-          const invitedIds = new Set<string>(invitations.map((inv: any) => inv.invitee_id as string))
-          setInvitedManagers(invitedIds)
-        }
-      } catch (error) {
-        console.error('Error loading pending invitations:', error)
-      }
-    }
-
-    loadPendingInvitations()
-  }, [portfolioId])
 
   const handleInvite = async (userId: string, role: string = 'Member') => {
     setInviting(userId)
@@ -209,6 +238,7 @@ export function MembersPageClient({
           delete next[userId]
           return next
         })
+        router.refresh()
       } else {
         const data = await response.json()
         alert(data.error || 'Failed to send invitation')
@@ -233,11 +263,10 @@ export function MembersPageClient({
       })
 
       if (response.ok) {
-        // Mark this user as invited
-        setInvitedManagers(prev => new Set(prev).add(userId))
         alert('Manager invitation sent successfully!')
         setSearchQuery('')
         setSearchResults([])
+        router.refresh()
       } else {
         const data = await response.json()
         alert(data.error || 'Failed to send manager invitation')
@@ -384,6 +413,144 @@ export function MembersPageClient({
     )
   }
 
+  const getPendingJoinRequestForUser = (userId: string) =>
+    joinRequests.find((r) => r.applicant.id === userId && r.status === 'pending')
+
+  const getPendingInvitationForUser = (userId: string) =>
+    sentInvitations.find((i) => i.invitee.id === userId && i.status === 'pending')
+
+  const isUserAlreadyMember = (userId: string) =>
+    (!!creator && creator.id === userId) || members.some((m) => m.id === userId)
+
+  const handleCancelInvitation = async (inviteeId: string) => {
+    if (!confirm('Cancel this invitation?')) return
+    setCancellingInviteeId(inviteeId)
+    setRequestError(null)
+    try {
+      const response = await fetch(`/api/portfolios/${portfolioId}/invitations/${inviteeId}`, {
+        method: 'DELETE',
+      })
+      if (response.ok) {
+        router.refresh()
+      } else {
+        const data = await response.json().catch(() => ({}))
+        setRequestError(data.error || 'Failed to cancel invitation')
+      }
+    } catch (error) {
+      console.error('Error cancelling invitation:', error)
+      setRequestError('Failed to cancel invitation')
+    } finally {
+      setCancellingInviteeId(null)
+    }
+  }
+
+  const renderInviteSearchSection = (wrapperClassName: string) => (
+    <div className={wrapperClassName}>
+      <UIText as="h2" className="mb-4">Invite members</UIText>
+      {isManager && (
+        <UIText as="p" className="mb-4">
+          As a manager, you can also promote existing members to managers using the &quot;Make Manager&quot; button next to each member on the Members tab.
+        </UIText>
+      )}
+      <div className="relative">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search by email or username..."
+          className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {searching && (
+          <div className="absolute right-3 top-2.5">
+            <UIText>Searching...</UIText>
+          </div>
+        )}
+      </div>
+
+      {searchResults.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <UIText as="h3">Search results</UIText>
+          {searchResults.map((user) => {
+            const pendingReq = getPendingJoinRequestForUser(user.id)
+            const pendingInv = getPendingInvitationForUser(user.id)
+            const alreadyMember = isUserAlreadyMember(user.id)
+            const statusHint = alreadyMember
+              ? 'Already a member of this space.'
+              : pendingReq
+                ? 'This person has a pending join request. Resolve it before sending an invitation.'
+                : pendingInv
+                  ? pendingInv.invitation_type === 'manager'
+                    ? 'A manager invitation is already pending for this person.'
+                    : 'An invitation is already pending for this person.'
+                  : null
+            const canInviteUser = !alreadyMember && !pendingReq && !pendingInv
+
+            return (
+              <div
+                key={user.id}
+                className="flex flex-col gap-2 p-3 bg-gray-50 rounded-md sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="flex items-center gap-3">
+                  <img
+                    src={getAvatarUrl(user)}
+                    alt={getDisplayName(user)}
+                    className="h-10 w-10 rounded-full"
+                  />
+                  <div>
+                    <UIText as="div">{getDisplayName(user)}</UIText>
+                    {user.username && <UIText as="div">@{user.username}</UIText>}
+                    {statusHint && (
+                      <UIText as="p" className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1">
+                        {statusHint}
+                      </UIText>
+                    )}
+                  </div>
+                </div>
+                {canInviteUser && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={inviteRoleInputs[user.id] || 'Member'}
+                      onChange={(e) =>
+                        setInviteRoleInputs({ ...inviteRoleInputs, [user.id]: e.target.value })
+                      }
+                      placeholder="Role (max 2 words)"
+                      maxLength={50}
+                      className="px-2 py-1 text-sm border border-gray-300 rounded w-32"
+                    />
+                    <input
+                      type="text"
+                      value={inviteMessageInputs[user.id] || ''}
+                      onChange={(e) =>
+                        setInviteMessageInputs({ ...inviteMessageInputs, [user.id]: e.target.value })
+                      }
+                      placeholder="Message (optional)"
+                      maxLength={200}
+                      className="px-2 py-1 text-sm border border-gray-300 rounded w-48"
+                    />
+                    <Button
+                      variant="primary"
+                      onClick={() => handleInvite(user.id, inviteRoleInputs[user.id] || 'Member')}
+                      disabled={inviting === user.id}
+                    >
+                      <UIText>{inviting === user.id ? 'Sending...' : 'Invite'}</UIText>
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {searchQuery && !searching && searchResults.length === 0 && (
+        <div className="mt-4">
+          <UIText>No users found</UIText>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div>
       {/* Tabs */}
@@ -427,7 +594,8 @@ export function MembersPageClient({
             }`}
           >
             <UIText as="span">
-              Requests &amp; Invites {joinRequests.length > 0 && `(${joinRequests.length})`}
+              Requests &amp; Invites{' '}
+              {requestsTabAttentionCount > 0 && `(${requestsTabAttentionCount})`}
             </UIText>
           </button>
         )}
@@ -436,87 +604,8 @@ export function MembersPageClient({
       {/* Members Tab */}
       {activeTab === 'members' && (
         <>
-          {/* Invite Section - Only for managers */}
-          {canManage && (
-        <div className="mb-8 pb-6 border-b border-gray-200">
-          <UIText as="h2" className="mb-4">Invite Members</UIText>
-          {isManager && (
-            <UIText as="p" className="mb-4">
-              As a manager, you can also promote existing members to managers using the "Make Manager" button next to each member.
-            </UIText>
-          )}
-          <div className="relative">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by email or username..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {searching && (
-              <div className="absolute right-3 top-2.5"><UIText>Searching...</UIText></div>
-            )}
-          </div>
-
-          {/* Search Results */}
-          {searchResults.length > 0 && (
-            <div className="mt-4 space-y-2">
-              <UIText as="h3">Search Results</UIText>
-              {searchResults.map((user) => (
-                <div
-                  key={user.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
-                >
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={getAvatarUrl(user)}
-                      alt={getDisplayName(user)}
-                      className="h-10 w-10 rounded-full"
-                    />
-                    <div>
-                      <UIText as="div">{getDisplayName(user)}</UIText>
-                      {user.username && (
-                        <UIText as="div">@{user.username}</UIText>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={inviteRoleInputs[user.id] || 'Member'}
-                      onChange={(e) => setInviteRoleInputs({ ...inviteRoleInputs, [user.id]: e.target.value })}
-                      placeholder="Role (max 2 words)"
-                      maxLength={50}
-                      className="px-2 py-1 text-sm border border-gray-300 rounded w-32"
-                    />
-                    <input
-                      type="text"
-                      value={inviteMessageInputs[user.id] || ''}
-                      onChange={(e) =>
-                        setInviteMessageInputs({ ...inviteMessageInputs, [user.id]: e.target.value })
-                      }
-                      placeholder="Message (optional)"
-                      maxLength={200}
-                      className="px-2 py-1 text-sm border border-gray-300 rounded w-48"
-                    />
-                    <Button
-                      variant="primary"
-                      onClick={() => handleInvite(user.id, inviteRoleInputs[user.id] || 'Member')}
-                      disabled={inviting === user.id}
-                    >
-                      <UIText>{inviting === user.id ? 'Sending...' : 'Invite'}</UIText>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {searchQuery && !searching && searchResults.length === 0 && (
-            <div className="mt-4"><UIText>No users found</UIText></div>
-          )}
-          </div>
-        )}
+          {canManage && !canShowJoinRequestsTab &&
+            renderInviteSearchSection('mb-8 pb-6 border-b border-gray-200')}
 
         {/* External activities: show Uploader separately, then Going list */}
         {isExternalActivity && creator && (
@@ -685,12 +774,12 @@ export function MembersPageClient({
                           variant="text"
                           size="sm"
                           onClick={() => handleInviteManager(member.id)}
-                          disabled={invitingManager === member.id || invitedManagers.has(member.id)}
+                          disabled={invitingManager === member.id || pendingManagerInviteeIds.has(member.id)}
                         >
                           <UIText>
                           {invitingManager === member.id 
                             ? 'Sending...' 
-                            : invitedManagers.has(member.id) 
+                            : pendingManagerInviteeIds.has(member.id) 
                             ? 'Invited' 
                             : 'Make Manager'}
                           </UIText>
@@ -751,10 +840,26 @@ export function MembersPageClient({
       {/* Requests & invites: same UI and server actions for all non-human portfolio types */}
       {activeTab === 'requests' && canShowJoinRequestsTab && (
         <div>
+          {canManage && renderInviteSearchSection('mb-8 pb-8 border-b border-gray-200')}
+          <UIText as="p" className="mb-4">
+            Search for people to invite, then review active join requests and invitations below. If both
+            applied to the same person, only the join request is listed.
+          </UIText>
+          {requestError && (
+            <Content className="mb-2 text-red-600">{requestError}</Content>
+          )}
           <div className="mb-3 flex items-center gap-2 flex-wrap">
-            <UIText as="h2">Join requests {joinRequests.length > 0 && `(${joinRequests.length})`}</UIText>
+            <UIText as="h2">
+              Active requests &amp; invitations{' '}
+              {unifiedActiveRows.length > 0 && `(${unifiedActiveRows.length})`}
+            </UIText>
             {(() => {
-              const unprocessed = joinRequests.filter((r) => r.status === 'pending' && !r.respondedAt).length
+              const unprocessed = unifiedActiveRows.filter(
+                (row) =>
+                  row.kind === 'request' &&
+                  row.request.status === 'pending' &&
+                  !row.request.respondedAt
+              ).length
               return unprocessed > 0 ? (
                 <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-blue-600 text-white text-xs font-medium">
                   {unprocessed}
@@ -762,16 +867,81 @@ export function MembersPageClient({
               ) : null
             })()}
           </div>
-          {requestError && (
-            <Content className="mb-2 text-red-600">{requestError}</Content>
-          )}
-          {joinRequests.length === 0 ? (
+          {unifiedActiveRows.length === 0 ? (
             <div>
-              <UIText>No join requests yet</UIText>
+              <UIText>No active join requests or invitations</UIText>
             </div>
           ) : (
-            <div className="space-y-2">
-              {joinRequests.map((req) => {
+            <div className="space-y-2 mb-4">
+              {unifiedActiveRows.map((row) => {
+                if (row.kind === 'invite') {
+                  const inv = row.invite
+                  const inviteeName = getDisplayName(inv.invitee)
+                  const inviterName = getDisplayName(inv.inviter)
+                  const typeLabel =
+                    inv.invitation_type === 'manager' ? 'Manager invite' : 'Member invite'
+                  const canCancel = inv.inviter.id === currentUserId
+
+                  return (
+                    <div
+                      key={inv.id}
+                      className="flex flex-col gap-2 p-3 bg-gray-50 rounded-md sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="relative flex-shrink-0">
+                          <img
+                            src={getAvatarUrl(inv.invitee)}
+                            alt={inviteeName}
+                            className="h-10 w-10 rounded-full"
+                          />
+                          <span
+                            className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full bg-blue-600 border-2 border-white"
+                            title="Awaiting response"
+                            aria-hidden
+                          />
+                        </div>
+                        <div>
+                          <UIText as="div">{inviteeName}</UIText>
+                          {inv.invitee.username && (
+                            <UIText as="div">@{inv.invitee.username}</UIText>
+                          )}
+                          <UIText as="div" className="text-gray-600 text-xs mt-1">
+                            Invitation · {typeLabel}
+                            {inv.invitation_type === 'member' && inv.role && inv.role !== 'Member'
+                              ? ` · Role: ${inv.role}`
+                              : ''}{' '}
+                            · {new Date(inv.createdAt).toLocaleString()}
+                          </UIText>
+                          <UIText as="div" className="text-gray-600 text-xs mt-1">
+                            Sent by {inviterName}
+                            {inv.inviter.id === currentUserId ? ' (you)' : ''}
+                          </UIText>
+                          {inv.message && (
+                            <UIText as="div" className="text-gray-600 text-xs mt-1">
+                              Message: {inv.message}
+                            </UIText>
+                          )}
+                        </div>
+                      </div>
+                      {canCancel && (
+                        <Button
+                          variant="text"
+                          size="sm"
+                          onClick={() => handleCancelInvitation(inv.invitee.id)}
+                          disabled={cancellingInviteeId === inv.invitee.id}
+                        >
+                          <UIText>
+                            {cancellingInviteeId === inv.invitee.id
+                              ? 'Cancelling...'
+                              : 'Cancel invitation'}
+                          </UIText>
+                        </Button>
+                      )}
+                    </div>
+                  )
+                }
+
+                const req = row.request
                 const { applicant } = req
                 const displayName = getDisplayName(applicant)
                 const isUnprocessed = req.status === 'pending' && !req.respondedAt
@@ -861,7 +1031,7 @@ export function MembersPageClient({
                             <UIText as="div">@{applicant.username}</UIText>
                           )}
                           <UIText as="div" className="text-gray-600 text-xs mt-1">
-                            {statusLabel} ·{' '}
+                            Join request · {statusLabel} ·{' '}
                             {new Date(req.createdAt).toLocaleString()}
                           </UIText>
                           {req.activityRole && (

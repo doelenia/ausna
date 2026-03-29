@@ -3,6 +3,7 @@ import { isHumanPortfolio } from '@/types/portfolio'
 import {
   getCurrentUserPendingActivityRequest,
   getCurrentUserPendingCommunityRequest,
+  getCurrentUserPendingPortfolioInvitation,
 } from '@/app/portfolio/[idOrSlug]/actions'
 import { notFound, permanentRedirect } from 'next/navigation'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
@@ -41,8 +42,18 @@ export default async function SpacePortfolioPage({ params }: SpacePortfolioPageP
   const adminUser = await checkAdmin()
   const isAdmin = adminUser !== null
 
-  let hasPendingApplication = false
+  let hasPendingPortfolioInvitation = false
+  let pendingPortfolioInvitationType: 'member' | 'manager' | null = null
   if (user && !isHumanPortfolio(portfolio)) {
+    const invRes = await getCurrentUserPendingPortfolioInvitation(portfolio.id)
+    if (invRes.success && invRes.hasPending && invRes.invitationType) {
+      hasPendingPortfolioInvitation = true
+      pendingPortfolioInvitationType = invRes.invitationType
+    }
+  }
+
+  let hasPendingApplication = false
+  if (user && !isHumanPortfolio(portfolio) && !hasPendingPortfolioInvitation) {
     const hasCallToJoin = !!((portfolio.metadata as any)?.properties?.call_to_join)
     if (hasCallToJoin) {
       const res = await getCurrentUserPendingActivityRequest(portfolio.id)
@@ -51,7 +62,7 @@ export default async function SpacePortfolioPage({ params }: SpacePortfolioPageP
   }
 
   let hasPendingCommunityApplication = false
-  if (user && !isHumanPortfolio(portfolio)) {
+  if (user && !isHumanPortfolio(portfolio) && !hasPendingPortfolioInvitation) {
     const res = await getCurrentUserPendingCommunityRequest(portfolio.id)
     if (res.success && res.hasPending) hasPendingCommunityApplication = true
   }
@@ -66,6 +77,8 @@ export default async function SpacePortfolioPage({ params }: SpacePortfolioPageP
       isAdmin={isAdmin}
       hasPendingApplication={hasPendingApplication}
       hasPendingCommunityApplication={hasPendingCommunityApplication}
+      hasPendingPortfolioInvitation={hasPendingPortfolioInvitation}
+      pendingPortfolioInvitationType={pendingPortfolioInvitationType}
     />
   )
 }
