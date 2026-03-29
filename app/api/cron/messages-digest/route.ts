@@ -226,40 +226,16 @@ export async function GET(request: NextRequest) {
 
         emailsSent += 1
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': 'e7d925',
-        },
-        body: JSON.stringify({
-          sessionId: 'e7d925',
-          runId: 'post-send',
-          hypothesisId: 'L1',
-          location: 'app/api/cron/messages-digest/route.ts:139',
-          message: 'Digest email sent successfully; preparing to update message_digest',
-          data: {
-            userId,
-            portfolioId: row.id,
-            lastSentAtIso: messageDigest.last_sent_at as string | undefined,
-            hadMessageDigest: !!messageDigest,
+        const nextMetadata = {
+          ...(meta || {}),
+          properties: {
+            ...(meta?.properties || {}),
+            message_digest: {
+              ...messageDigest,
+              last_sent_at: new Date().toISOString(),
+            },
           },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {})
-      // #endregion agent log
-
-      const nextMetadata = {
-        ...(meta || {}),
-        properties: {
-          ...(meta?.properties || {}),
-          message_digest: {
-            ...messageDigest,
-            last_sent_at: new Date().toISOString(),
-          },
-        },
-      }
+        }
 
         const { error: updateError } = await supabase
           .from('portfolios')
@@ -267,29 +243,6 @@ export async function GET(request: NextRequest) {
           .eq('id', row.id)
 
         if (updateError) {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/fab1a5e4-0675-4ead-a1dd-862094e22f59', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Session-Id': 'e7d925',
-          },
-          body: JSON.stringify({
-            sessionId: 'e7d925',
-            runId: 'post-send',
-            hypothesisId: 'L2',
-            location: 'app/api/cron/messages-digest/route.ts:152',
-            message: 'Failed to update message_digest metadata after send',
-            data: {
-              userId,
-              portfolioId: row.id,
-              errorMessage: updateError.message ?? null,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {})
-        // #endregion agent log
-
           console.error('[messages-digest] Failed to update message_digest metadata', {
             userId,
             portfolioId: row.id,

@@ -148,6 +148,27 @@ export default async function SpaceMembersPage({ params, searchParams }: Members
     respondedAt: string | null
   }[] = []
 
+  let sentInvitations: {
+    id: string
+    invitee: {
+      id: string
+      username: string | null
+      name: string | null
+      avatar: string | null
+    }
+    inviter: {
+      id: string
+      username: string | null
+      name: string | null
+      avatar: string | null
+    }
+    status: string
+    invitation_type: string
+    role: string | null
+    createdAt: string
+    message: string | null
+  }[] = []
+
   if (canManage) {
     const { data: requestRows } = await supabase
       .from('portfolio_join_requests')
@@ -197,6 +218,73 @@ export default async function SpaceMembersPage({ params, searchParams }: Members
           respondedAt: (r.responded_at as string | null) ?? null,
         }
       }) || []
+
+    const { data: invitationRows } = await supabase
+      .from('portfolio_invitations')
+      .select('id, invitee_id, inviter_id, status, invitation_type, role, created_at, message')
+      .eq('portfolio_id', portfolio.id)
+      .order('created_at', { ascending: false })
+
+    const invitationUserIds = Array.from(
+      new Set(
+        (invitationRows || []).flatMap((row: any) => [row.invitee_id as string, row.inviter_id as string])
+      )
+    )
+    const invitationUserMap = new Map<
+      string,
+      { id: string; username: string | null; name: string | null; avatar: string | null }
+    >()
+
+    if (invitationUserIds.length > 0) {
+      const { data: userPortfolios } = await supabase
+        .from('portfolios')
+        .select('user_id, metadata')
+        .eq('type', 'human')
+        .in('user_id', invitationUserIds)
+
+      if (userPortfolios) {
+        userPortfolios.forEach((p: any) => {
+          const m = p.metadata as any
+          const b = m?.basic || {}
+          invitationUserMap.set(p.user_id as string, {
+            id: p.user_id as string,
+            username: m?.username || null,
+            name: b.name || m?.username || null,
+            avatar: b.avatar || m?.avatar_url || null,
+          })
+        })
+      }
+    }
+
+    sentInvitations =
+      (invitationRows || []).map((row: any) => {
+        const inviteeId = row.invitee_id as string
+        const inviterId = row.inviter_id as string
+        const invitee =
+          invitationUserMap.get(inviteeId) || {
+            id: inviteeId,
+            username: null,
+            name: null,
+            avatar: null,
+          }
+        const inviter =
+          invitationUserMap.get(inviterId) || {
+            id: inviterId,
+            username: null,
+            name: null,
+            avatar: null,
+          }
+        return {
+          id: row.id as string,
+          invitee,
+          inviter,
+          status: (row.status as string) || 'pending',
+          invitation_type: (row.invitation_type as string) || 'member',
+          role: (row.role as string | null) ?? null,
+          createdAt: row.created_at as string,
+          message: (row.message as string | null) ?? null,
+        }
+      }) || []
   }
 
   return (
@@ -218,6 +306,7 @@ export default async function SpaceMembersPage({ params, searchParams }: Members
         canManage={canManage}
         currentUserId={user?.id}
         joinRequests={joinRequests}
+        sentInvitations={sentInvitations}
         initialTab={initialTab}
         isExternalActivity={(portfolio.metadata as any)?.properties?.external === true}
       />
