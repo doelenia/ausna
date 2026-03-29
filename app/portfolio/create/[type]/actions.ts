@@ -50,6 +50,7 @@ export async function createPortfolio(
     const activityLocationOnlinePrivateRaw = formData.get(
       'activity_location_online_private'
     ) as string | null
+    const activityCallToJoinEnabledRaw = formData.get('activity_call_to_join_enabled') as string | null
     const activityCallToJoinDescriptionRaw = formData.get('activity_call_to_join_description') as string | null
     const activityCallToJoinJoinByRaw = formData.get('activity_call_to_join_join_by') as string | null
     const activityCallToJoinRequireApprovalRaw = formData.get('activity_call_to_join_require_approval') as string | null
@@ -319,8 +320,10 @@ export async function createPortfolio(
       }
     }
 
-    // Call-to-join: on when portfolio is not private and not external.
-    if (!isExternal && visibility !== 'private') {
+    // Call-to-join: ONLY when explicitly enabled by the create form.
+    // (Do not default to enabled just because the space is public.)
+    const callToJoinEnabled = activityCallToJoinEnabledRaw === 'true'
+    if (!isExternal && visibility !== 'private' && callToJoinEnabled) {
       const existingProperties: Record<string, any> = metadata.properties || {}
 
       let callToJoinRoles: Array<{ id: string; label: string; activityRole: string }> = [
@@ -477,8 +480,6 @@ export async function createPortfolio(
       metadata.properties = { ...activityProps, host_community_ids: resolvedHostCommunityIds }
     }
 
-    const firstHostId = resolvedHostProjectIds.length > 0 ? resolvedHostProjectIds[0] : null
-
     // Create portfolio
     const { data: portfolio, error: createError } = await supabase
       .from('portfolios')
@@ -488,7 +489,6 @@ export async function createPortfolio(
         user_id: user.id,
         metadata,
         visibility,
-        host_project_id: firstHostId,
       })
       .select()
       .single()

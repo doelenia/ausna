@@ -847,12 +847,8 @@ export async function updatePortfolio(
       updatePayload.visibility = visibilityRaw
     }
 
-    // For non-human portfolios, sync host_project_id from metadata.properties.host_project_ids (first)
-    if (portfolio.type !== 'human') {
-      const props = (updatedMetadata.properties || {}) as Record<string, any>
-      const ids = props.host_project_ids as string[] | undefined
-      updatePayload.host_project_id = Array.isArray(ids) && ids.length > 0 ? ids[0] : null
-    }
+    // NOTE: `portfolios.host_project_id` is legacy and restricted by DB constraints.
+    // Host relationships for spaces are stored only in `metadata.properties.host_project_ids`.
 
     // Update portfolio
     const { error: updateError } = await supabase
