@@ -416,6 +416,11 @@ export function CreateActivityForm({
       formData.append('visibility', isExternal ? 'public' : visibility)
       formData.append('project_status', projectStatus || '')
 
+      // Explicitly pass call-to-join enabled so the server doesn't default it on.
+      if (!isExternal && visibility !== 'private') {
+        formData.append('activity_call_to_join_enabled', allowOthersToJoin ? 'true' : 'false')
+      }
+
       // Call-to-join: only for non-external, when activity is public, and explicitly enabled.
       if (!isExternal && visibility !== 'private' && allowOthersToJoin) {
         if (callToJoinDescription.trim().length > 0) {
