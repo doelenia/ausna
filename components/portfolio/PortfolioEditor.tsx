@@ -253,6 +253,8 @@ export function PortfolioEditor({
   const [callToJoinConfig, setCallToJoinConfig] = useState<ActivityCallToJoinConfig | null>(
     initialCallToJoin
   )
+  const initialAllowOthersToJoin = Boolean(initialCallToJoin && initialCallToJoin.enabled !== false)
+  const [allowOthersToJoin, setAllowOthersToJoin] = useState<boolean>(initialAllowOthersToJoin)
   const initialOrgMembershipSuffixes: string = (() => {
     const raw = metadata?.properties?.org_membership?.email_suffixes
     if (!Array.isArray(raw)) return ''
@@ -303,6 +305,14 @@ export function PortfolioEditor({
     () => getAvailabilityValidationError(availabilityScheduleDraft || availabilitySchedule),
     [availabilityScheduleDraft, availabilitySchedule]
   )
+
+  useEffect(() => {
+    const activityProps = (portfolio.metadata as any)?.properties || {}
+    const isExternalActivity = isSpacePortfolio(portfolio) && activityProps.external === true
+    if (isExternalActivity || visibility === 'private') {
+      setAllowOthersToJoin(false)
+    }
+  }, [portfolio, visibility])
 
   useEffect(() => {
     if (!isSpacePortfolio(portfolio)) return
@@ -633,7 +643,7 @@ export function PortfolioEditor({
           }
 
         await updateActivityCallToJoin(portfolio.id, {
-          enabled: true,
+          enabled: allowOthersToJoin,
           description: cfg.description,
           joinBy: cfg.join_by ?? null,
           requireApproval: cfg.require_approval ?? true,
@@ -1006,6 +1016,93 @@ export function PortfolioEditor({
                   />
                 </div>
 
+                {/* Call to join (outside Advanced) */}
+                {!isExternalActivity && visibility !== 'private' && (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <UIText as="label" className="block" id="allow-others-to-join-label-edit">
+                        Allow others to join
+                      </UIText>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-labelledby="allow-others-to-join-label-edit"
+                        aria-checked={allowOthersToJoin}
+                        onClick={() => {
+                          setAllowOthersToJoin((prev) => {
+                            const next = !prev
+                            if (next) {
+                              setCallToJoinConfig((existing) => {
+                                if (existing) return { ...existing, enabled: true }
+                                return {
+                                  enabled: true,
+                                  description: 'Join us!',
+                                  join_by: null,
+                                  require_approval: true,
+                                  prompt: 'Why do you want to join?',
+                                  roles: [
+                                    { id: 'default-member', label: 'Member', activityRole: 'member' },
+                                  ],
+                                  join_by_auto_managed: true,
+                                }
+                              })
+                            }
+                            return next
+                          })
+                        }}
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                          allowOthersToJoin ? 'bg-blue-600' : 'bg-gray-200'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                            allowOthersToJoin ? 'translate-x-5' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    {allowOthersToJoin && (
+                      <div className="mt-2">
+                        <Card variant="subtle" padding="sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <UIText as="h3" className="mb-1">
+                                Call to join preview
+                              </UIText>
+                              <Content className="mb-1">
+                                {callToJoinConfig?.description || 'Join this portfolio.'}
+                              </Content>
+                              <UIText className="text-gray-600 text-xs">
+                                {callToJoinConfig?.join_by
+                                  ? `Join by: ${new Date(
+                                      callToJoinConfig.join_by
+                                    ).toLocaleString()}`
+                                  : 'No join-by date: applications close when the activity ends or is archived.'}
+                              </UIText>
+                              <UIText className="text-gray-600 text-xs mt-1">
+                                {callToJoinConfig?.require_approval ?? true
+                                  ? 'Requires approval'
+                                  : 'Auto-join'}
+                              </UIText>
+                            </div>
+                            <div className="flex-shrink-0">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => setShowCallToJoinModal(true)}
+                                disabled={loading}
+                              >
+                                <UIText>Edit</UIText>
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Advanced settings: keep activity-specific fields, but allow call-to-join for all */}
                 {!isExternalActivity && (
                 <div className="border border-gray-200 rounded-lg overflow-hidden mt-4">
@@ -1076,53 +1173,6 @@ export function PortfolioEditor({
                         </div>
                       )}
 
-                      {visibility !== 'private' && (
-                        <div>
-                          <UIText as="label" className="block mb-2">
-                            Call to join
-                          </UIText>
-                          <UIText as="p" className="text-xs text-gray-500 mb-2">
-                            Public portfolios show a call-to-join card so visitors can apply.
-                          </UIText>
-                          <div className="mt-2">
-                            <Card variant="subtle" padding="sm">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <UIText as="h3" className="mb-1">
-                                    Call to join preview
-                                  </UIText>
-                                  <Content className="mb-1">
-                                    {callToJoinConfig?.description || 'Join this portfolio.'}
-                                  </Content>
-                                  <UIText className="text-gray-600 text-xs">
-                                    {callToJoinConfig?.join_by
-                                      ? `Join by: ${new Date(
-                                          callToJoinConfig.join_by
-                                        ).toLocaleString()}`
-                                      : 'No join-by date: applications close when the activity ends or is archived.'}
-                                  </UIText>
-                                  <UIText className="text-gray-600 text-xs mt-1">
-                                    {callToJoinConfig?.require_approval ?? true
-                                      ? 'Requires approval'
-                                      : 'Auto-join'}
-                                  </UIText>
-                                </div>
-                                <div className="flex-shrink-0">
-                                  <Button
-                                    type="button"
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={() => setShowCallToJoinModal(true)}
-                                    disabled={loading}
-                                  >
-                                    <UIText>Edit</UIText>
-                                  </Button>
-                                </div>
-                              </div>
-                            </Card>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
