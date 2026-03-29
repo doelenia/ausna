@@ -940,30 +940,35 @@ function ConversationViewContent() {
           >
             {[...messages].reverse().map((message) => {
               const isSent = message.sender_id === currentUserId
-              const isFriendRequestMessage = message.text.includes('friend request')
-              const isApplyToJoinMessage =
-                message.text.includes('applied to join') &&
-                message.text.includes('(activity). Review:')
-              const applyToJoinMatch = isApplyToJoinMessage
-                ? message.text.match(/applied to join (.+?) \(activity\)\. Review: (\S+)/)
-                : null
-              const applyToJoinActivityName = applyToJoinMatch ? applyToJoinMatch[1].trim() : null
-              const applyToJoinReviewPath = applyToJoinMatch ? applyToJoinMatch[2].trim() : null
+              const messageText = (message.text || '') as string
+              const isFriendRequestMessage = messageText.includes('friend request')
+
+              // Support join-request messages for multiple portfolio kinds (activity/community/project/portfolio/space)
+              // Example backend formats:
+              // - "applied to join X (activity). Review: /portfolio/activities/<id>?tab=requests"
+              // - "applied to join X (community). Review: /portfolio/communities/<id>?tab=requests"
+              const applyToJoinMatch = messageText.match(
+                /applied to join (.+?) \(([^)]+)\)\. Review:\s*(\S+)/i
+              )
+              const isApplyToJoinMessage = !!applyToJoinMatch
+              const applyToJoinTargetName = applyToJoinMatch ? applyToJoinMatch[1].trim() : null
+              const applyToJoinTargetLabel = applyToJoinMatch ? applyToJoinMatch[2].trim() : null
+              const applyToJoinReviewPath = applyToJoinMatch ? applyToJoinMatch[3].trim() : null
               const isNoteCollaborationInviteMessage = message.text?.includes('invited you to collaborate') && !!message.note_id
               const noteCollaborationInvite = isNoteCollaborationInviteMessage && message.note_id
                 ? noteCollaborationInvites.get(message.note_id)
                 : null
-              const isInviteMessage = message.text.includes('invited you to join') || message.text.includes('invited you to become a manager')
-              const isManagerInviteMessage = message.text.includes('invited you to become a manager')
-              const isAcceptMessage = message.text.includes('accepted your invitation to join') || message.text.includes('accepted your invitation to become a manager')
-              const isManagerAcceptMessage = message.text.includes('accepted your invitation to become a manager')
+              const isInviteMessage = messageText.includes('invited you to join') || messageText.includes('invited you to become a manager')
+              const isManagerInviteMessage = messageText.includes('invited you to become a manager')
+              const isAcceptMessage = messageText.includes('accepted your invitation to join') || messageText.includes('accepted your invitation to become a manager')
+              const isManagerAcceptMessage = messageText.includes('accepted your invitation to become a manager')
               const isPortfolioInvitationMessage = isInviteMessage || isAcceptMessage
               const isPortfolioShareMessage = message.message_type === 'portfolio_share'
               const portfolioShareMatch = message.text?.match(/View details:\s*(\/portfolio\/([a-z-]+)\/([^\s]+))/i)
               const sharedPortfolioType = (portfolioShareMatch?.[2] || null) as Portfolio['type'] | null
               const sharedPortfolioIdentifier = portfolioShareMatch?.[3] || null
 
-              const activityUpdateMatch = message.text.match(
+              const activityUpdateMatch = messageText.match(
                 /updated the (?:time and location|time|location) for (.+?) \(activity\)\. View details: \/portfolio\/activities\/([a-f0-9-]+)/i
               )
               const isActivityUpdateMessage = !!activityUpdateMatch
@@ -974,7 +979,13 @@ function ConversationViewContent() {
                 const expectedInviterId = isInviteMessage ? message.sender_id : message.receiver_id
                 const expectedInviteeId = isInviteMessage ? message.receiver_id : message.sender_id
 
-                const match = message.text.match(/(?:invited you to (?:join|become a manager of)|accepted your invitation to (?:join|become a manager of))\s+(.+?)\s+\((project|community)\)/)
+                // Backend formats:
+                // - "invited you to join <name> (portfolio)"
+                // - "invited you to become a manager of <name> (portfolio)"
+                // - "accepted your invitation to join <name> (<typeLabel>)"
+                const match = messageText.match(
+                  /(?:invited you to (?:join|become a manager of)|accepted your invitation to (?:join|become a manager of))\s+(.+?)\s+\(([^)]+)\)/i
+                )
                 const portfolioNameFromMessage = match ? match[1].trim() : null
 
                 const matchingInvitations: Array<{ invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string }> = []
@@ -1112,14 +1123,14 @@ function ConversationViewContent() {
                         {isApplyToJoinMessage && !isSent && applyToJoinReviewPath ? (
                           <div className="flex flex-col gap-2">
                             <UIText as="p">
-                              Applied to join {applyToJoinActivityName || 'this activity'} (activity).
+                              Applied to join {applyToJoinTargetName || 'this'}{applyToJoinTargetLabel ? ` (${applyToJoinTargetLabel})` : ''}.
                             </UIText>
                             <Button variant="primary" size="sm" asLink href={applyToJoinReviewPath}>
                               <UIText>View requests</UIText>
                             </Button>
                           </div>
                         ) : (
-                          <UIText as="p">{message.text}</UIText>
+                          <UIText as="p">{messageText}</UIText>
                         )}
                         {(message as any).isOptimistic && (
                           <svg className="animate-spin h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

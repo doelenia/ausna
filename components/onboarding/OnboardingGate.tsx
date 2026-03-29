@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import type { OnboardingStatus } from '@/app/onboarding/actions'
 import {
   getOnboardingStatusForCurrentUser,
@@ -129,6 +129,7 @@ interface OnboardingGateProps {
 export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
   const pathname = usePathname()
   const isLegalPage = pathname?.startsWith('/legal/')
+  const router = useRouter()
 
   if (isLegalPage) {
     return null
@@ -197,7 +198,11 @@ export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
               <DoorOpen className="w-20 h-20 text-gray-300" strokeWidth={1.5} />
               <Button
                 variant="primary"
-                onClick={() => setDismissed(true)}
+                onClick={() => {
+                  // Close immediately, then refresh server-rendered content to reflect onboarding changes.
+                  setDismissed(true)
+                  router.refresh()
+                }}
               >
                 <UIText>Continue</UIText>
               </Button>
