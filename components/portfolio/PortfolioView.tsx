@@ -77,14 +77,34 @@ export function PortfolioView({
   hasPendingPortfolioInvitation = false,
   pendingPortfolioInvitationType = null,
 }: PortfolioViewProps) {
+  const membershipRoleFromServer = (() => {
+    if (!currentUserId) {
+      return { isManager: false, isMember: false }
+    }
+    if (
+      !isProjectPortfolio(portfolio) &&
+      !isCommunityPortfolio(portfolio) &&
+      !isActivityPortfolio(portfolio)
+    ) {
+      return { isManager: false, isMember: false }
+    }
+    const metadata = portfolio.metadata as any
+    const managers = metadata?.managers || []
+    const members = metadata?.members || []
+    return {
+      isManager: Array.isArray(managers) && managers.includes(currentUserId),
+      isMember: Array.isArray(members) && members.includes(currentUserId),
+    }
+  })()
+
   const [isEditing, setIsEditing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [showDescriptionPopup, setShowDescriptionPopup] = useState(false)
   const [displayDescription, setDisplayDescription] = useState(() => basic.description || '')
   const [showAvatarPopup, setShowAvatarPopup] = useState(false)
-  const [isOwner, setIsOwner] = useState(false)
-  const [isManager, setIsManager] = useState(false)
-  const [isMember, setIsMember] = useState(false)
+  const [isOwner, setIsOwner] = useState(() => serverIsOwner)
+  const [isManager, setIsManager] = useState(() => membershipRoleFromServer.isManager)
+  const [isMember, setIsMember] = useState(() => membershipRoleFromServer.isMember)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
   const [projects, setProjects] = useState<
@@ -1164,10 +1184,10 @@ export function PortfolioView({
               const joinByDate = config.join_by ? new Date(config.join_by) : null
               const requiresApproval = config.require_approval ?? true
 
-              const canSeeOwnerManagerCard = (isOwner || isManager)
+              // Include server isOwner so first paint matches leadership (client isOwner starts false).
+              const canSeeOwnerManagerCard = serverIsOwner || isOwner || isManager
               const canApplyAsVisitor =
-                !isOwner &&
-                !isManager &&
+                !canSeeOwnerManagerCard &&
                 !isMember &&
                 joinWindowOpen &&
                 !hasPendingPortfolioInvitation
