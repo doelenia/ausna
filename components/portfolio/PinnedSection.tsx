@@ -3,12 +3,12 @@
 import { useState, useEffect } from 'react'
 import { getPinnedItems } from '@/app/portfolio/[idOrSlug]/actions'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
-import { normalizePortfolioType } from '@/types/portfolio'
+import { normalizePinnedItemType, normalizePortfolioType } from '@/types/portfolio'
 import Link from 'next/link'
 import { Title, Content, UIText, UIButtonText } from '@/components/ui'
 
 interface PinnedItemWithData {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note'
   id: string
   portfolio?: {
     id: string
@@ -78,7 +78,7 @@ export function PinnedSection({ portfolioId }: PinnedSectionProps) {
     <div className="mb-6 pb-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {items.map((item) => {
-          if (item.type === 'portfolio' && item.portfolio) {
+          if (normalizePinnedItemType(item.type) === 'space' && item.portfolio) {
             const portfolio = item.portfolio
             return (
               <Link

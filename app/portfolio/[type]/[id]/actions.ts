@@ -5,6 +5,7 @@ import { requireAuth } from '@/lib/auth/requireAuth'
 import {
   Portfolio,
   isHumanPortfolio,
+  normalizePinnedItemType,
   PinnedItem,
   ActivityCallToJoinConfig,
   HumanAvailabilitySchedule,
@@ -23,6 +24,7 @@ import {
 import { Note } from '@/types/note'
 import { revalidatePortfolioPathsForIdAndSlug } from '@/lib/portfolio/revalidatePaths'
 import { getSpaceMembersUrl, getSpaceUrl } from '@/lib/portfolio/routes'
+import { deriveSpaceCapabilities } from '@/lib/portfolio/spaceCapabilities'
 
 interface UpdatePortfolioResult {
   success: boolean
@@ -36,7 +38,7 @@ interface DeletePortfolioResult {
 
 interface SubPortfolio {
   id: string
-  type: 'portfolio'
+  type: 'space'
   name: string
   avatar?: string
   slug: string
@@ -52,7 +54,7 @@ interface GetSubPortfoliosResult {
 }
 
 interface PinnedItemWithData {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note'
   id: string
   portfolio?: {
     id: string
@@ -103,7 +105,7 @@ interface UpdatePinnedListResult {
 }
 
 interface EligibleItem {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note'
   id: string
   name?: string
   text?: string
@@ -309,7 +311,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         const basic = getPortfolioBasic(p as Portfolio)
         return {
           id: p.id,
-          type: 'portfolio' as const,
+          type: 'space' as const,
           name: basic.name,
           avatar: basic.avatar,
           slug: p.slug,
@@ -340,7 +342,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
           const basic = getPortfolioBasic(p as Portfolio)
           return {
             id: p.id,
-            type: 'portfolio' as const,
+            type: 'space' as const,
             name: basic.name,
             avatar: basic.avatar,
             slug: p.slug,
@@ -1471,12 +1473,11 @@ export async function getCurrentUserPendingPortfolioInvitation(
   }
 }
 
-/** Noun used in DM copy for unified join flows (`activities` → activity, `space` → space, else portfolio). */
-function portfolioJoinRequestMessageLabel(portfolioType: string | null | undefined): string {
-  const t = String(portfolioType || '').toLowerCase()
-  if (t === 'activities') return 'activity'
-  if (t === 'space') return 'space'
-  return 'portfolio'
+/** Noun used in DM copy for unified join flows (scheduled spaces → “activity”, else “space”). */
+function portfolioJoinRequestMessageLabel(portfolio: Pick<Portfolio, 'type' | 'metadata'>): string {
+  const caps = deriveSpaceCapabilities(portfolio)
+  if (caps?.hasActivitySchedule) return 'activity'
+  return 'space'
 }
 
 /** Owner plus `metadata.managers`, deduped — for join / application alerts. */
@@ -1582,7 +1583,7 @@ export async function respondToActivityJoinRequest(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolioJoinRequestMessageLabel(portfolio.type)
+    const label = portfolioJoinRequestMessageLabel(portfolio)
     const text =
       message.trim().length > 0
         ? `Regarding your request to join ${portfolioName} (${label}): ${message.trim()}`
@@ -1679,7 +1680,7 @@ export async function applyToActivityCallToJoin(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolioJoinRequestMessageLabel(portfolio.type)
+    const label = portfolioJoinRequestMessageLabel(portfolio)
 
     // External activities: always auto-join. Non-external with approval: create pending request.
     if (!isExternal && callToJoin?.require_approval) {
@@ -1976,7 +1977,7 @@ export async function approveActivityJoinRequest(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolioJoinRequestMessageLabel(portfolio.type)
+    const label = portfolioJoinRequestMessageLabel(portfolio)
 
     await supabase.from('messages').insert({
       sender_id: user.id,
@@ -2076,7 +2077,7 @@ export async function rejectActivityJoinRequest(
 
     const basic = metadata?.basic || {}
     const portfolioName = (basic.name as string) || 'this portfolio'
-    const label = portfolioJoinRequestMessageLabel(portfolio.type)
+    const label = portfolioJoinRequestMessageLabel(portfolio)
 
     let text = `rejected your request to join ${portfolioName} (${label})`
     if (rejectionMessage && rejectionMessage.trim().length > 0) {
@@ -2185,7 +2186,7 @@ export async function applyToCommunityJoin(
 
     const basic = metadata?.basic || {}
     const communityName = (basic.name as string) || 'this portfolio'
-    const label = portfolioJoinRequestMessageLabel(portfolio.type)
+    const label = portfolioJoinRequestMessageLabel(portfolio)
     const requestsUrl = getSpaceMembersUrl((portfolio as { slug?: string }).slug || portfolioId, 'tab=requests')
     await notifyPortfolioLeadershipFromApplicant(
       supabase,
@@ -2289,7 +2290,7 @@ export async function rejectCommunityJoinRequest(
 }
 
 interface PinnedItemWithData {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note'
   id: string
   portfolio?: {
     id: string
@@ -2340,7 +2341,7 @@ interface UpdatePinnedListResult {
 }
 
 interface EligibleItem {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note'
   id: string
   name?: string
   text?: string
@@ -2396,7 +2397,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
     
     for (const item of pinned as PinnedItem[]) {
       // For human portfolios, only return notes (not portfolios)
-      if (item.type === 'portfolio' && !isHumanPortfolio(portfolioData)) {
+      if (normalizePinnedItemType(item.type) === 'space' && !isHumanPortfolio(portfolioData)) {
         const { data: pinnedPortfolio } = await supabase
           .from('portfolios')
           .select('*')
@@ -2408,7 +2409,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
           
           // Determine role if this is a human portfolio viewing pinned projects/communities
           let role: 'manager' | 'member' | undefined = undefined
-          if (userId && (pinnedPortfolio.type === 'projects' || pinnedPortfolio.type === 'community')) {
+          if (userId && !isHumanPortfolio(pinnedPortfolio as Portfolio)) {
             const pinnedMetadata = pinnedPortfolio.metadata as any
             const managers = pinnedMetadata?.managers || []
             const members = pinnedMetadata?.members || []
@@ -2421,7 +2422,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
           }
           
           items.push({
-            type: 'portfolio',
+            type: 'space',
             id: item.id,
             portfolio: {
               id: pinnedPortfolio.id,
@@ -2484,7 +2485,7 @@ export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItem
  */
 export async function addToPinned(
   portfolioId: string,
-  itemType: 'portfolio' | 'note',
+  itemType: 'space' | 'note',
   itemId: string
 ): Promise<AddToPinnedResult> {
   try {
@@ -2573,7 +2574,7 @@ export async function addToPinned(
  */
 export async function removeFromPinned(
   portfolioId: string,
-  itemType: 'portfolio' | 'note',
+  itemType: 'space' | 'note',
   itemId: string
 ): Promise<RemoveFromPinnedResult> {
   try {
@@ -2799,7 +2800,7 @@ export async function getEligibleItemsForPinning(portfolioId: string): Promise<G
         for (const subPortfolio of allSubPortfolios) {
           const isPinned = pinnedIds.has(`portfolio:${subPortfolio.id}`)
           eligiblePortfolios.push({
-            type: 'portfolio',
+            type: 'space',
             id: subPortfolio.id,
             name: subPortfolio.name,
             avatar: subPortfolio.avatar,

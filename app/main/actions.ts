@@ -9,11 +9,11 @@ import {
   serializeBloomFilter,
   markNotesAsSeen,
 } from '@/lib/feed/bloom-filter'
-import { Portfolio, isCommunityPortfolio } from '@/types/portfolio'
+import { DB_NON_HUMAN_TYPES, Portfolio } from '@/types/portfolio'
 import { NoteSource } from '@/types/note'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 
-export type FeedType = 'all' | 'friends' | 'community'
+export type FeedType = 'all' | 'friends' | 'space'
 
 interface GetFeedNotesResult {
   success: boolean
@@ -42,9 +42,9 @@ interface GetFeedItemsResult {
   error?: string
 }
 
-interface GetUserCommunitiesResult {
+interface GetUserSpacesResult {
   success: boolean
-  communities?: Array<{ id: string; name: string; slug: string }>
+  spaces?: Array<{ id: string; name: string; slug: string }>
   error?: string
 }
 
@@ -253,11 +253,11 @@ async function getMemberPortfolioIds(
 
   const ownedIds = (ownedPortfolios || []).map((p: any) => p.id)
 
-  // Get all project and community portfolios
+  // Get all non-human (space) portfolios
   const { data: allPortfolios } = await supabase
     .from('portfolios')
     .select('id, metadata')
-    .in('type', ['projects', 'community'])
+    .in('type', [...DB_NON_HUMAN_TYPES])
 
   // Filter portfolios where user is a member
   const memberIds: string[] = []
@@ -274,26 +274,26 @@ async function getMemberPortfolioIds(
 }
 
 /**
- * Get community member IDs for a specific community
+ * Get member user IDs for a specific space portfolio
  */
-async function getCommunityMemberIds(
-  communityId: string,
+async function getSpaceMemberIds(
+  spaceId: string,
   supabase: any
 ): Promise<string[]> {
-  const { data: community } = await supabase
+  const { data: spaceRow } = await supabase
     .from('portfolios')
     .select('user_id, metadata')
-    .eq('id', communityId)
-    .in('type', ['portfolio', 'space'])
+    .eq('id', spaceId)
+    .in('type', [...DB_NON_HUMAN_TYPES])
     .maybeSingle()
 
-  if (!community) {
+  if (!spaceRow) {
     return []
   }
 
-  const memberIds: string[] = [community.user_id] // Owner is always a member
+  const memberIds: string[] = [spaceRow.user_id] // Owner is always a member
 
-  const metadata = community.metadata as any
+  const metadata = spaceRow.metadata as any
   const members = metadata?.members || []
   if (Array.isArray(members)) {
     memberIds.push(...members)
@@ -303,53 +303,52 @@ async function getCommunityMemberIds(
 }
 
 /**
- * Get all communities where user is a member (for "all" feed)
- * Returns map of community ID to community info
+ * Get all spaces where user is a member (for "all" feed)
+ * Returns map of space ID to space info
  */
-async function getUserCommunitiesMap(
+async function getUserSpacesMap(
   userId: string,
   supabase: any
 ): Promise<Map<string, { id: string; name: string; members: string[] }>> {
-  // Get all communities where user is a member
-  const { data: allCommunities } = await supabase
+  const { data: allSpaces } = await supabase
     .from('portfolios')
     .select('id, user_id, metadata')
-    .in('type', ['portfolio', 'space'])
+    .in('type', [...DB_NON_HUMAN_TYPES])
 
-  const communitiesMap = new Map<string, { id: string; name: string; members: string[] }>()
+  const spacesMap = new Map<string, { id: string; name: string; members: string[] }>()
 
-  allCommunities?.forEach((community: any) => {
-    const metadata = community.metadata as any
+  allSpaces?.forEach((row: any) => {
+    const metadata = row.metadata as any
     const members = metadata?.members || []
     const isUserMember =
-      community.user_id === userId ||
+      row.user_id === userId ||
       (Array.isArray(members) && members.includes(userId))
 
     if (isUserMember) {
-      const basic = getPortfolioBasic(community as Portfolio)
-      communitiesMap.set(community.id, {
-        id: community.id,
+      const basic = getPortfolioBasic(row as Portfolio)
+      spacesMap.set(row.id, {
+        id: row.id,
         name: basic.name,
-        members: [community.user_id, ...(Array.isArray(members) ? members : [])],
+        members: [row.user_id, ...(Array.isArray(members) ? members : [])],
       })
     }
   })
 
-  return communitiesMap
+  return spacesMap
 }
 
 /**
- * Get all community member IDs (for "all" feed)
+ * Get all space member IDs (for "all" feed)
  */
-async function getAllCommunityMemberIds(
+async function getAllSpaceMemberIds(
   userId: string,
   supabase: any
 ): Promise<string[]> {
-  const communitiesMap = await getUserCommunitiesMap(userId, supabase)
+  const spacesMap = await getUserSpacesMap(userId, supabase)
   const allMemberIds: string[] = []
 
-  communitiesMap.forEach((community) => {
-    allMemberIds.push(...community.members)
+  spacesMap.forEach((space) => {
+    allMemberIds.push(...space.members)
   })
 
   return Array.from(new Set(allMemberIds))
@@ -357,13 +356,13 @@ async function getAllCommunityMemberIds(
 
 /**
  * Determine note source for "all" feed
- * Priority: 1. self (show nothing), 2. friend, 3. subscribed, 4. community
+ * Priority: 1. self (show nothing), 2. friend, 3. subscribed, 4. shared space
  */
 async function determineNoteSource(
   note: any,
   userId: string,
   friendIds: string[],
-  communitiesMap: Map<string, { id: string; name: string; members: string[] }>,
+  spacesMap: Map<string, { id: string; name: string; members: string[] }>,
   subscribedPortfolioIds: string[],
   supabase: any
 ): Promise<NoteSource> {
@@ -385,13 +384,13 @@ async function determineNoteSource(
     return { type: 'subscribed' }
   }
 
-  // Priority 4: Community member
-  for (const [communityId, community] of communitiesMap.entries()) {
-    if (community.members.includes(noteOwnerId)) {
+  // Priority 4: Member of a shared space
+  for (const [, space] of spacesMap.entries()) {
+    if (space.members.includes(noteOwnerId)) {
       return {
-        type: 'community',
-        communityName: community.name,
-        communityId: community.id,
+        type: 'space',
+        spaceName: space.name,
+        spaceId: space.id,
       }
     }
   }
@@ -404,7 +403,7 @@ async function determineNoteSource(
  */
 export async function getFeedNotes(
   feedType: FeedType,
-  communityId: string | null = null,
+  spaceId: string | null = null,
   offset: number = 0,
   limit: number = 10
 ): Promise<GetFeedNotesResult> {
@@ -526,15 +525,15 @@ export async function getFeedNotes(
       }))
       const enriched = await enrichNotesWithAuthorProfiles(notesWithReferences, supabase, user.id)
       return { success: true, notes: enriched, hasMore }
-    } else if (feedType === 'community') {
-      // Get notes from community members
-      if (!communityId) {
+    } else if (feedType === 'space') {
+      // Get notes from members of this space
+      if (!spaceId) {
         return {
           success: false,
-          error: 'communityId is required for community feed',
+          error: 'spaceId is required for space feed',
         }
       }
-      const memberIds = await getCommunityMemberIds(communityId, supabase)
+      const memberIds = await getSpaceMemberIds(spaceId, supabase)
       if (memberIds.length === 0) {
         return { success: true, notes: [], hasMore: false }
       }
@@ -542,8 +541,8 @@ export async function getFeedNotes(
     } else {
       // "all" feed: friends + community members + subscribed portfolios + member portfolios
       const friendIds = await getFriendIds(user.id, supabase)
-      const communitiesMap = await getUserCommunitiesMap(user.id, supabase)
-      const communityMemberIds = await getAllCommunityMemberIds(user.id, supabase)
+      const spacesMap = await getUserSpacesMap(user.id, supabase)
+      const spaceMemberIds = await getAllSpaceMemberIds(user.id, supabase)
       const subscribedPortfolioIds = await getSubscribedPortfolioIds(
         user.id,
         supabase
@@ -552,7 +551,7 @@ export async function getFeedNotes(
 
       // Combine all relevant user IDs (for "owner is visible")
       const allUserIds = Array.from(
-        new Set([...friendIds, ...communityMemberIds])
+        new Set([...friendIds, ...spaceMemberIds])
       )
 
       // For portfolio-based notes, we need to check if any assigned_portfolio matches.
@@ -654,7 +653,7 @@ export async function getFeedNotes(
         const collaboratorIds = (note.collaborator_account_ids || []) as string[]
         const isCollaborator = collaboratorIds.includes(user.id)
 
-        // Check if note owner is a friend or community member
+        // Check if note owner is a friend or space member
         const isOwnerVisible = allUserIds.includes(noteOwnerId)
 
         // Check if note is assigned to a portfolio the user subscribes to or is a member of
@@ -680,7 +679,7 @@ export async function getFeedNotes(
             note,
             user.id,
             friendIds,
-            communitiesMap,
+            spacesMap,
             subscribedPortfolioIds,
             supabase
           )
@@ -710,7 +709,7 @@ export async function getFeedNotes(
       }
     }
 
-    // For friends and community feeds
+    // For friends and space feeds
     const { data: notes, error } = await notesQuery
 
     if (error) {
@@ -755,7 +754,7 @@ export async function getFeedItemsForUserId(
   supabase: any,
   userId: string,
   feedType: FeedType,
-  communityId: string | null = null,
+  spaceId: string | null = null,
   offset: number = 0,
   limit: number = 10
 ): Promise<GetFeedItemsResult> {
@@ -763,7 +762,7 @@ export async function getFeedItemsForUserId(
     const poolTarget = offset + limit + 1
     const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
-    const portfolioTypes: Array<'portfolio'> = ['portfolio']
+    const nonHumanTypes = [...DB_NON_HUMAN_TYPES]
 
     if (feedType === 'friends') {
       const friendIds = await getFriendIds(userId, supabase)
@@ -793,7 +792,7 @@ export async function getFeedItemsForUserId(
           ? supabase
               .from('portfolios')
               .select('*')
-              .in('type', portfolioTypes)
+              .in('type', nonHumanTypes)
               .in('user_id', friendIds)
               .order('created_at', { ascending: false })
               .limit(poolLimit)
@@ -833,11 +832,11 @@ export async function getFeedItemsForUserId(
       return { success: true, items: page, hasMore }
     }
 
-    if (feedType === 'community') {
-      if (!communityId) {
-        return { success: false, error: 'communityId is required for community feed' }
+    if (feedType === 'space') {
+      if (!spaceId) {
+        return { success: false, error: 'spaceId is required for space feed' }
       }
-      const memberIds = await getCommunityMemberIds(communityId, supabase)
+      const memberIds = await getSpaceMemberIds(spaceId, supabase)
       if (memberIds.length === 0) {
         return { success: true, items: [], hasMore: false }
       }
@@ -855,7 +854,7 @@ export async function getFeedItemsForUserId(
         supabase
           .from('portfolios')
           .select('*')
-          .in('type', portfolioTypes)
+          .in('type', nonHumanTypes)
           .in('user_id', memberIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit),
@@ -889,14 +888,14 @@ export async function getFeedItemsForUserId(
       return { success: true, items: page, hasMore }
     }
 
-    // "all" feed: reuse existing visibility logic for notes; add portfolio creations by friends/community members.
+    // "all" feed: reuse existing visibility logic for notes; add space creations by friends / space members.
     const friendIds = await getFriendIds(userId, supabase)
-    const communitiesMap = await getUserCommunitiesMap(userId, supabase)
-    const communityMemberIds = await getAllCommunityMemberIds(userId, supabase)
+    const spacesMap = await getUserSpacesMap(userId, supabase)
+    const spaceMemberIds = await getAllSpaceMemberIds(userId, supabase)
     const subscribedPortfolioIds = await getSubscribedPortfolioIds(userId, supabase)
     const memberPortfolioIds = await getMemberPortfolioIds(userId, supabase)
 
-    const allUserIds = Array.from(new Set([userId, ...friendIds, ...communityMemberIds]))
+    const allUserIds = Array.from(new Set([userId, ...friendIds, ...spaceMemberIds]))
     const allPortfolioIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds]))
 
     if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
@@ -972,7 +971,7 @@ export async function getFeedItemsForUserId(
     const { data: portfoliosData } = await supabase
       .from('portfolios')
       .select('*')
-      .in('type', portfolioTypes)
+      .in('type', nonHumanTypes)
       .in('user_id', allUserIds)
       .order('created_at', { ascending: false })
       .limit(poolLimit)
@@ -1005,7 +1004,7 @@ export async function getFeedItemsForUserId(
           note,
           userId,
           friendIds,
-          communitiesMap,
+          spacesMap,
           subscribedPortfolioIds,
           supabase
         )
@@ -1039,7 +1038,7 @@ export async function getFeedItemsForUserId(
  */
 export async function getFeedItems(
   feedType: FeedType,
-  communityId: string | null = null,
+  spaceId: string | null = null,
   offset: number = 0,
   limit: number = 10
 ): Promise<GetFeedItemsResult> {
@@ -1081,7 +1080,7 @@ export async function getFeedItems(
       }
     }
 
-    return await getFeedItemsForUserId(supabase, user.id, feedType, communityId, offset, limit)
+    return await getFeedItemsForUserId(supabase, user.id, feedType, spaceId, offset, limit)
   } catch (error: any) {
     return { success: false, error: error.message || 'An unexpected error occurred' }
   }
@@ -1118,50 +1117,47 @@ export async function markNotesAsSeenAction(
 }
 
 /**
- * Get all communities the user is a member of
+ * Get all spaces the user is a member of (for feed tabs, etc.)
  */
-export async function getUserCommunities(): Promise<GetUserCommunitiesResult> {
+export async function getUserSpaces(): Promise<GetUserSpacesResult> {
   try {
     const { user, supabase } = await requireAuth()
 
-    // Get all community portfolios
-    const { data: allCommunities, error } = await supabase
+    const { data: allSpaces, error } = await supabase
       .from('portfolios')
       .select('id, user_id, slug, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .order('created_at', { ascending: false })
 
     if (error) {
       return {
         success: false,
-        error: error.message || 'Failed to fetch communities',
+        error: error.message || 'Failed to fetch spaces',
       }
     }
 
-    // Filter communities where user is a member
-    const userCommunities: Array<{ id: string; name: string; slug: string }> =
-      []
+    const userSpaces: Array<{ id: string; name: string; slug: string }> = []
 
-    allCommunities?.forEach((community: any) => {
-      const metadata = community.metadata as any
+    allSpaces?.forEach((row: any) => {
+      const metadata = row.metadata as any
       const members = metadata?.members || []
       const basic = metadata?.basic || {}
       const isUserMember =
-        community.user_id === user.id ||
+        row.user_id === user.id ||
         (Array.isArray(members) && members.includes(user.id))
 
       if (isUserMember) {
-        userCommunities.push({
-          id: community.id,
-          name: basic.name || 'Unnamed Community',
-          slug: community.slug,
+        userSpaces.push({
+          id: row.id,
+          name: basic.name || 'Unnamed space',
+          slug: row.slug,
         })
       }
     })
 
     return {
       success: true,
-      communities: userCommunities,
+      spaces: userSpaces,
     }
   } catch (error: any) {
     return {
@@ -1169,5 +1165,16 @@ export async function getUserCommunities(): Promise<GetUserCommunitiesResult> {
       error: error.message || 'An unexpected error occurred',
     }
   }
+}
+
+/** @deprecated Use getUserSpaces */
+export async function getUserCommunities(): Promise<{
+  success: boolean
+  communities?: Array<{ id: string; name: string; slug: string }>
+  error?: string
+}> {
+  const r = await getUserSpaces()
+  if (!r.success) return r
+  return { success: true, communities: r.spaces }
 }
 

@@ -10,6 +10,7 @@ import {
   extractAdditionalTopicsFromAsks,
 } from '@/lib/indexing/vectors'
 import { cleanupPropertyIndexes } from '@/lib/indexing/property-processing'
+import { normalizePortfolioType } from '@/types/portfolio'
 
 /**
  * Background API route for indexing notes
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
         .in('id', assignedPortfolios)
       
       const assignedProjectIds = (portfolios || [])
-        .filter((p) => p.type === 'portfolio')
+        .filter((p) => normalizePortfolioType(p.type) === 'space')
         .map((p) => p.id)
 
       // Get human portfolio of note owner

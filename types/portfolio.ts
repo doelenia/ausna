@@ -4,23 +4,19 @@ import type { ActivityLocationValue } from '@/lib/location'
 export type PortfolioVisibility = 'public' | 'private'
 
 /**
- * Base portfolio types that all portfolio types extend
+ * Canonical portfolio discriminator: person profile vs shared space.
+ * Legacy DB values (`portfolio`, `community`, `activities`, `projects`) normalize to `space`.
  */
-/**
- * Canonical portfolio discriminator in application logic (non-human is always `portfolio`).
- *
- * The database may use `space` for non-human rows; `normalizePortfolioType` maps that to `portfolio`.
- * Legacy DB values (projects/community/activities) map to `portfolio`.
- */
-export type PortfolioType = 'human' | 'portfolio'
+export type PortfolioType = 'human' | 'space'
 
 /** Values that may appear on `portfolios.type` from the database */
-export type DbPortfolioType =
-  | PortfolioType
-  | 'space'
-  | LegacyNonHumanPortfolioType
+export type DbPortfolioType = PortfolioType
 
-export type LegacyNonHumanPortfolioType = 'projects' | 'community' | 'activities'
+/**
+ * Legacy DB non-human subtype values are no longer expected after the backfill
+ * that normalizes non-human portfolios to `type = 'space'`.
+ */
+export type LegacyNonHumanPortfolioType = never
 
 export function normalizePortfolioType(
   type: string | null | undefined
@@ -28,23 +24,24 @@ export function normalizePortfolioType(
   if (!type) return null
   const t = String(type).toLowerCase()
   if (t === 'human') return 'human'
-  if (t === 'portfolio' || t === 'space') return 'portfolio'
-  // Backward compatibility while DB migration is pending
-  if (t === 'projects' || t === 'community' || t === 'activities') return 'portfolio'
+  if (
+    t === 'portfolio' ||
+    t === 'space' ||
+    t === 'projects' ||
+    t === 'community' ||
+    t === 'activities'
+  ) {
+    return 'space'
+  }
   return null
 }
 
 /**
  * DB `type` values that mean non-human (for Supabase `.in('type', …)`).
- * Do not include `projects` — that enum label was renamed to `portfolio` in
- * unify_non_human_portfolio_types.sql; passing `projects` makes Postgres reject the query.
+ * After `migrations/20260329_non_human_portfolios_to_space.sql` (or equivalent backfill),
+ * rows are expected to be `space` only.
  */
-export const DB_NON_HUMAN_TYPES: readonly string[] = [
-  'portfolio',
-  'space',
-  'community',
-  'activities',
-]
+export const DB_NON_HUMAN_TYPES: readonly string[] = ['space']
 
 /**
  * Basic metadata fields shared by all portfolios
@@ -57,11 +54,22 @@ export interface PortfolioBasicMetadata {
 }
 
 /**
- * Pinned item structure
+ * Pinned item: link to another space portfolio or a note.
+ * Stored `type` may be legacy `"portfolio"`; use `normalizePinnedItemType`.
  */
 export interface PinnedItem {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note' | 'portfolio'
   id: string
+}
+
+export function normalizePinnedItemType(
+  t: string | null | undefined
+): 'space' | 'note' | null {
+  if (!t) return null
+  const s = String(t).toLowerCase()
+  if (s === 'note') return 'note'
+  if (s === 'space' || s === 'portfolio') return 'space'
+  return null
 }
 
 /**
@@ -155,7 +163,7 @@ export interface HumanPortfolioMetadata extends PortfolioMetadata {
   location?: string
   availability?: string
   owned_projects?: string[] // Array of project portfolio IDs, ordered by most recent activity (most recent first)
-  joined_community?: string // Community portfolio ID that this human has joined
+  joined_community?: string // Space portfolio ID that this human has joined
   properties?: HumanPortfolioProperties
   [key: string]: any
 }
@@ -299,7 +307,7 @@ export interface HumanPortfolio extends BasePortfolio {
 }
 
 export interface PortfolioEntity extends BasePortfolio {
-  type: 'portfolio' | 'space' | LegacyNonHumanPortfolioType
+  type: 'space'
   metadata: PortfolioEntityMetadata
 }
 
@@ -315,30 +323,36 @@ export function isHumanPortfolio(portfolio: Portfolio): portfolio is HumanPortfo
   return normalizePortfolioType(portfolio.type) === 'human'
 }
 
+/** Non-human portfolio (shared space). */
+export function isSpacePortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
+  return normalizePortfolioType(portfolio.type) === 'space'
+}
+
+/** @deprecated Use isSpacePortfolio */
 export function isPortfolioEntity(portfolio: Portfolio): portfolio is PortfolioEntity {
-  return normalizePortfolioType(portfolio.type) === 'portfolio'
+  return isSpacePortfolio(portfolio)
 }
 
 // ---------------------------------------------------------------------------
-// Backward compatible type guards (to be removed after full de-typing refactor)
+// Backward compatible type guards (non-human = space)
 // ---------------------------------------------------------------------------
 export function isProjectPortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
-  return normalizePortfolioType(portfolio.type) === 'portfolio'
+  return isSpacePortfolio(portfolio)
 }
 
 export function isActivityPortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
-  return normalizePortfolioType(portfolio.type) === 'portfolio'
+  return isSpacePortfolio(portfolio)
 }
 
 export function isCommunityPortfolio(portfolio: Portfolio): portfolio is PortfolioEntity {
-  return normalizePortfolioType(portfolio.type) === 'portfolio'
+  return isSpacePortfolio(portfolio)
 }
 
 /**
  * Portfolio creation input type
  */
 export interface CreatePortfolioInput {
-  type: 'portfolio' | 'space'
+  type: 'space'
   name: string
   avatar?: string // Optional avatar URL
 }
@@ -365,4 +379,3 @@ export interface PortfolioSearchOptions {
   order_by?: 'created_at' | 'updated_at' | 'name'
   order?: 'asc' | 'desc'
 }
-

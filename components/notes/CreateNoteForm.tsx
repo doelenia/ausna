@@ -2,12 +2,7 @@
 
 import { useState, useRef, useEffect, Fragment, useMemo } from 'react'
 import { createNote } from '@/app/notes/actions'
-import {
-  Portfolio,
-  isProjectPortfolio,
-  isActivityPortfolio,
-  isCommunityPortfolio,
-} from '@/types/portfolio'
+import { Portfolio, DB_NON_HUMAN_TYPES, isSpacePortfolio } from '@/types/portfolio'
 import type { NoteVisibility } from '@/types/note'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -146,9 +141,7 @@ export function CreateNoteForm({
     const portfolio = effectivePortfolios.find((p) => p.id === id)
     return (
       portfolio &&
-      (isProjectPortfolio(portfolio) ||
-        isActivityPortfolio(portfolio) ||
-        isCommunityPortfolio(portfolio))
+      isSpacePortfolio(portfolio)
     )
   })
 
@@ -276,23 +269,15 @@ export function CreateNoteForm({
           return
         }
 
-        const { data: allProjects } = await supabase
+        const { data: allSpaces } = await supabase
           .from('portfolios')
           .select('*')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
-        const { data: allActivities } = await supabase
-          .from('portfolios')
-          .select('*')
-          .in('type', ['portfolio', 'space'])
-          .order('created_at', { ascending: false })
-
-        const { data: allCommunities } = await supabase
-          .from('portfolios')
-          .select('*')
-          .in('type', ['portfolio', 'space'])
-          .order('created_at', { ascending: false })
+        const allProjects = allSpaces
+        const allActivities = allSpaces
+        const allCommunities = allSpaces
 
         const projects = (allProjects || [])
           .filter((p: any) => {
@@ -307,7 +292,7 @@ export function CreateNoteForm({
             const isActive = status !== 'archived'
             return isMemberOrManager && isActive
           })
-          .map((p: any) => ({ ...p, type: 'projects' as const } as Portfolio))
+          .map((p: any) => ({ ...p, type: 'space' as const } as Portfolio))
 
         const projectNameById = new Map<string, string>()
         ;(allProjects || []).forEach((p: any) => {
@@ -339,7 +324,7 @@ export function CreateNoteForm({
             const effectiveEnd = end ?? start
             return effectiveEnd >= now
           })
-          .map((p: any) => ({ ...p, type: 'activities' as const } as Portfolio))
+          .map((p: any) => ({ ...p, type: 'space' as const } as Portfolio))
 
         const communities = (allCommunities || [])
           .filter((p: any) => {
@@ -351,7 +336,7 @@ export function CreateNoteForm({
             const isMember = Array.isArray(members) && members.includes(authUser.id)
             return isOwner || isManager || isMember
           })
-          .map((p: any) => ({ ...p, type: 'community' as const } as Portfolio))
+          .map((p: any) => ({ ...p, type: 'space' as const } as Portfolio))
 
         setAssignableProjects(projects)
         setAssignableActivities(activities)
@@ -1683,9 +1668,7 @@ export function CreateNoteForm({
         const context = effectivePortfolios.find(
           (p) =>
             p.id === selectedContextId &&
-            (isProjectPortfolio(p) ||
-              isActivityPortfolio(p) ||
-              isCommunityPortfolio(p))
+            isSpacePortfolio(p)
         )
         if (!context) return null
         const basic = getPortfolioBasic(context)
@@ -1812,7 +1795,7 @@ export function CreateNoteForm({
                               <StickerAvatar
                                 src={basic.avatar}
                                 alt={basic.name}
-                                type="projects"
+                                type="space"
                                 size={72}
                                 emoji={metadata?.basic?.emoji}
                                 name={basic.name}
@@ -1860,7 +1843,7 @@ export function CreateNoteForm({
                               <StickerAvatar
                                 src={basic.avatar}
                                 alt={basic.name}
-                                type="activities"
+                                type="space"
                                 size={72}
                                 emoji={metadata?.basic?.emoji}
                                 name={basic.name}
@@ -1917,7 +1900,7 @@ export function CreateNoteForm({
                               <StickerAvatar
                                 src={basic.avatar}
                                 alt={basic.name}
-                                type="community"
+                                type="space"
                                 size={72}
                                 emoji={metadata?.basic?.emoji}
                                 name={basic.name}

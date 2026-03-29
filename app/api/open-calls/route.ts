@@ -7,32 +7,35 @@ import { enrichNotesWithAuthorProfiles } from '@/app/main/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { getFeedOpenCallsForUserId } from '@/lib/open-calls/feedOpenCallsForUser'
 
-type OpenCallsContext = 'feed' | 'human' | 'portfolio'
+type OpenCallsContext = 'feed' | 'human' | 'space'
 
 /**
  * GET /api/open-calls
  * Query params:
- *   - context: 'feed' | 'human' | 'portfolio'
- *   - portfolioId: required when context is 'human' or 'portfolio'
+ *   - context: 'feed' | 'human' | 'space' (legacy: portfolio → space)
+ *   - portfolioId: required when context is 'human' or 'space'
  *   - limit: number (default 10)
  */
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const context = searchParams.get('context') as OpenCallsContext | null
+    const rawContext = searchParams.get('context')
+    const normalized =
+      rawContext === 'portfolio' ? 'space' : rawContext
+    const context = normalized as OpenCallsContext | null
     const portfolioId = searchParams.get('portfolioId')
     const limit = parseInt(searchParams.get('limit') || '10', 10)
 
-    if (!context || !['feed', 'human', 'portfolio'].includes(context)) {
+    if (!context || !['feed', 'human', 'space'].includes(context)) {
       return NextResponse.json(
-        { error: 'Invalid context. Must be "feed", "human", or "portfolio"' },
+        { error: 'Invalid context. Must be "feed", "human", or "space"' },
         { status: 400 }
       )
     }
 
-    if ((context === 'human' || context === 'portfolio') && !portfolioId) {
+    if ((context === 'human' || context === 'space') && !portfolioId) {
       return NextResponse.json(
-        { error: 'portfolioId is required for human and portfolio context' },
+        { error: 'portfolioId is required for human and space context' },
         { status: 400 }
       )
     }

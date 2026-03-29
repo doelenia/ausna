@@ -9,7 +9,7 @@ import { uploadNoteImage } from '@/lib/storage/note-images-server'
 import { fetchUrlMetadata } from '@/lib/notes/url-metadata'
 import { canCreateNoteInPortfolio, canRemoveNoteFromPortfolio, canAnnotateNote, canCreateResourceInPortfolio } from '@/lib/notes/helpers'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
-import type { Portfolio } from '@/types/portfolio'
+import { normalizePortfolioType, type Portfolio } from '@/types/portfolio'
 
 interface CreateNoteResult {
   success: boolean
@@ -937,10 +937,10 @@ export async function addNoteToPortfolio(
       }
     }
 
-    if (portfolio.type !== 'projects') {
+    if (normalizePortfolioType(portfolio.type) !== 'space') {
       return {
         success: false,
-        error: 'Note must be assigned to a project (not human or community portfolio)',
+        error: 'Note must be assigned to a space (not a human profile)',
       }
     }
 

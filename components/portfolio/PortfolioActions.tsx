@@ -3,7 +3,14 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Portfolio, isHumanPortfolio, isProjectPortfolio, isCommunityPortfolio, isActivityPortfolio } from '@/types/portfolio'
+import {
+  Portfolio,
+  isHumanPortfolio,
+  isProjectPortfolio,
+  isCommunityPortfolio,
+  isActivityPortfolio,
+  DB_NON_HUMAN_TYPES,
+} from '@/types/portfolio'
 import { getPortfolioUrl } from '@/lib/portfolio/routes'
 import { Button, UIText, Dropdown, DropdownItem, Card } from '@/components/ui'
 import { FriendButton } from './FriendButton'
@@ -113,13 +120,13 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
         const { data: allCommunities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
         if (!allProjects) {

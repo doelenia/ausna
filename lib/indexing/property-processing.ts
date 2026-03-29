@@ -7,7 +7,13 @@ import {
   extractAdditionalTopicsFromAsks,
 } from './vectors'
 import { updateUserInterests } from './interest-tracking'
-import { ProjectPortfolioMetadata, HumanPortfolioMetadata, ActivityPortfolioMetadata } from '@/types/portfolio'
+import {
+  ProjectPortfolioMetadata,
+  HumanPortfolioMetadata,
+  ActivityPortfolioMetadata,
+  normalizePortfolioType,
+  DB_NON_HUMAN_TYPES,
+} from '@/types/portfolio'
 
 /**
  * Cleanup atomic knowledge entries matching source_info before reprocessing
@@ -79,26 +85,21 @@ export async function buildPropertyContext(
     externalLink?: string
   } = {}
 
-  if (portfolio.type === 'activities') {
-    const metadata = portfolio.metadata as Record<string, unknown>
-    const basic = (metadata?.basic as Record<string, unknown>) || {}
-    const properties = (metadata?.properties as Record<string, unknown>) || {}
-    context.activityName = basic.name as string
+  const normalized = normalizePortfolioType(portfolio.type)
+  if (normalized === 'space') {
+    const metadata = portfolio.metadata as ProjectPortfolioMetadata & Record<string, unknown>
+    const basic = metadata?.basic || {}
+    const properties = metadata?.properties || {}
+    context.projectName = basic.name
+    context.projectDescription = basic.description
+    context.activityName = basic.name
     context.externalLink = properties.external_link as string | undefined
-  } else if (portfolio.type === 'projects') {
-    const metadata = portfolio.metadata as ProjectPortfolioMetadata
-    context.projectName = metadata.basic?.name
-    context.projectDescription = metadata.basic?.description
 
-    // Include other project properties for context when processing goals or asks
-    // This helps AI infer missing information
     if (propertyType === 'project_property' && metadata.properties) {
       if (propertyName === 'asks' && metadata.properties.goals) {
-        // When processing asks, include goals for context
         context.projectGoals = metadata.properties.goals
       }
       if (propertyName === 'goals' && metadata.properties.asks) {
-        // When processing goals, include asks for context
         const asks = metadata.properties.asks || []
         if (asks.length > 0) {
           context.projectAsks = asks.map((ask) => `${ask.title}: ${ask.description}`).join('\n\n')
@@ -106,7 +107,6 @@ export async function buildPropertyContext(
       }
     }
 
-    // Get human portfolio of project owner
     const { data: humanPortfolio } = await supabase
       .from('portfolios')
       .select('metadata')
@@ -119,7 +119,7 @@ export async function buildPropertyContext(
       context.humanName = humanMetadata.basic?.name
       context.humanDescription = humanMetadata.basic?.description
     }
-  } else if (portfolio.type === 'human') {
+  } else if (normalized === 'human') {
     const metadata = portfolio.metadata as HumanPortfolioMetadata
     context.humanName = metadata.basic?.name
     context.humanDescription = metadata.basic?.description
@@ -276,7 +276,7 @@ export async function processProjectDescription(
       .from('portfolios')
       .select('metadata, user_id')
       .eq('id', portfolioId)
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .single()
 
     if (error || !portfolio) {
@@ -455,7 +455,7 @@ export async function processProjectProperty(
       .from('portfolios')
       .select('metadata, user_id')
       .eq('id', portfolioId)
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .single()
 
     if (error || !portfolio) {
@@ -629,7 +629,7 @@ export async function processActivityDescription(
       .from('portfolios')
       .select('metadata, user_id')
       .eq('id', portfolioId)
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .single()
 
     if (error || !portfolio) {

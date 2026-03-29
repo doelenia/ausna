@@ -21,7 +21,7 @@ interface PortfolioCreatedCardProps {
 }
 
 function getPortfolioTypeLabel(portfolio: Portfolio) {
-  return portfolio.type === 'human' ? 'profile' : 'portfolio'
+  return portfolio.type === 'human' ? 'profile' : 'space'
 }
 
 export function PortfolioCreatedCard({

@@ -13,7 +13,7 @@ import {
   completeOpenCallsOnboarding,
   generateOnboardingOpenCallDraft,
 } from '@/app/onboarding/actions'
-import { applyToCommunityJoin } from '@/app/portfolio/[idOrSlug]/actions'
+import { applyToActivityCallToJoin } from '@/app/portfolio/[idOrSlug]/actions'
 import type { HumanAvailabilitySchedule } from '@/types/portfolio'
 import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { Title, Content, UIText, Button, Card, UIButtonText, UserAvatar } from '@/components/ui'
@@ -975,12 +975,10 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => {
       setSearching(true)
-      fetch(`/api/portfolios/search?q=${encodeURIComponent(query.trim())}&type=community&limit=20`)
+      fetch(`/api/portfolios/search?q=${encodeURIComponent(query.trim())}&joinable=1&limit=20`)
         .then((res) => res.json())
         .then((data) => {
-          const list: CommunitySearchResult[] = (data.results ?? [])
-            .filter((p: any) => p.type === 'community')
-            .map((p: any) => ({
+          const list: CommunitySearchResult[] = (data.results ?? []).map((p: any) => ({
               id: p.id,
               type: p.type,
               name: p.name,
@@ -1010,12 +1008,12 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     setSubmitting(true)
     setFeedback(null)
     try {
-      const result = await applyToCommunityJoin({
+      const result = await applyToActivityCallToJoin({
         portfolioId: selectedId,
         promptAnswer: promptAnswer.trim(),
       })
-      if (!result.success) {
-        setFeedback(result.error ?? 'Failed to submit.')
+      if (!result?.success) {
+        setFeedback(result?.error ?? 'Failed to submit.')
         setSubmitting(false)
         return
       }

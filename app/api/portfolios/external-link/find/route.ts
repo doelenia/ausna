@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { normalizeExternalLink } from '@/lib/portfolio/normalizeExternalLink'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
     const { data: portfolios, error } = await supabase
       .from('portfolios')
       .select('id, metadata, slug')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     if (error) return NextResponse.json({ error: 'Failed to search' }, { status: 500 })
 

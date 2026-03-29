@@ -16,6 +16,7 @@ import { StickerAvatar } from './StickerAvatar'
 import { ActivityDateTimeField, ActivityLocationField } from './activity-fields'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 interface HostProjectOption {
   id: string
@@ -58,11 +59,9 @@ function pickRandomDefaultEmoji(): string {
 }
 
 export function CreateActivityForm({
-  targetType = 'activities',
   mode = 'activity',
 }: {
-  targetType?: 'projects' | 'activities'
-  mode?: 'portfolio' | 'activity'
+  mode?: 'space' | 'activity'
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -121,13 +120,13 @@ export function CreateActivityForm({
   } | null>(null)
   const [iAmGoing, setIAmGoing] = useState(true)
 
-  const entityLabel = mode === 'portfolio' ? 'portfolio' : 'activity'
-  const entityLabelTitle = mode === 'portfolio' ? 'Portfolio' : 'Activity'
-  const externalKindLabel = mode === 'portfolio' ? 'space' : 'activity'
-  const showHosts = mode !== 'portfolio'
+  const entityLabel = mode === 'space' ? 'space' : 'activity'
+  const entityLabelTitle = mode === 'space' ? 'Space' : 'Activity'
+  const externalKindLabel = mode === 'space' ? 'space' : 'activity'
+  const showHosts = mode !== 'space'
 
   useEffect(() => {
-    if (mode !== 'portfolio') return
+    if (mode !== 'space') return
     setSelectedEmoji((prev) => prev ?? pickRandomDefaultEmoji())
   }, [mode])
 
@@ -262,7 +261,7 @@ export function CreateActivityForm({
         const { data: projects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
         const options: HostProjectOption[] =
@@ -317,7 +316,7 @@ export function CreateActivityForm({
         const { data: communities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
         const options: HostCommunityOption[] =
@@ -436,7 +435,7 @@ export function CreateActivityForm({
 
     try {
       const formData = new FormData()
-      formData.append('type', targetType)
+      formData.append('type', 'space')
       formData.append('name', name.trim())
       if (description.trim()) {
         formData.append('description', description.trim())
@@ -565,7 +564,7 @@ export function CreateActivityForm({
 
       const redirectUrl = getSpaceUrl(result.portfolioId)
       if (process.env.NODE_ENV === 'development') {
-        console.log('Redirecting to:', redirectUrl, { type: targetType, portfolioId: result.portfolioId })
+        console.log('Redirecting to:', redirectUrl, { type: 'space', portfolioId: result.portfolioId })
       }
       window.location.href = redirectUrl
     } catch (err: any) {
@@ -584,7 +583,7 @@ export function CreateActivityForm({
         />
       )}
       <form onSubmit={handleSubmit} className="space-y-6">
-        {mode === 'portfolio' && (
+        {mode === 'space' && (
           <Button
             type="button"
             variant="secondary"
@@ -640,7 +639,7 @@ export function CreateActivityForm({
                   }}
                 />
               ) : selectedEmoji ? (
-                <StickerAvatar alt={name || 'Preview'} type="activities" size={80} emoji={selectedEmoji} />
+                <StickerAvatar alt={name || 'Preview'} type="space" size={80} emoji={selectedEmoji} />
               ) : (
                 <div className="h-20 w-20 rounded-full bg-gray-200 flex items-center justify-center border-2 border-gray-300">
                   <svg
@@ -763,7 +762,7 @@ export function CreateActivityForm({
                   <StickerAvatar
                     src={p.avatar}
                     alt={p.name}
-                    type="projects"
+                    type="space"
                     size={32}
                     emoji={p.emoji}
                     name={p.name}
@@ -794,7 +793,7 @@ export function CreateActivityForm({
                   <StickerAvatar
                     src={c.avatar}
                     alt={c.name}
-                    type="community"
+                    type="space"
                     size={32}
                     emoji={c.emoji}
                     name={c.name}
@@ -1178,7 +1177,7 @@ export function CreateActivityForm({
                       <StickerAvatar
                         src={existingActivity.avatar}
                         alt={existingActivity.name}
-                        type="activities"
+                        type="space"
                         size={48}
                         emoji={existingActivity.emoji}
                         name={existingActivity.name}
@@ -1272,7 +1271,7 @@ export function CreateActivityForm({
                           <StickerAvatar
                             src={project.avatar}
                             alt={project.name}
-                            type="projects"
+                            type="space"
                             size={72}
                             emoji={project.emoji}
                             name={project.name}
@@ -1309,7 +1308,7 @@ export function CreateActivityForm({
                         <StickerAvatar
                           src={community.avatar}
                           alt={community.name}
-                          type="community"
+                          type="space"
                           size={72}
                           emoji={community.emoji}
                           name={community.name}

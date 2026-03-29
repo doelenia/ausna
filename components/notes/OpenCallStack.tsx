@@ -6,7 +6,7 @@ import { OpenCallPreviewCard } from './OpenCallPreviewCard'
 import { OpenCallCarouselPopup } from './OpenCallCarouselPopup'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 
-type OpenCallsContext = 'feed' | 'human' | 'portfolio'
+type OpenCallsContext = 'feed' | 'human' | 'space'
 
 interface OpenCallStackProps {
   context: OpenCallsContext

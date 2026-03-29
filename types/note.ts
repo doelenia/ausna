@@ -139,9 +139,9 @@ export interface NoteWithMention extends Note {
 /**
  * Note source information for feed display
  */
-export type NoteSource = 
+export type NoteSource =
   | { type: 'friend' }
-  | { type: 'community'; communityName: string; communityId: string }
+  | { type: 'space'; spaceName: string; spaceId: string }
   | { type: 'subscribed' }
   | null
 

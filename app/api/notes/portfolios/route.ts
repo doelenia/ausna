@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
         .from('portfolios')
         .select('*')
         .in('id', portfolioIds)
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
       
       if (assignedError) {
         console.error('[API /notes/portfolios] Error fetching assigned portfolios:', assignedError)

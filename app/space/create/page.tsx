@@ -14,7 +14,7 @@ export default async function CreateSpacePage() {
         This creates the home space for your interest, project, event, or community. You can add posters, links,
         detailed descriptions, and follow-up updates later.
       </Content>
-      <CreateActivityForm targetType="projects" mode="portfolio" />
+      <CreateActivityForm mode="space" />
     </div>
   )
 }

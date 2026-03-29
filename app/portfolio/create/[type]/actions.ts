@@ -90,8 +90,14 @@ export async function createPortfolio(
           })()
         : []
 
-    // Validate type (legacy values are accepted and normalized to portfolio)
-    if (type !== 'portfolio' && type !== 'projects' && type !== 'community' && type !== 'activities') {
+    // Validate type (legacy values accepted; rows persist as `space`)
+    if (
+      type !== 'space' &&
+      type !== 'portfolio' &&
+      type !== 'projects' &&
+      type !== 'community' &&
+      type !== 'activities'
+    ) {
       return {
         success: false,
         error: 'Invalid portfolio type.',

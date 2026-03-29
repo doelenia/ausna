@@ -1,4 +1,5 @@
 import type { Note } from '@/types/note'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { enrichNotesWithAuthorProfiles } from '@/app/main/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import type { NoteWithDigestPortfolio } from '@/lib/email/digestAssignedPortfolio'
@@ -43,7 +44,7 @@ async function getMemberPortfolioIds(userId: string, supabase: any): Promise<str
   const { data: allPortfolios } = await supabase
     .from('portfolios')
     .select('id, metadata')
-    .in('type', ['projects', 'community'])
+    .in('type', [...DB_NON_HUMAN_TYPES])
   const memberIds: string[] = []
   allPortfolios?.forEach((p: any) => {
     const metadata = p.metadata as any
@@ -62,7 +63,7 @@ async function getUserCommunitiesMap(
   const { data: allCommunities } = await supabase
     .from('portfolios')
     .select('id, user_id, metadata')
-    .in('type', ['portfolio', 'space'])
+    .in('type', [...DB_NON_HUMAN_TYPES])
   const communitiesMap = new Map<string, { id: string; name: string; members: string[] }>()
   allCommunities?.forEach((community: any) => {
     const metadata = community.metadata as any

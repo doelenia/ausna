@@ -7,7 +7,7 @@ import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { ActivityUpdateCard } from '@/components/portfolio/ActivityUpdateCard'
-import { Portfolio } from '@/types/portfolio'
+import { Portfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { MessagePortfolioCard } from '@/components/messages/MessagePortfolioCard'
@@ -142,7 +142,7 @@ function ConversationViewContent() {
         const { data: portfolios, error } = await supabase
           .from('portfolios')
           .select('*')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .in('id', missingIds)
 
         if (error || !portfolios || cancelled) {

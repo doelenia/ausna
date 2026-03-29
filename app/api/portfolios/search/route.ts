@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio } from '@/types/portfolio'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
+import { isJoinablePublicSpaceRow } from '@/lib/portfolio/spaceCapabilities'
 
 export const dynamic = 'force-dynamic'
 
@@ -41,7 +42,8 @@ function calculateSimilarity(query: string, text: string | null | undefined): nu
  * Query params:
  *   - q: search query (optional - if not provided, returns initial results)
  *   - limit: number of results (default: 50)
- *   - type: optional filter - 'community' to return only community portfolios (e.g. for onboarding)
+ *   - joinable: '1' or 'true' — only public non-pseudo spaces with call-to-join enabled (onboarding).
+ *   - type: legacy — `community` is treated as joinable spaces (same as joinable=1).
  * 
  * Pseudo Portfolio Behavior:
  * - Portfolios with is_pseudo = true are automatically excluded from results for non-admin users
@@ -55,7 +57,15 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const query = searchParams.get('q')?.trim() || ''
     const limit = parseInt(searchParams.get('limit') || '50', 10)
-    const typeFilter = searchParams.get('type')?.toLowerCase() === 'community' ? 'community' : null
+    const joinableParam = searchParams.get('joinable')
+    const joinableOnly =
+      joinableParam === '1' ||
+      joinableParam?.toLowerCase() === 'true' ||
+      searchParams.get('type')?.toLowerCase() === 'community'
+    const typeFilter =
+      !joinableOnly && searchParams.get('type')
+        ? searchParams.get('type')!.toLowerCase()
+        : null
     
     // Try to get current user (optional - for initial results)
     const {
@@ -95,40 +105,37 @@ export async function GET(request: NextRequest) {
           friendPortfolios = data || []
         }
         
-        // Get projects/communities user is a member of
-        // Note: RLS automatically excludes pseudo portfolios for non-admin users
-        const memberTypes = typeFilter ? [typeFilter] : ['projects', 'community']
         const { data: allPortfolios } = await supabase
           .from('portfolios')
           .select('*')
-          .in('type', memberTypes)
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .limit(100)
-        
+
         const userPortfolios = (allPortfolios || []).filter((p: any) => {
           const metadata = p.metadata as any
           const members = metadata?.members || []
           return Array.isArray(members) && members.includes(user.id)
         })
-        
-        portfolios = typeFilter === 'community'
-          ? userPortfolios.slice(0, 20)
-          : [
-              ...(friendPortfolios || []),
-              ...userPortfolios.slice(0, 20),
-            ]
+
+        portfolios = [
+          ...(friendPortfolios || []),
+          ...userPortfolios.slice(0, 20),
+        ]
       } else {
         // For visitors: show recent portfolios (optionally filtered by type)
         // Note: RLS automatically excludes pseudo portfolios for non-admin users
-        let queryBuilder = supabase
-          .from('portfolios')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(limit)
-        if (typeFilter) {
+        let queryBuilder = supabase.from('portfolios').select('*').order('created_at', { ascending: false }).limit(limit)
+        if (joinableOnly) {
+          queryBuilder = queryBuilder.in('type', [...DB_NON_HUMAN_TYPES])
+        } else if (typeFilter) {
           queryBuilder = queryBuilder.eq('type', typeFilter)
         }
         const { data: recentPortfolios } = await queryBuilder
-        portfolios = recentPortfolios || []
+        portfolios = (recentPortfolios || []).filter((p: any) =>
+          joinableOnly
+            ? isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
+            : true
+        )
       }
     } else {
       // Search mode: search by name and username
@@ -138,11 +145,10 @@ export async function GET(request: NextRequest) {
       // This is necessary because Supabase doesn't support ilike on JSONB paths directly
       // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users
       // Admin users will see all portfolios including pseudo ones
-      let fetchQuery = supabase
-        .from('portfolios')
-        .select('*')
-        .limit(limit * 3) // Fetch more to have buffer for filtering
-      if (typeFilter) {
+      let fetchQuery = supabase.from('portfolios').select('*').limit(limit * 3)
+      if (joinableOnly) {
+        fetchQuery = fetchQuery.in('type', [...DB_NON_HUMAN_TYPES])
+      } else if (typeFilter) {
         fetchQuery = fetchQuery.eq('type', typeFilter)
       }
       const { data: allPortfolios, error } = await fetchQuery
@@ -155,15 +161,19 @@ export async function GET(request: NextRequest) {
         )
       }
       
-      // Filter and rank results by similarity
       portfolios = (allPortfolios || [])
+        .filter((p: any) =>
+          joinableOnly
+            ? isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
+            : true
+        )
         .filter((p: any) => {
           const metadata = p.metadata as any
           const basic = metadata?.basic || {}
           const name = (basic.name || '').toLowerCase()
           const description = (basic.description || '').toLowerCase()
           const username = ((p.slug || '') as string).toLowerCase()
-          
+
           return (
             name.includes(searchTerm) ||
             description.includes(searchTerm) ||
@@ -195,10 +205,10 @@ export async function GET(request: NextRequest) {
         })
     }
     
-    // Optionally filter by type (e.g. community-only for onboarding)
-    const filteredPortfolios = typeFilter
-      ? portfolios.filter((p: any) => p.type === typeFilter)
-      : portfolios
+    const filteredPortfolios =
+      typeFilter && !joinableOnly
+        ? portfolios.filter((p: any) => (p.type as string)?.toLowerCase() === typeFilter)
+        : portfolios
 
     // Format results
     const results = filteredPortfolios.map((p: any) => {

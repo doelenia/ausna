@@ -7,6 +7,7 @@ import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
 import type { Note, NoteSource, OpenCallMetadata } from '@/types/note'
 import type { Portfolio } from '@/types/portfolio'
+import { normalizePortfolioType } from '@/types/portfolio'
 
 function toAbsoluteUrl(siteUrl: string, url: string): string {
   const u = (url || '').trim()
@@ -39,7 +40,7 @@ function feedSourceLabel(source: NoteSource | null | undefined): string | null {
   if (!source) return null
   if (source.type === 'friend') return 'Friend'
   if (source.type === 'subscribed') return 'Subscribed'
-  if (source.type === 'community') return `From ${source.communityName}`
+  if (source.type === 'space') return `From ${source.spaceName}`
   return null
 }
 
@@ -53,12 +54,7 @@ function openCallDaysLeft(meta: OpenCallMetadata | undefined): number | null {
 }
 
 function portfolioTypeWord(type: Portfolio['type']): string {
-  if (type === 'human') return 'human'
-  if (type === 'projects') return 'project'
-  if (type === 'activities') return 'activity'
-  if (type === 'community') return 'community'
-  if (type === 'space' || type === 'portfolio') return 'space'
-  return 'space'
+  return normalizePortfolioType(type) === 'human' ? 'profile' : 'space'
 }
 
 function avatarCell(siteUrl: string, avatarUrl: string | null | undefined): string {
@@ -211,7 +207,7 @@ function renderPortfolioCreatedCard(siteUrl: string, item: FeedItem & { kind: 'p
     : `<div style="width:32px; height:32px; border-radius:999px; background:#e5e7eb;"></div>`
 
   let dateLocLine = ''
-  if (portfolio.type === 'activities' && activityDateTime?.start) {
+  if (activityDateTime?.start) {
     const d = new Date(activityDateTime.start)
     const dateStr = Number.isNaN(d.getTime())
       ? ''

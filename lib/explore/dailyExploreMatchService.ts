@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/service'
 import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
 import { isActivityLive } from '@/lib/activityLive'
 import type { ActivityCallToJoinConfig } from '@/types/portfolio'
+import { DB_NON_HUMAN_TYPES, normalizePortfolioType } from '@/types/portfolio'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
 import { runActivityMatchPipeline, type ActivityMetadata, type ActivityMatchDetails } from '@/lib/indexing/activity-match'
@@ -129,7 +130,7 @@ async function getMemberPortfolioIds(
   const { data: allPortfolios } = await supabase
     .from('portfolios')
     .select('id, metadata')
-    .in('type', ['projects', 'community'])
+    .in('type', [...DB_NON_HUMAN_TYPES])
 
   const memberIds: string[] = []
   allPortfolios?.forEach((p: { id: string; metadata: { members?: string[] } }) => {
@@ -310,7 +311,7 @@ export async function getExploreActivitiesService(userId: string): Promise<Explo
       supabase
         .from('portfolios')
         .select('id, user_id, host_project_id, visibility, metadata')
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .limit(500),
     ])
 
@@ -383,9 +384,13 @@ async function computeActivityMatchContextService(
     typeById.set(row.id, row.type)
   })
 
-  const subscribedProjectIds = new Set<string>(subscribedIds.filter((id) => typeById.get(id) === 'projects'))
-  const joinedProjectIds = new Set<string>(memberIds.filter((id) => typeById.get(id) === 'projects'))
-  const joinedCommunityIds = new Set<string>(memberIds.filter((id) => typeById.get(id) === 'community'))
+  const subscribedProjectIds = new Set<string>(
+    subscribedIds.filter((id) => normalizePortfolioType(typeById.get(id)) === 'space')
+  )
+  const joinedProjectIds = new Set<string>(
+    memberIds.filter((id) => normalizePortfolioType(typeById.get(id)) === 'space')
+  )
+  const joinedCommunityIds = joinedProjectIds
 
   const activityMetadata = new Map<string, ActivityMetadata>()
   ;(portfolioRows || []).forEach(
@@ -500,14 +505,14 @@ export async function computeAndStoreDailyExploreMatchService(
         ? supabase
             .from('portfolios')
             .select('id, metadata')
-            .in('type', ['portfolio', 'space'])
+            .in('type', [...DB_NON_HUMAN_TYPES])
             .in('id', Array.from(hostProjectIdsAll))
         : Promise.resolve({ data: [] as any[], error: null }),
       hostCommunityIdsAll.size > 0
         ? supabase
             .from('portfolios')
             .select('id, metadata')
-            .in('type', ['portfolio', 'space'])
+            .in('type', [...DB_NON_HUMAN_TYPES])
             .in('id', Array.from(hostCommunityIdsAll))
         : Promise.resolve({ data: [] as any[], error: null }),
       friendIdsAll.size > 0
@@ -518,7 +523,7 @@ export async function computeAndStoreDailyExploreMatchService(
             .in('user_id', Array.from(friendIdsAll))
         : Promise.resolve({ data: [] as any[], error: null }),
       supabase.from('portfolios').select('id, metadata').eq('type', 'human').eq('user_id', userId).maybeSingle(),
-      supabase.from('portfolios').select('metadata').in('type', ['portfolio', 'space']).eq('user_id', userId).limit(5),
+      supabase.from('portfolios').select('metadata').in('type', [...DB_NON_HUMAN_TYPES]).eq('user_id', userId).limit(5),
     ])
 
     const hostProjectMap = new Map<string, { name: string; avatar?: string | null; emoji?: string | null }>()

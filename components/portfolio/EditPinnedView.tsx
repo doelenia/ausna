@@ -4,13 +4,13 @@ import { useState, useEffect } from 'react'
 import { getEligibleItemsForPinning, updatePinnedList } from '@/app/portfolio/[idOrSlug]/actions'
 import { PinnedItem } from '@/types/portfolio'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
-import { normalizePortfolioType } from '@/types/portfolio'
+import { normalizePinnedItemType, normalizePortfolioType } from '@/types/portfolio'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Title, UIText, Button } from '@/components/ui'
 
 interface EligibleItem {
-  type: 'portfolio' | 'note'
+  type: 'space' | 'note'
   id: string
   name?: string
   text?: string
@@ -60,7 +60,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
         })
         result.portfolios?.forEach((portfolio) => {
           if (portfolio.isPinned) {
-            pinned.push({ type: 'portfolio', id: portfolio.id })
+            pinned.push({ type: 'space', id: portfolio.id })
           }
         })
         setPinnedItems(pinned)
@@ -74,16 +74,21 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
     fetchEligibleItems()
   }, [portfolioId])
 
-  const togglePinned = (itemType: 'portfolio' | 'note', itemId: string) => {
+  const togglePinned = (itemType: 'space' | 'note', itemId: string) => {
     const isCurrentlyPinned = pinnedItems.some(
-      (item) => item.type === itemType && item.id === itemId
+      (item) =>
+        normalizePinnedItemType(item.type) === itemType && item.id === itemId
     )
 
     let updatedPinned: PinnedItem[]
     if (isCurrentlyPinned) {
       // Remove from pinned
       updatedPinned = pinnedItems.filter(
-        (item) => !(item.type === itemType && item.id === itemId)
+        (item) =>
+          !(
+            normalizePinnedItemType(item.type) === itemType &&
+            item.id === itemId
+          )
       )
     } else {
       // Add to pinned (check max 9)
@@ -259,7 +264,7 @@ export function EditPinnedView({ portfolioId, portfolioType }: EditPinnedViewPro
                       ? 'border-blue-500 bg-transparent'
                       : 'border-gray-200 bg-transparent hover:border-gray-300'
                   }`}
-                  onClick={() => togglePinned('portfolio', item.id)}
+                  onClick={() => togglePinned('space', item.id)}
                 >
                   {item.avatar ? (
                     <img

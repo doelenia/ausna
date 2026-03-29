@@ -3,7 +3,11 @@
  */
 
 import type { Portfolio } from '@/types/portfolio'
-import { isHumanPortfolio, type PortfolioType } from '@/types/portfolio'
+import {
+  isHumanPortfolio,
+  normalizePortfolioType,
+  type PortfolioType,
+} from '@/types/portfolio'
 
 const LEGACY_PREFIX = '/portfolio'
 
@@ -71,35 +75,32 @@ export function parsePortfolioRoute(
   type: string | undefined,
   id: string | undefined
 ): { type: PortfolioType | null; id: string | null; isValid: boolean } {
-  const validTypes: PortfolioType[] = ['human', 'portfolio']
-
   if (!type || !id) {
     return { type: null, id: null, isValid: false }
   }
 
-  const normalizedType = type.toLowerCase() as PortfolioType
-  const isValid = validTypes.includes(normalizedType)
+  const normalizedType = normalizePortfolioType(type)
+  const isValid = normalizedType !== null
 
   return {
-    type: isValid ? normalizedType : null,
+    type: normalizedType,
     id,
     isValid,
   }
 }
 
 export function isValidPortfolioType(type: string): type is PortfolioType {
-  const validTypes: PortfolioType[] = ['human', 'portfolio']
-  return validTypes.includes(type.toLowerCase() as PortfolioType)
+  return normalizePortfolioType(type) !== null
 }
 
 export function getPortfolioTypes(): PortfolioType[] {
-  return ['human', 'portfolio']
+  return ['human', 'space']
 }
 
 export function getPortfolioTypeDisplayName(type: PortfolioType): string {
   const displayNames: Record<PortfolioType, string> = {
     human: 'Human',
-    portfolio: 'Space',
+    space: 'Space',
   }
   return displayNames[type]
 }
