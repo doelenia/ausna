@@ -6,7 +6,7 @@ import { Button, Card, Title, Content, UIText, UIButtonText, UserAvatar } from '
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { formatActivityLocation } from '@/lib/formatActivityLocation'
-import { Calendar, MapPin, Globe, ChevronDown, ChevronRight, Balloon } from 'lucide-react'
+import { Calendar, MapPin, Globe, ChevronDown, ChevronRight, Balloon, Megaphone } from 'lucide-react'
 import { isActivityLive } from '@/lib/activityLive'
 import { DEFAULT_ACTIVITY_PATTERN_PATH } from '@/lib/explore/activityPatterns'
 import {
@@ -270,7 +270,13 @@ function MatchDetailsDev({ details }: { details: ActivityMatchDetails }) {
   )
 }
 
-function MatchedHighlights({ highlight }: { highlight: DailyMatchHighlightMeta }) {
+function MatchedHighlights({
+  highlight,
+  joinable,
+}: {
+  highlight: DailyMatchHighlightMeta
+  joinable?: boolean
+}) {
   const { host, accessibility, interestTags, friends } = highlight
 
   const hasHost = !!host
@@ -278,7 +284,7 @@ function MatchedHighlights({ highlight }: { highlight: DailyMatchHighlightMeta }
   const hasInterestTags = interestTags && interestTags.length > 0
   const hasFriends = friends && friends.topFriends.length > 0
 
-  if (!hasHost && !hasAccessibility && !hasInterestTags && !hasFriends) {
+  if (!hasHost && !hasAccessibility && !hasInterestTags && !hasFriends && !joinable) {
     return null
   }
 
@@ -318,9 +324,13 @@ function MatchedHighlights({ highlight }: { highlight: DailyMatchHighlightMeta }
           {accessibility.kind === 'online' ? (
             <Globe className="w-3.5 h-3.5 text-gray-700" aria-hidden />
           ) : (
-            <MapPin className="w-3.5 h-3.5 text-gray-700" aria-hidden />
+            <MapPin className="w-3.5 h-3.5 text-blue-600" aria-hidden />
           )}
-          <UIText className="text-gray-700 whitespace-nowrap">
+          <UIText
+            className={`whitespace-nowrap ${
+              accessibility.kind === 'online' ? 'text-gray-700' : 'text-blue-600'
+            }`}
+          >
             {accessibility.label}
           </UIText>
         </div>
@@ -366,6 +376,13 @@ function MatchedHighlights({ highlight }: { highlight: DailyMatchHighlightMeta }
           </UIText>
         </div>
       )}
+
+      {joinable && (
+        <div className="inline-flex items-center gap-1.5 px-2 h-8 rounded-full bg-gray-100 flex-shrink-0">
+          <Megaphone className="w-3.5 h-3.5 text-orange-600" aria-hidden />
+          <UIText className="text-orange-600 whitespace-nowrap">Joinable</UIText>
+        </div>
+      )}
     </div>
   )
 }
@@ -375,6 +392,7 @@ export function ActivityCard({
   score,
   details,
   highlight,
+  joinable,
   hrefOverride,
   hideMetaRow,
   memberLabel,
@@ -386,6 +404,7 @@ export function ActivityCard({
   score?: number
   details?: ActivityMatchDetails
   highlight?: DailyMatchHighlightMeta
+  joinable?: boolean
   hrefOverride?: string
   hideMetaRow?: boolean
   memberLabel?: string
@@ -446,7 +465,19 @@ export function ActivityCard({
                   {activity.description}
                 </UIText>
               )}
-              {highlight && <MatchedHighlights highlight={highlight} />}
+              {(highlight || joinable) && (
+                <MatchedHighlights
+                  highlight={
+                    highlight || {
+                      host: undefined,
+                      accessibility: undefined,
+                      interestTags: [],
+                      friends: undefined,
+                    }
+                  }
+                  joinable={joinable}
+                />
+              )}
               {details && (
                 <MatchDetailsDev details={details} />
               )}

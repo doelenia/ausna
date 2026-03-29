@@ -41,8 +41,8 @@ import {
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
-import { Button, Title, Content, UIText, UserAvatar, Card } from '@/components/ui'
-import { Apple, ChevronRight, Lock, Megaphone, Timer, History } from 'lucide-react'
+import { Button, Title, Content, UIText, UserAvatar, Card, UIButtonText } from '@/components/ui'
+import { Apple, ChevronRight, Lock, Megaphone, Timer, History, X } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -53,6 +53,9 @@ import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationBadge } from './ActivityLocationBadge'
 import { ActivityLinkBadge } from './ActivityLinkBadge'
 import { FeedView } from '@/components/main/FeedView'
+import { normalizePortfolioType } from '@/types/portfolio'
+import { ActivityCard } from '@/components/explore/ExploreView'
+import { getExploreActivityHighlights, type DailyMatchHighlightMeta } from '@/app/explore/actions'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -690,26 +693,214 @@ export function PortfolioView({
   const [isSubmittingCommunityJoin, setIsSubmittingCommunityJoin] = useState(false)
   const [communityJoinFeedback, setCommunityJoinFeedback] = useState<string | null>(null)
   const [isCommunityLoginRequiredOpen, setIsCommunityLoginRequiredOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'feed'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'feed' | 'spaces'>('overview')
 
-  if (isEditing) {
-    return (
-      <PortfolioEditor
-        portfolio={portfolio}
-        onCancel={() => setIsEditing(false)}
-        onSave={async () => {
-          setIsEditing(false)
-          // Force a full page reload to ensure fresh data is loaded
-          // This ensures the server action completes and cache is cleared
-          const portfolioUrl = getPortfolioUrl(portfolio)
-          // Use window.location to force a full page reload with fresh data
-          window.location.href = portfolioUrl
-        }}
-        initialShowActivityPicker={openActivityOnEdit}
-        initialShowLocationPicker={openLocationOnEdit}
-      />
-    )
+  const shouldShowSpacesTab = isHumanPortfolio(portfolio) || normalizePortfolioType(portfolio.type) === 'space'
+  const spacesApiPath = isHumanPortfolio(portfolio)
+    ? `/api/portfolios/${encodeURIComponent(portfolio.id)}/member-spaces`
+    : `/api/portfolios/${encodeURIComponent(portfolio.id)}/hosted-spaces`
+
+  type SpacesApiPortfolio = {
+    id: string
+    type: string
+    slug: string | null
+    user_id: string
+    visibility: string | null
+    metadata: any
+    member_preview?: Array<{ userId: string; name?: string | null; avatar?: string | null }>
   }
+
+  const [spacesList, setSpacesList] = useState<SpacesApiPortfolio[]>([])
+  const [spacesLoading, setSpacesLoading] = useState(false)
+  const [spacesError, setSpacesError] = useState<string | null>(null)
+  const [spacesSearchMode, setSpacesSearchMode] = useState(false)
+  const [spacesQuery, setSpacesQuery] = useState('')
+  const [spacesHighlights, setSpacesHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
+
+  const getSpaceName = (p: SpacesApiPortfolio): string => {
+    const basic = (p.metadata as any)?.basic || {}
+    return (basic.name as string) || ''
+  }
+
+  const getSpaceStatus = (p: SpacesApiPortfolio): string | null => {
+    const status = (p.metadata as any)?.status
+    return typeof status === 'string' ? status : null
+  }
+
+  const getSpaceActivityDateTime = (p: SpacesApiPortfolio): ActivityDateTimeValue | null => {
+    const props = (p.metadata as any)?.properties || {}
+    const dt = props.activity_datetime
+    return dt && typeof dt === 'object' ? (dt as ActivityDateTimeValue) : null
+  }
+
+  const isSpaceLive = (p: SpacesApiPortfolio): boolean => {
+    const status = getSpaceStatus(p)
+    const dt = getSpaceActivityDateTime(p)
+    if (dt?.start) return isActivityLive(dt, status)
+    return status === 'live'
+  }
+
+  const isSpaceUpcoming = (p: SpacesApiPortfolio): boolean => {
+    const status = getSpaceStatus(p)
+    if (status === 'archived') return false
+    const dt = getSpaceActivityDateTime(p)
+    const start = dt?.start ? new Date(dt.start) : null
+    if (!start || Number.isNaN(start.getTime())) return false
+    return start.getTime() > Date.now()
+  }
+
+  const isSpaceJoinable = (p: SpacesApiPortfolio): boolean => {
+    if (!currentUserId) return false
+    if ((p.visibility || 'public') === 'private') return false
+    const status = getSpaceStatus(p)
+    if (status === 'archived') return false
+
+    // Membership check: owner OR manager OR member -> not joinable
+    if (p.user_id === currentUserId) return false
+    const meta = (p.metadata as any) || {}
+    const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+    const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
+    if (managersArr.includes(currentUserId) || membersArr.includes(currentUserId)) return false
+
+    const props = meta?.properties || {}
+    const callToJoin = props.call_to_join || null
+    const dt = getSpaceActivityDateTime(p) ?? undefined
+    const visibility = (p.visibility as 'public' | 'private' | undefined | null) ?? 'public'
+    return isCallToJoinWindowOpen(visibility, callToJoin, dt, status)
+  }
+
+  type TimelineItem = {
+    portfolio: SpacesApiPortfolio
+    activity: {
+      id: string
+      name: string
+      avatar?: string
+      emoji?: string
+      description?: string
+      hostProjectId?: string | null
+      activityDateTime?: ActivityDateTimeValue | null
+      location?: ActivityLocationValue | null
+      external?: boolean
+    }
+  }
+
+  const toExploreActivity = (p: SpacesApiPortfolio): TimelineItem['activity'] => {
+    const meta = (p.metadata as any) || {}
+    const basic = meta.basic || {}
+    const props = meta.properties || {}
+    return {
+      id: p.id,
+      name: (basic.name as string) || 'Space',
+      avatar: basic.avatar as string | undefined,
+      emoji: basic.emoji as string | undefined,
+      description: (basic.description as string) || undefined,
+      hostProjectId: null,
+      activityDateTime: (props.activity_datetime as ActivityDateTimeValue | null | undefined) ?? null,
+      location: (props.location as ActivityLocationValue | null | undefined) ?? null,
+      external: props.external === true,
+    }
+  }
+
+  const getStartDate = (a: TimelineItem['activity']): Date | null => {
+    const start = a.activityDateTime?.start
+    if (!start) return null
+    const d = new Date(start)
+    if (Number.isNaN(d.getTime())) return null
+    return d
+  }
+
+  const getDateKey = (a: TimelineItem['activity']): string => {
+    const d = getStartDate(a)
+    if (!d) return 'no-date'
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const formatDateGroupLabel = (key: string): string => {
+    if (key === 'no-date') return 'Anytime'
+    const [y, m, d] = key.split('-').map((v) => parseInt(v, 10))
+    if (!y || !m || !d) return 'Anytime'
+    const date = new Date(y, m - 1, d)
+    if (Number.isNaN(date.getTime())) return 'Anytime'
+
+    const today = new Date()
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+      today.getDate()
+    ).padStart(2, '0')}`
+    const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+    const tomorrowKey = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}-${String(tomorrow.getDate()).padStart(2, '0')}`
+
+    if (key === todayKey) {
+      const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)
+      return `Today ${weekday}`
+    }
+    if (key === tomorrowKey) {
+      const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)
+      return `Tomorrow ${weekday}`
+    }
+
+    const monthDay = new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+    }).format(date)
+    const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)
+    return `${monthDay} ${weekday}`
+  }
+
+  useEffect(() => {
+    if (!shouldShowSpacesTab) return
+    if (activeTab !== 'spaces' && activeTab !== 'overview') return
+
+    let cancelled = false
+    setSpacesLoading(true)
+    setSpacesError(null)
+    fetch(spacesApiPath)
+      .then((res) => res.json())
+      .then((data) => {
+        if (cancelled) return
+        const list: SpacesApiPortfolio[] = Array.isArray(data?.portfolios) ? data.portfolios : []
+        setSpacesList(list)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setSpacesError('Failed to load spaces.')
+        setSpacesList([])
+      })
+      .finally(() => {
+        if (cancelled) return
+        setSpacesLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, shouldShowSpacesTab, spacesApiPath])
+
+  useEffect(() => {
+    if (!currentUserId) return
+    if (!spacesList || spacesList.length === 0) return
+    let cancelled = false
+    const run = async () => {
+      try {
+        const ids = spacesList.map((p) => p.id)
+        const result = await getExploreActivityHighlights(currentUserId, ids)
+        if (!cancelled && result.success) {
+          setSpacesHighlights(result.highlights || {})
+        }
+      } catch {
+        // non-critical UI
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [currentUserId, spacesList])
 
   const metadata = portfolio.metadata as any
   const members = metadata?.members || []
@@ -783,7 +974,22 @@ export function PortfolioView({
   // Determine tab label based on portfolio type
   const tabLabel = isHumanPortfolio(portfolio) ? 'Spaces' : 'Navigations'
 
-  return (
+  return isEditing ? (
+    <PortfolioEditor
+      portfolio={portfolio}
+      onCancel={() => setIsEditing(false)}
+      onSave={async () => {
+        setIsEditing(false)
+        // Force a full page reload to ensure fresh data is loaded
+        // This ensures the server action completes and cache is cleared
+        const portfolioUrl = getPortfolioUrl(portfolio)
+        // Use window.location to force a full page reload with fresh data
+        window.location.href = portfolioUrl
+      }}
+      initialShowActivityPicker={openActivityOnEdit}
+      initialShowLocationPicker={openLocationOnEdit}
+    />
+  ) : (
     <>
     {basic.avatar && (
       <ImageViewerPopup
@@ -1697,6 +1903,21 @@ export function PortfolioView({
                   >
                     <UIText>Feed</UIText>
                   </button>
+                  {shouldShowSpacesTab && (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setActiveTab('spaces')
+                      }}
+                      className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
+                        activeTab === 'spaces'
+                          ? 'bg-gray-200 text-gray-700'
+                          : 'text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      <UIText>Spaces</UIText>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1717,7 +1938,7 @@ export function PortfolioView({
             <div className="mt-4 mb-8 group">
               <div className="flex items-center gap-2 mb-4">
                 <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                <UIText>Spaces</UIText>
+                <UIText>Live spaces</UIText>
               </div>
               <div className="relative">
                 {/* Horizontal scroll buttons for mouse users */}
@@ -1747,119 +1968,221 @@ export function PortfolioView({
                   ref={involvementScrollRef}
                   className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth"
                 >
-                {projectsLoading ? (
-                  <UIText className="text-gray-500">Loading portfolios...</UIText>
-                ) : (
-                  <>
-                    {projects.map((project) => (
-                      <div
-                        key={project.id}
-                        className="flex flex-col items-center flex-shrink-0 w-48 relative"
-                      >
-                        {project.visibility === 'private' && (
-                          <Lock
-                            className="absolute top-2 right-3 w-4 h-4 text-gray-500 z-10"
-                            aria-label="Private"
-                          />
-                        )}
-                        <Link
-                              href={getSpaceUrl((project as { slug?: string }).slug || project.id)}
-                          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                        >
-                          <div className="flex flex-col items-center gap-3">
-                            <StickerAvatar
-                              src={project.avatar}
-                              alt={project.name}
-                              type="projects"
-                              size={96}
-                              emoji={project.emoji}
-                              name={project.name}
-                            />
-                            <div className="flex flex-col items-center gap-1 w-full">
-                              <Content
-                                className="text-center max-w-[140px] mx-auto line-clamp-2"
-                                title={project.name}
+                {(() => {
+                  const liveSpaces = spacesList.filter((p) => isSpaceLive(p))
+                  return spacesLoading ? (
+                    <UIText className="text-gray-500">Loading spaces...</UIText>
+                  ) : liveSpaces.length === 0 ? (
+                    <UIText className="text-gray-500">No live spaces right now.</UIText>
+                  ) : (
+                    <>
+                      {liveSpaces.map((p) => {
+                        const basic = (p.metadata as any)?.basic || {}
+                        const name = (basic.name as string) || 'Space'
+                        const avatar = basic.avatar as string | undefined
+                        const emoji = basic.emoji as string | undefined
+                        const joinable = isSpaceJoinable(p)
+                        return (
+                          <div
+                            key={p.id}
+                            className="flex flex-col items-center flex-shrink-0 w-48 relative"
+                          >
+                            {(p.visibility || 'public') === 'private' && (
+                              <Lock
+                                className="absolute top-2 right-3 w-4 h-4 text-gray-500 z-10"
+                                aria-label="Private"
+                              />
+                            )}
+                            <Link
+                              href={getSpaceUrl(p.slug || p.id)}
+                              className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                            >
+                              <div className="flex flex-col items-center gap-3">
+                                <StickerAvatar
+                                  src={avatar}
+                                  alt={name}
+                                  type="space"
+                                  size={96}
+                                  emoji={emoji}
+                                  name={name}
+                                />
+                                <div className="flex flex-col items-center gap-1 w-full">
+                                  <Content
+                                    className="text-center max-w-[140px] mx-auto line-clamp-2"
+                                    title={name}
+                                  >
+                                    {name}
+                                  </Content>
+                                  {joinable && (
+                                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                                      <UIText as="span" className="text-gray-700">
+                                        Joinable
+                                      </UIText>
+                                    </div>
+                                  )}
+                                  {p.slug && (
+                                    <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
+                                      {p.slug}
+                                    </UIText>
+                                  )}
+                                </div>
+                              </div>
+                            </Link>
+                          </div>
+                        )
+                      })}
+
+                      {/* Create Space Button - Only visible to owner */}
+                      {authChecked && isOwner && isAuthenticated && (
+                        <div className="flex flex-col items-center flex-shrink-0 w-48">
+                          <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                            <div className="flex flex-col items-center gap-3">
+                              <Link
+                                href={getSpaceCreateUrl()}
+                                className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                               >
-                                {project.name}
-                              </Content>
-                              {(project.projectType || project.role) && (
-                                <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
-                                  {project.projectType && project.role
-                                    ? `${project.projectType} · ${project.role}`
-                                    : project.projectType || project.role}
-                                </UIText>
-                              )}
+                                <svg
+                                  className="h-12 w-12 text-gray-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 4v16m8-8H4"
+                                  />
+                                </svg>
+                              </Link>
+                              <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                Create Space
+                              </UIText>
                             </div>
                           </div>
-                        </Link>
-                      </div>
-                    ))}
-                    {/* Create Project Button - Only visible to owner */}
-                    {authChecked && isOwner && isAuthenticated && (
-                      <div className="flex flex-col items-center flex-shrink-0 w-48">
-                        <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                          <div className="flex flex-col items-center gap-3">
-                            <Link
-                              href={getSpaceCreateUrl()}
-                              className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                            >
-                              <svg
-                                className="h-12 w-12 text-gray-600"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
+                        </div>
+                      )}
+
+                      {/* Create Community button - Admin only, owner only */}
+                      {authChecked && isOwner && isAuthenticated && isAdmin === true && (
+                        <div className="flex flex-col items-center flex-shrink-0 w-48">
+                          <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                            <div className="flex flex-col items-center gap-3">
+                              <Link
+                                href={getSpaceCreateUrl()}
+                                className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M12 4v16m8-8H4"
-                                />
-                              </svg>
-                            </Link>
-                            <UIText className="text-center max-w-[140px] mx-auto truncate">
-                              Create Space
-                            </UIText>
+                                <svg
+                                  className="h-12 w-12 text-gray-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                                  />
+                                </svg>
+                              </Link>
+                              <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                Create Space
+                              </UIText>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                    {/* Create Community button - Admin only, owner only */}
-                    {authChecked && isOwner && isAuthenticated && isAdmin === true && (
-                      <div className="flex flex-col items-center flex-shrink-0 w-48">
-                        <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                          <div className="flex flex-col items-center gap-3">
-                            <Link
-                              href={getSpaceCreateUrl()}
-                              className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                            >
-                              <svg
-                                className="h-12 w-12 text-gray-600"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  strokeWidth={2}
-                                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                                />
-                              </svg>
-                            </Link>
-                            <UIText className="text-center max-w-[140px] mx-auto truncate">
-                              Create Space
-                            </UIText>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
+                      )}
+                    </>
+                  )
+                })()}
                 </div>
               </div>
             </div>
           )}
+
+          {/* Live spaces section (space portfolios only) */}
+          {!isHumanPortfolio(portfolio) &&
+            normalizePortfolioType(portfolio.type) === 'space' && (
+              <div className="mt-4 mb-8 group">
+                <div className="flex items-center gap-2 mb-4">
+                  <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                  <UIText>Live spaces</UIText>
+                </div>
+                <div className="relative">
+                  <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth">
+                    {(() => {
+                      const liveHosted = spacesList.filter((p) => isSpaceLive(p))
+                      if (spacesLoading) {
+                        return <UIText className="text-gray-500">Loading spaces...</UIText>
+                      }
+                      if (liveHosted.length === 0) {
+                        return <UIText className="text-gray-500">No live spaces right now.</UIText>
+                      }
+                      return (
+                        <>
+                          {liveHosted.map((p) => {
+                            const basic = (p.metadata as any)?.basic || {}
+                            const name = (basic.name as string) || 'Space'
+                            const avatar = basic.avatar as string | undefined
+                            const emoji = basic.emoji as string | undefined
+                            const joinable = isSpaceJoinable(p)
+                            return (
+                              <div
+                                key={p.id}
+                                className="flex flex-col items-center flex-shrink-0 w-48 relative"
+                              >
+                                {(p.visibility || 'public') === 'private' && (
+                                  <Lock
+                                    className="absolute top-2 right-3 w-4 h-4 text-gray-500 z-10"
+                                    aria-label="Private"
+                                  />
+                                )}
+                                <Link
+                                  href={getSpaceUrl(p.slug || p.id)}
+                                  className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                                >
+                                  <div className="flex flex-col items-center gap-3">
+                                    <StickerAvatar
+                                      src={avatar}
+                                      alt={name}
+                                      type="space"
+                                      size={96}
+                                      emoji={emoji}
+                                      name={name}
+                                    />
+                                    <div className="flex flex-col items-center gap-1 w-full">
+                                      <Content
+                                        className="text-center max-w-[140px] mx-auto line-clamp-2"
+                                        title={name}
+                                      >
+                                        {name}
+                                      </Content>
+                                      {joinable && (
+                                        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                                          <UIText as="span" className="text-gray-700">
+                                            Joinable
+                                          </UIText>
+                                        </div>
+                                      )}
+                                      {p.slug && (
+                                        <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
+                                          {p.slug}
+                                        </UIText>
+                                      )}
+                                    </div>
+                                  </div>
+                                </Link>
+                              </div>
+                            )
+                          })}
+                        </>
+                      )
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
 
           {/* Notes feed (unified overview layout) */}
           <NotesFeed
@@ -1879,6 +2202,208 @@ export function PortfolioView({
                 apiPath={`/api/portfolios/${portfolio.id}/member-feed`}
                 showOpenCallStack={false}
               />
+            </div>
+          )}
+
+          {/* Spaces tab */}
+          {activeTab === 'spaces' && shouldShowSpacesTab && (
+            <div className="mt-6">
+              <div className="mb-3 flex items-center gap-2">
+                <input
+                  type="search"
+                  value={spacesQuery}
+                  onChange={(e) => setSpacesQuery(e.target.value)}
+                  onFocus={() => setSpacesSearchMode(true)}
+                  onBlur={(e) => {
+                    // Exit search mode when focus leaves the search control area.
+                    // Keep search mode if focus moves to the clear button.
+                    const next = e.relatedTarget as HTMLElement | null
+                    if (next && next.dataset && next.dataset.role === 'spaces-search-clear') {
+                      return
+                    }
+                    setSpacesSearchMode(false)
+                    setSpacesQuery('')
+                  }}
+                  placeholder="Search by name or slug..."
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                  autoComplete="off"
+                />
+                {spacesSearchMode && (
+                  <Button
+                    variant="text"
+                    onClick={() => {
+                      setSpacesSearchMode(false)
+                      setSpacesQuery('')
+                    }}
+                    data-role="spaces-search-clear"
+                    disabled={spacesLoading}
+                  >
+                    <X className="w-4 h-4" aria-hidden />
+                  </Button>
+                )}
+              </div>
+
+              {spacesLoading ? (
+                <UIText className="text-gray-500">Loading...</UIText>
+              ) : spacesError ? (
+                <UIText className="text-gray-600">{spacesError}</UIText>
+              ) : spacesList.length === 0 ? (
+                <Card variant="default" padding="md">
+                  <Content className="text-gray-500">No spaces found.</Content>
+                </Card>
+              ) : (
+                (() => {
+                  const query = spacesQuery.trim().toLowerCase()
+                  const filtered = query
+                    ? spacesList.filter((p) => {
+                        const name = getSpaceName(p).toLowerCase()
+                        const slug = (p.slug || '').toLowerCase()
+                        return name.includes(query) || slug.includes(query)
+                      })
+                    : spacesList
+
+                  if (spacesSearchMode) {
+                    const alphabetical = [...filtered].sort((a, b) =>
+                      getSpaceName(a).toLowerCase().localeCompare(getSpaceName(b).toLowerCase())
+                    )
+                    return (
+                      <div className="space-y-3">
+                        {alphabetical.map((p) => {
+                          const joinable = isSpaceJoinable(p)
+                          const a = toExploreActivity(p)
+                          const meta = (p.metadata as any) || {}
+                          const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+                          const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
+                          const memberUserIds = Array.from(new Set<string>([p.user_id, ...managersArr, ...membersArr].filter(Boolean)))
+                          const memberLabel = memberUserIds.length > 0 ? `${memberUserIds.length} member${memberUserIds.length === 1 ? '' : 's'}` : undefined
+                          const memberUsers =
+                            Array.isArray(p.member_preview) && p.member_preview.length > 0
+                              ? p.member_preview.map((u) => ({
+                                  userId: u.userId,
+                                  name: u.name ?? null,
+                                  avatar: u.avatar ?? null,
+                                }))
+                              : undefined
+                          return (
+                            <ActivityCard
+                              key={p.id}
+                              activity={a as any}
+                              hrefOverride={getSpaceUrl(p.slug || p.id)}
+                              avatarTypeOverride="space"
+                              joinable={joinable}
+                              highlight={spacesHighlights[p.id]}
+                              memberLabel={memberLabel}
+                              memberUserIds={memberUserIds}
+                              memberUsers={memberUsers}
+                            />
+                          )
+                        })}
+                      </div>
+                    )
+                  }
+
+                  const items: TimelineItem[] = filtered.map((p) => ({
+                    portfolio: p,
+                    activity: toExploreActivity(p),
+                  }))
+
+                  const sorted = [...items].sort((a, b) => {
+                    const da = getStartDate(a.activity)
+                    const db = getStartDate(b.activity)
+                    if (!da && !db) return 0
+                    if (!da) return 1
+                    if (!db) return -1
+                    return da.getTime() - db.getTime()
+                  })
+
+                  const live = sorted.filter((x) => isSpaceLive(x.portfolio))
+                  const upcoming = sorted.filter(
+                    (x) => !isSpaceLive(x.portfolio) && isSpaceUpcoming(x.portfolio)
+                  )
+
+                  const groups: Array<{ label: string; items: TimelineItem[] }> = []
+
+                  if (live.length > 0) {
+                    groups.push({ label: 'Live', items: live })
+                  }
+
+                  const upcomingGroups = new Map<string, TimelineItem[]>()
+                  upcoming.forEach((x) => {
+                    const key = getDateKey(x.activity)
+                    const list = upcomingGroups.get(key)
+                    if (list) list.push(x)
+                    else upcomingGroups.set(key, [x])
+                  })
+
+                  const sortedKeys = Array.from(upcomingGroups.keys()).sort((a, b) => {
+                    if (a === 'no-date' && b === 'no-date') return 0
+                    if (a === 'no-date') return 1
+                    if (b === 'no-date') return -1
+                    return a.localeCompare(b)
+                  })
+
+                  sortedKeys.forEach((key) => {
+                    const list = upcomingGroups.get(key)
+                    if (!list || list.length === 0) return
+                    groups.push({ label: formatDateGroupLabel(key), items: list })
+                  })
+
+                  if (groups.length === 0) {
+                    return (
+                      <Card variant="default" padding="md">
+                        <Content className="text-gray-500">No live or upcoming spaces.</Content>
+                      </Card>
+                    )
+                  }
+
+                  return (
+                    <div className="relative pl-4">
+                      <div className="absolute left-1 top-0 bottom-0 border-l border-dashed border-gray-200" />
+                      <div className="space-y-6">
+                        {groups.map((group) => (
+                          <div key={group.label} className="relative pb-1">
+                            <div className="ml-2 mb-2 text-gray-500">
+                              <UIButtonText as="span">{group.label}</UIButtonText>
+                            </div>
+                            <div className="ml-2 space-y-4">
+                              {group.items.map((x) => (
+                                (() => {
+                                  const meta = (x.portfolio.metadata as any) || {}
+                                  const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+                                  const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
+                                  const memberUserIds = Array.from(new Set<string>([x.portfolio.user_id, ...managersArr, ...membersArr].filter(Boolean)))
+                                  const memberLabel = memberUserIds.length > 0 ? `${memberUserIds.length} member${memberUserIds.length === 1 ? '' : 's'}` : undefined
+                                  const memberUsers =
+                                    Array.isArray(x.portfolio.member_preview) && x.portfolio.member_preview.length > 0
+                                      ? x.portfolio.member_preview.map((u) => ({
+                                          userId: u.userId,
+                                          name: u.name ?? null,
+                                          avatar: u.avatar ?? null,
+                                        }))
+                                      : undefined
+                                  return (
+                                    <ActivityCard
+                                      key={x.portfolio.id}
+                                      activity={x.activity as any}
+                                      hrefOverride={getSpaceUrl(x.portfolio.slug || x.portfolio.id)}
+                                      avatarTypeOverride="space"
+                                      joinable={isSpaceJoinable(x.portfolio)}
+                                      highlight={spacesHighlights[x.portfolio.id]}
+                                      memberLabel={memberLabel}
+                                      memberUserIds={memberUserIds}
+                                      memberUsers={memberUsers}
+                                    />
+                                  )
+                                })()
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })()
+              )}
             </div>
           )}
         </div>

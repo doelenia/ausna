@@ -541,7 +541,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
           <Button
             variant="secondary"
             asLink
-            href={`/messages?userId=${portfolio.user_id}`}
+            href={`/messages/${portfolio.user_id}`}
           >
             <MessageCircle className="w-4 h-4 mr-2" strokeWidth={1.5} />
             <UIText>Message</UIText>
