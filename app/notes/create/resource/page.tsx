@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/requireAuth'
 import { getHumanPortfolio } from '@/lib/portfolio/human'
 import { redirect } from 'next/navigation'
 import type { Portfolio } from '@/types/portfolio'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { Folder } from 'lucide-react'
 import { UIText } from '@/components/ui'
@@ -26,7 +27,7 @@ export default async function CreateResourcePage({ searchParams }: CreateResourc
       .from('portfolios')
       .select('*')
       .eq('id', searchParams.portfolio)
-      .in('type', ['projects', 'activities', 'community'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .single()
 
     if (!error && data) sourcePortfolio = data as Portfolio

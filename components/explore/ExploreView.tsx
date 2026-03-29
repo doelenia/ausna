@@ -299,7 +299,7 @@ function MatchedHighlights({ highlight }: { highlight: DailyMatchHighlightMeta }
             <StickerAvatar
               src={host.avatar ?? undefined}
               alt={host.name}
-              type={host.kind === 'project' ? 'projects' : 'community'}
+              type="space"
               size={24}
               emoji={host.emoji ?? undefined}
               name={host.name}
@@ -400,7 +400,7 @@ export function ActivityCard({
   const hasDate = !!dateStr
   const hasLocation = !!locationStr
   const href = hrefOverride ?? getSpaceUrl(activity.id)
-  const avatarType = avatarTypeOverride ?? 'portfolio'
+  const avatarType = avatarTypeOverride ?? 'space'
 
   return (
     <div>

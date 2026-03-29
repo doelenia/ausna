@@ -101,7 +101,7 @@ export function MembersPageClient({
 
   /** Non-human portfolios (space, portfolio, legacy activities/community/projects) use join requests + this tab. */
   const canShowJoinRequestsTab =
-    normalizePortfolioType(portfolioType) === 'portfolio' && canManage
+    normalizePortfolioType(portfolioType) === 'space' && canManage
 
   const pendingManagerInviteeIds = useMemo(() => {
     return new Set(

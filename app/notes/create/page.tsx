@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import { getHumanPortfolio } from '@/lib/portfolio/human'
-import { Portfolio } from '@/types/portfolio'
+import { Portfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { redirect } from 'next/navigation'
@@ -32,7 +32,7 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
       .from('portfolios')
       .select('*')
       .eq('id', searchParams.portfolio)
-      .in('type', ['projects', 'activities', 'community'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .single()
 
     if (!error && data) {

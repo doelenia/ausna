@@ -6,6 +6,7 @@ import type { ActivityCallToJoinConfig } from '@/types/portfolio'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
 import type { ExploreActivity } from '@/app/explore/actions'
+import { normalizePortfolioType, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 export const dynamic = 'force-dynamic'
 
@@ -78,7 +79,7 @@ function activityMatchesTargetPortfolio(activity: ActivityRow, target: { id: str
     return hostedByHuman || going
   }
 
-  if (target.type === 'portfolio') {
+  if (normalizePortfolioType(target.type) === 'space') {
     const hostProjectIds: string[] = Array.isArray(props?.host_project_ids) ? props.host_project_ids : []
     const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids)
       ? props.host_community_ids
@@ -140,7 +141,7 @@ export async function GET(
     const { data: activitiesRaw } = await supabase
       .from('portfolios')
       .select('id, user_id, host_project_id, visibility, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .limit(500)
 
     const activities = ((activitiesRaw || []) as ActivityRow[])

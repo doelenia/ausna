@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enrichNotesWithAuthorProfiles, type FeedItem } from '@/app/main/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
-import type { Portfolio } from '@/types/portfolio'
+import { DB_NON_HUMAN_TYPES, type Portfolio } from '@/types/portfolio'
 
 export const dynamic = 'force-dynamic'
 
@@ -93,7 +93,7 @@ export async function GET(
       supabase
         .from('portfolios')
         .select('*')
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .in('user_id', memberUserIds)
         .order('created_at', { ascending: false })
         .limit(poolLimit),

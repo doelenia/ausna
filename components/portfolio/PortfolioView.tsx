@@ -1,6 +1,14 @@
 'use client'
 
-import { Portfolio, isProjectPortfolio, isCommunityPortfolio, isHumanPortfolio, isActivityPortfolio, ActivityCallToJoinConfig } from '@/types/portfolio'
+import {
+  Portfolio,
+  isProjectPortfolio,
+  isCommunityPortfolio,
+  isHumanPortfolio,
+  isActivityPortfolio,
+  ActivityCallToJoinConfig,
+  DB_NON_HUMAN_TYPES,
+} from '@/types/portfolio'
 import {
   getPortfolioUrl,
   getHumanProfileUrl,
@@ -369,7 +377,7 @@ export function PortfolioView({
       const { data: projects } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .in('id', ids)
       if (cancelled || !projects?.length) {
         if (!cancelled) setActivityHostProjects([])
@@ -407,7 +415,7 @@ export function PortfolioView({
       const { data: communities } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .in('id', ids)
       if (cancelled || !communities?.length) {
         if (!cancelled) setActivityHostCommunities([])
@@ -1580,7 +1588,7 @@ export function PortfolioView({
             {/* Open Call Stack - right under action buttons */}
             <div className="mb-6 mt-0">
               <OpenCallStack
-                context={isHumanPortfolio(portfolio) ? 'human' : 'portfolio'}
+                context={isHumanPortfolio(portfolio) ? 'human' : 'space'}
                 portfolioId={portfolio.id}
                 currentUserId={currentUserId}
               />

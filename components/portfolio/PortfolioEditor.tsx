@@ -3,9 +3,9 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import {
   Portfolio,
-  isProjectPortfolio,
-  isCommunityPortfolio,
   isHumanPortfolio,
+  isSpacePortfolio,
+  DB_NON_HUMAN_TYPES,
   PortfolioVisibility,
   ActivityCallToJoinConfig,
   HumanAvailabilitySchedule,
@@ -24,7 +24,6 @@ import {
 } from './DescriptionPopups'
 import { ImageViewerPopup } from './ImageViewerPopup'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
-import { CommunityTypeSelector } from './CommunityTypeSelector'
 import { Title, UIText, Button, Card, Content } from '@/components/ui'
 import { ActivityDateTimeField, ActivityLocationField } from './activity-fields'
 import { ActivityLinkBadge } from './ActivityLinkBadge'
@@ -270,7 +269,8 @@ export function PortfolioEditor({
   const [hostSelectorTab, setHostSelectorTab] = useState<'projects' | 'communities'>('projects')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const membersList: string[] = metadata?.members || []
-  const isExternalActivityInit = portfolio.type === 'activities' && (metadata?.properties as any)?.external === true
+  const isExternalActivityInit =
+    isSpacePortfolio(portfolio) && (metadata?.properties as any)?.external === true
   const [creatorGoing, setCreatorGoing] = useState<boolean>(
     isExternalActivityInit ? membersList.includes(portfolio.user_id) : true
   )
@@ -299,7 +299,7 @@ export function PortfolioEditor({
   )
 
   useEffect(() => {
-    if (portfolio.type !== 'activities') return
+    if (!isSpacePortfolio(portfolio)) return
     let cancelled = false
     const load = async () => {
       setHostProjectsLoading(true)
@@ -309,7 +309,7 @@ export function PortfolioEditor({
         const { data: projects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
         const list = (projects || []).filter((p: any) => {
           const meta = p.metadata as any
@@ -334,10 +334,10 @@ export function PortfolioEditor({
     }
     load()
     return () => { cancelled = true }
-  }, [portfolio.type])
+  }, [portfolio.id, portfolio.type, supabase])
 
   useEffect(() => {
-    if (portfolio.type !== 'activities') return
+    if (!isSpacePortfolio(portfolio)) return
     let cancelled = false
     const load = async () => {
       setHostCommunitiesLoading(true)
@@ -347,7 +347,7 @@ export function PortfolioEditor({
         const { data: communities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
         const list = (communities || []).filter((c: any) => {
           const meta = c.metadata as any
@@ -372,7 +372,7 @@ export function PortfolioEditor({
     }
     load()
     return () => { cancelled = true }
-  }, [portfolio.type])
+  }, [portfolio.id, portfolio.type, supabase])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -456,7 +456,7 @@ export function PortfolioEditor({
       const isOwner = portfolio.user_id === user.id
       let isManager = false
       
-      if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) {
+      if (isSpacePortfolio(portfolio)) {
         const portfolioMetadata = portfolio.metadata as any
         const managers = portfolioMetadata?.managers || []
         isManager = Array.isArray(managers) && managers.includes(user.id)
@@ -493,7 +493,7 @@ export function PortfolioEditor({
       const isOwner = portfolio.user_id === currentUser.id
       let isManager = false
       
-      if (isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) {
+      if (isSpacePortfolio(portfolio)) {
         const portfolioMetadata = portfolio.metadata as any
         const managers = portfolioMetadata?.managers || []
         isManager = Array.isArray(managers) && managers.includes(currentUser.id)
@@ -622,11 +622,11 @@ export function PortfolioEditor({
           hasAnyAvailability(availabilitySchedule) ? JSON.stringify(availabilitySchedule) : ''
         )
       }
-      if (portfolio.type === 'activities' && !isExternalAct) {
+      if (isSpacePortfolio(portfolio) && !isExternalAct) {
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
         formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
       }
-      if (portfolio.type === 'activities' && isExternalAct) {
+      if (isSpacePortfolio(portfolio) && isExternalAct) {
         formData.append('i_am_going', creatorGoing ? 'true' : 'false')
       }
 
@@ -837,35 +837,23 @@ export function PortfolioEditor({
               }
             />
 
-            {/* Type Selection (projects and communities only; activities use Advanced) */}
-            {(isProjectPortfolio(portfolio) || isCommunityPortfolio(portfolio)) && (
+            {/* Category (all spaces share the same taxonomy fields in metadata) */}
+            {isSpacePortfolio(portfolio) && (
               <div>
-                {isProjectPortfolio(portfolio) ? (
-                  <ProjectTypeSelector
-                    generalCategory={projectTypeGeneral}
-                    specificType={projectTypeSpecific}
-                    onSelect={(general, specific) => {
-                      setProjectTypeGeneral(general)
-                      setProjectTypeSpecific(specific)
-                    }}
-                    disabled={loading}
-                  />
-                ) : (
-                  <CommunityTypeSelector
-                    generalCategory={projectTypeGeneral}
-                    specificType={projectTypeSpecific}
-                    onSelect={(general, specific) => {
-                      setProjectTypeGeneral(general)
-                      setProjectTypeSpecific(specific)
-                    }}
-                    disabled={loading}
-                  />
-                )}
+                <ProjectTypeSelector
+                  generalCategory={projectTypeGeneral}
+                  specificType={projectTypeSpecific}
+                  onSelect={(general, specific) => {
+                    setProjectTypeGeneral(general)
+                    setProjectTypeSpecific(specific)
+                  }}
+                  disabled={loading}
+                />
               </div>
             )}
 
-            {/* Visibility and Status (projects only; activities use Advanced) */}
-            {isProjectPortfolio(portfolio) && (
+            {/* Visibility and Status (spaces without date/time use Live/Archived here; see Advanced when scheduling) */}
+            {isSpacePortfolio(portfolio) && (
               <>
                 <div>
                   <UIText as="label" className="block mb-2">
@@ -890,7 +878,7 @@ export function PortfolioEditor({
                     ))}
                   </div>
                   <UIText as="p" className="text-xs text-gray-500 mt-1">
-                    Private projects are only visible to you and will not appear in search or feeds.
+                    Private spaces are only visible to you and will not appear in search or feeds.
                   </UIText>
                 </div>
                 <div className="mt-4">
@@ -923,7 +911,7 @@ export function PortfolioEditor({
                     })}
                   </div>
                   <UIText as="p" className="text-xs text-gray-500 mt-1">
-                    Used to indicate whether this project is live or archived.
+                    Used to indicate whether this space is live or archived.
                   </UIText>
                 </div>
               </>
@@ -936,7 +924,7 @@ export function PortfolioEditor({
               const externalLink = (activityProps.external_link as string) || ''
               return (
               <>
-                {portfolio.type === 'activities' && !isExternalActivity && (
+                {isSpacePortfolio(portfolio) && !isExternalActivity && (
                 <div>
                   <UIText as="label" className="block mb-2">
                     Hosts
@@ -1036,7 +1024,7 @@ export function PortfolioEditor({
                   </div>
                 )}
 
-                {portfolio.type === 'activities' && isExternalActivity && (
+                {isSpacePortfolio(portfolio) && isExternalActivity && (
                   <div className="flex items-center gap-2 mt-4">
                     <input
                       type="checkbox"
@@ -1102,53 +1090,7 @@ export function PortfolioEditor({
                   </button>
                   {advancedOpen && (
                     <div className="p-4 pt-2 space-y-4 border-t border-gray-200">
-                      {portfolio.type === 'activities' && (
-                        <div>
-                          <UIText as="label" className="block mb-2">
-                            Category
-                          </UIText>
-                          <ProjectTypeSelector
-                            generalCategory={projectTypeGeneral}
-                            specificType={projectTypeSpecific}
-                            onSelect={(general, specific) => {
-                              setProjectTypeGeneral(general)
-                              setProjectTypeSpecific(specific)
-                            }}
-                            disabled={loading}
-                          />
-                        </div>
-                      )}
-
-                      {portfolio.type === 'activities' && (
-                        <div>
-                          <UIText as="label" className="block mb-2">
-                            Visibility
-                          </UIText>
-                          <div className="flex flex-wrap gap-2">
-                            {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
-                              <button
-                                key={v}
-                                type="button"
-                                onClick={() => setVisibility(v)}
-                                className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                                  visibility === v
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                                }`}
-                                disabled={loading}
-                              >
-                                {v === 'public' && 'Public'}
-                                {v === 'private' && 'Private'}
-                              </button>
-                            ))}
-                          </div>
-                          <UIText as="p" className="text-xs text-gray-500 mt-1">
-                            Private activities are only visible to you and will not appear in search or feeds.
-                          </UIText>
-                        </div>
-                      )}
-
-                      {portfolio.type === 'activities' && (
+                      {isSpacePortfolio(portfolio) && (
                         <div>
                           <UIText as="label" className="block mb-2">
                             Status (Live / Archived)
@@ -1508,7 +1450,7 @@ export function PortfolioEditor({
       </div>
     )}
     {/* Host selector for activities (projects and communities) */}
-    {portfolio.type === 'activities' && showHostSelector && (
+    {isSpacePortfolio(portfolio) && showHostSelector && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <Card variant="default" padding="sm">
@@ -1613,7 +1555,7 @@ export function PortfolioEditor({
     )}
 
     {/* Call-to-join details popup for activities */}
-    {portfolio.type === 'activities' && showCallToJoinModal && (
+    {isSpacePortfolio(portfolio) && showCallToJoinModal && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div
           className="bg-white rounded-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-y-auto"

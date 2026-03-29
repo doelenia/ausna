@@ -7,7 +7,7 @@ import { getSubPortfolios } from '@/app/portfolio/[idOrSlug]/actions'
 
 interface SubPortfolio {
   id: string
-  type: 'portfolio'
+  type: 'space'
   name: string
   avatar?: string
   slug: string
@@ -16,7 +16,7 @@ interface SubPortfolio {
 
 interface SubPortfoliosTabProps {
   portfolioId: string
-  portfolioType: 'human' | 'portfolio'
+  portfolioType: 'human' | 'space'
   showOnly?: 'projects' | 'communities' // Optional filter to show only one type
   hideTitles?: boolean // Hide section titles (for All page)
 }

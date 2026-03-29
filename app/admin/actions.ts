@@ -17,6 +17,7 @@ import {
   DB_NON_HUMAN_TYPES,
   HumanPortfolioMetadata,
   ProjectPortfolioMetadata,
+  normalizePortfolioType,
 } from '@/types/portfolio'
 import {
   getDemoDisplayName,
@@ -444,7 +445,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
     const { data: ownedProjects, error: projectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .eq('user_id', userId)
 
     if (projectsError) {
@@ -495,7 +496,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
     const { data: allProjects, error: allProjectsError } = await serviceClient
       .from('portfolios')
       .select('id, user_id, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     if (allProjectsError) {
       console.error('Error fetching all projects:', allProjectsError)
@@ -545,7 +546,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResult> {
     const { data: allCommunities, error: communitiesError } = await serviceClient
       .from('portfolios')
       .select('id, user_id, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     if (communitiesError) {
       console.error('Error fetching communities:', communitiesError)
@@ -925,7 +926,7 @@ export async function approveUser(userId: string, approve: boolean): Promise<App
     const { error: updateProjectsError } = await serviceClient
       .from('portfolios')
       .update({ is_pseudo: nextIsPseudo })
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .eq('user_id', userId)
 
     if (updateProjectsError) {
@@ -1456,7 +1457,7 @@ export async function deletePortfolio(portfolioId: string): Promise<DeletePortfo
     }
 
     // If this was a project, remove it from owner's owned_projects list
-    if (portfolio.type === 'projects') {
+    if (normalizePortfolioType(portfolio.type) === 'space') {
       try {
         const { removeProjectFromOwnedList } = await import('@/lib/portfolio/human')
         await removeProjectFromOwnedList(portfolio.user_id, portfolioId)
@@ -1670,7 +1671,7 @@ export async function createHumanPortfolioWithProjects(
         const { data: existing } = await supabase
           .from('portfolios')
           .select('id')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .eq('slug', slug)
           .maybeSingle()
 
@@ -2044,7 +2045,7 @@ export async function reprocessApprovedForm(
     const { data: pseudoProjects, error: projectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
       .eq('user_id', userId)
       .eq('is_pseudo', true)
 
@@ -2150,7 +2151,7 @@ export async function reprocessApprovedForm(
       const { data: allCommunities, error: communitiesError } = await serviceClient
         .from('portfolios')
         .select('id, metadata')
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
 
       if (!communitiesError && allCommunities) {
         for (const community of allCommunities) {
@@ -2364,7 +2365,7 @@ export async function getMatchData(userId: string): Promise<GetMatchDataResult> 
     const { data: allProjects, error: projectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata, created_at, updated_at, user_id, is_pseudo')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     if (projectsError) {
       console.error('Error fetching projects:', projectsError)
@@ -2746,7 +2747,7 @@ export async function getMatchExplanation(
     const { data: searcherProjects, error: searcherProjectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     if (searcherProjectsError) {
       console.error('Error fetching searcher projects:', searcherProjectsError)
@@ -2779,7 +2780,7 @@ export async function getMatchExplanation(
     const { data: targetProjects, error: targetProjectsError } = await serviceClient
       .from('portfolios')
       .select('id, metadata')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     if (targetProjectsError) {
       console.error('Error fetching target projects:', targetProjectsError)
@@ -3262,7 +3263,7 @@ export async function getMatchBreakdown(
             .from('portfolios')
             .select('id, metadata')
             .in('id', missingProjectIds)
-            .in('type', ['portfolio', 'space'])
+            .in('type', [...DB_NON_HUMAN_TYPES])
 
           ;(fetchedProjects || []).forEach((p: any) => {
             const meta = (p.metadata as any) || {}
@@ -3283,7 +3284,7 @@ export async function getMatchBreakdown(
           .from('portfolios')
           .select('id, metadata')
           .in('id', Array.from(projectIdsFromSource))
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
 
         ;(fetchedProjects || []).forEach((p: any) => {
           const meta = (p.metadata as any) || {}

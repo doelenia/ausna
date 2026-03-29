@@ -10,6 +10,7 @@ import { CreateHumanPortfolioInput } from '@/app/admin/actions'
 import { PublicUploadFormConfig, EmailCheckResponse } from '@/types/public-upload-form'
 import { createClient } from '@/lib/supabase/client'
 import { getSpaceUrl } from '@/lib/portfolio/routes'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 interface ProjectMember {
   name: string
@@ -146,7 +147,7 @@ export function PublicUploadForm({ config }: PublicUploadFormProps) {
           .from('portfolios')
           .select('id, user_id, metadata')
           .eq('id', PROJECT_ID)
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .maybeSingle()
 
         if (projectError || !project) {

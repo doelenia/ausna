@@ -1,22 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getUserCommunities } from '@/app/main/actions'
+import { getUserSpaces } from '@/app/main/actions'
 
 /**
- * GET /api/feed/communities - Get all communities the user is a member of
+ * GET /api/feed/communities — spaces the current user belongs to (feed tabs).
+ * Response includes `spaces` (canonical) and `communities` (same data, deprecated alias).
  */
-export async function GET(request: NextRequest) {
+export async function GET(_request: NextRequest) {
   try {
-    const result = await getUserCommunities()
+    const result = await getUserSpaces()
 
     if (!result.success) {
       return NextResponse.json(
-        { error: result.error || 'Failed to fetch communities' },
+        { error: result.error || 'Failed to fetch spaces' },
         { status: 500 }
       )
     }
 
+    const spaces = result.spaces || []
     return NextResponse.json({
-      communities: result.communities || [],
+      spaces,
+      communities: spaces,
     })
   } catch (error: any) {
     console.error('API route error:', error)
@@ -26,8 +29,3 @@ export async function GET(request: NextRequest) {
     )
   }
 }
-
-
-
-
-

@@ -5,6 +5,7 @@
  */
 
 import { createServiceClient } from '@/lib/supabase/service'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { getTopicIdsForPortfolio } from './interest-tracking'
 import {
   getUserAskVectors,
@@ -216,7 +217,7 @@ async function enrichAsksAndNonAsks(userId: string): Promise<{
     const { data: allProjects } = await supabase
       .from('portfolios')
       .select('id, metadata, user_id')
-      .in('type', ['portfolio', 'space'])
+      .in('type', [...DB_NON_HUMAN_TYPES])
 
     const relatedProjects =
       allProjects?.filter((p: any) => {

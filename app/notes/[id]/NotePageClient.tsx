@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Note } from '@/types/note'
-import { Portfolio } from '@/types/portfolio'
+import { Portfolio, isSpacePortfolio } from '@/types/portfolio'
 import { NoteView } from '@/components/notes/NoteView'
 import { useDataCache } from '@/lib/cache/useDataCache'
 
@@ -125,7 +125,7 @@ export function NotePageClient({
         p => p.user_id === serverNote.owner_account_id
       ) || null
       
-      const assignedProjects = serverPortfolios.filter(p => p.type === 'portfolio')
+      const assignedProjects = serverPortfolios.filter((p) => isSpacePortfolio(p))
       
       if (ownerPortfolio || assignedProjects.length > 0) {
         setCachedPortfolioData(noteId, {

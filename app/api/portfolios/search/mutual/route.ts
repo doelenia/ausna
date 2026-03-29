@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { DB_NON_HUMAN_TYPES, normalizePortfolioType } from '@/types/portfolio'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
       const { data: userCommunities } = await supabase
         .from('portfolios')
         .select('id, metadata')
-        .in('type', ['portfolio', 'space'])
+        .in('type', [...DB_NON_HUMAN_TYPES])
         .limit(100)
 
       if (userCommunities) {
@@ -138,7 +139,7 @@ export async function GET(request: NextRequest) {
           }
         })
       }
-    } else if (portfolioType === 'projects' || portfolioType === 'community') {
+    } else if (normalizePortfolioType(portfolioType) === 'space') {
       // For projects/communities: find friends who are members
       const members = metadata?.members || []
       if (Array.isArray(members)) {

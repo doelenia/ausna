@@ -1,5 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
-import { Portfolio, PortfolioType, PinnedItem, isHumanPortfolio } from '@/types/portfolio'
+import {
+  Portfolio,
+  PortfolioType,
+  PinnedItem,
+  isHumanPortfolio,
+  normalizePinnedItemType,
+} from '@/types/portfolio'
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // Re-export pure utility functions (can be used in client components)
@@ -175,7 +181,7 @@ export function getPinnedItemsCount(portfolio: Portfolio): number {
  */
 export async function canAddToPinned(
   portfolio: Portfolio,
-  itemType: 'portfolio' | 'note',
+  itemType: 'space' | 'note' | 'portfolio',
   itemId: string
 ): Promise<{ canAdd: boolean; error?: string }> {
   // Check if pinned list is full
@@ -191,9 +197,11 @@ export async function canAddToPinned(
   const metadata = portfolio.metadata as any
   const pinned = metadata?.pinned || []
   if (Array.isArray(pinned)) {
-    const isAlreadyPinned = pinned.some(
-      (item: PinnedItem) => item.type === itemType && item.id === itemId
-    )
+    const isAlreadyPinned = pinned.some((item: PinnedItem) => {
+      const a = normalizePinnedItemType(item.type)
+      const b = normalizePinnedItemType(itemType)
+      return a === b && b !== null && item.id === itemId
+    })
     if (isAlreadyPinned) {
       return {
         canAdd: false,
@@ -203,7 +211,7 @@ export async function canAddToPinned(
   }
 
   // Validate based on item type
-  if (itemType === 'portfolio') {
+  if (normalizePinnedItemType(itemType) === 'space') {
     // For human portfolios: can pin portfolios where user is manager or member
     // For project/community portfolios: can pin portfolios where user is manager or member
     // This validation will be done in the calling code based on portfolio type
@@ -254,10 +262,9 @@ export async function canAddToPinned(
  * Returns the specific type if available, otherwise null
  */
 export function getProjectType(portfolio: Portfolio): string | null {
-  if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+  if (isHumanPortfolio(portfolio)) {
     return null
   }
-  
   const metadata = portfolio.metadata as any
   return metadata?.project_type_specific || null
 }
@@ -267,10 +274,9 @@ export function getProjectType(portfolio: Portfolio): string | null {
  * Returns the role for a specific user, or null if not set
  */
 export function getMemberRole(portfolio: Portfolio, userId: string): string | null {
-  if (portfolio.type !== 'projects' && portfolio.type !== 'community') {
+  if (isHumanPortfolio(portfolio)) {
     return null
   }
-  
   const metadata = portfolio.metadata as any
   const memberRoles = metadata?.memberRoles || {}
   return memberRoles[userId] || null

@@ -8,7 +8,7 @@ import { Search } from 'lucide-react'
 
 interface SearchResult {
   id: string
-  type: 'human' | 'projects' | 'community'
+  type: string
   name: string
   description?: string
   avatar?: string | null

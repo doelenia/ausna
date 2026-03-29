@@ -20,7 +20,7 @@ import { Rss } from 'lucide-react'
 interface FeedViewProps {
   currentUserId?: string
   apiPath?: string
-  openCallContext?: 'feed' | 'human' | 'portfolio'
+  openCallContext?: 'feed' | 'human' | 'space'
   openCallPortfolioId?: string
   showOpenCallStack?: boolean
   /** From e.g. /main?showOpenCalls=1 — opens the open-call carousel once data is ready */
@@ -37,7 +37,7 @@ export function FeedView({
 }: FeedViewProps) {
   const { setCachedNote } = useDataCache()
   const [activeFeed, setActiveFeed] = useState<FeedType>('all')
-  const [activeCommunityId, setActiveCommunityId] = useState<string | null>(null)
+  const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null)
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -76,8 +76,8 @@ export function FeedView({
           limit: '10',
         })
 
-        if (activeFeed === 'community' && activeCommunityId) {
-          params.append('communityId', activeCommunityId)
+        if (activeFeed === 'space' && activeSpaceId) {
+          params.append('spaceId', activeSpaceId)
         }
 
         const url = `${apiPath}?${params.toString()}`
@@ -163,7 +163,7 @@ export function FeedView({
         inFlightRef.current = false
       }
     },
-    [activeFeed, activeCommunityId, currentUserId, apiPath]
+    [activeFeed, activeSpaceId, currentUserId, apiPath]
   )
 
   // Keep loadNotes ref up to date
@@ -174,7 +174,7 @@ export function FeedView({
   // Load initial notes when feed type changes
   useEffect(() => {
     loadNotes(true)
-  }, [activeFeed, activeCommunityId, loadNotes])
+  }, [activeFeed, activeSpaceId, loadNotes])
 
   // Infinite scroll observer (only for logged-in users)
   useEffect(() => {

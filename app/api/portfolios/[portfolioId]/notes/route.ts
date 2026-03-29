@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { Note } from '@/types/note'
 import { enrichNotesWithAuthorProfiles } from '@/app/main/actions'
+import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 /**
  * GET /api/portfolios/[portfolioId]/notes - Get notes assigned to a portfolio with pagination
@@ -92,7 +93,7 @@ export async function GET(
         const { data: hostedActivities } = await supabase
           .from('portfolios')
           .select('id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
         const hostedIds = (hostedActivities || [])
           .filter((a: any) => {
             const hostProjectIds = (a.metadata as any)?.properties?.host_project_ids

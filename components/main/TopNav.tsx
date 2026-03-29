@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-auth'
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
-import { HumanPortfolio } from '@/types/portfolio'
+import { HumanPortfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { getHumanProfileUrl, getSpaceCreateUrl } from '@/lib/portfolio/routes'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
 import { Home, MessageCircle, Plus, Search, Balloon, LogIn } from 'lucide-react'
@@ -215,14 +215,14 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         const { data: allProjects } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
         // Fetch all activities
         const { data: allActivities } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata, host_project_id')
-          .in('type', ['portfolio', 'space'])
+          .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
         if (!allProjects) {

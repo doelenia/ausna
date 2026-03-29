@@ -76,7 +76,7 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
     }
 
     if (mutualInfo) {
-      const normalizedType = normalizePortfolioType(result.type) || 'portfolio'
+      const normalizedType = normalizePortfolioType(result.type) || 'space'
       if (normalizedType === 'human') {
         // Prioritize mutual communities, then mutual friends
         if (mutualInfo.mutualCommunities.length > 0) {
@@ -116,7 +116,7 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
   }
 
   const secondLine = getSecondLine()
-  const normalizedType = normalizePortfolioType(result.type) || 'portfolio'
+  const normalizedType = normalizePortfolioType(result.type) || 'space'
   const portfolioUrl =
     normalizedType === 'human' && result.is_pseudo
       ? undefined
@@ -173,11 +173,8 @@ export function SearchResultItem({ result, currentUserId }: SearchResultItemProp
           {result.type === 'human' && result.username && (
             <UIButtonText className="text-gray-500 flex-shrink-0">@{result.username}</UIButtonText>
           )}
-          {result.type === 'projects' && result.projectType && (
+          {normalizePortfolioType(result.type) === 'space' && result.projectType && (
             <UIButtonText className="text-gray-500 flex-shrink-0">{result.projectType}</UIButtonText>
-          )}
-          {result.type === 'community' && (
-            <UIButtonText className="text-gray-500 flex-shrink-0">Community</UIButtonText>
           )}
         </div>
 
