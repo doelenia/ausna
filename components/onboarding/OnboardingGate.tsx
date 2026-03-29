@@ -959,6 +959,14 @@ interface CommunitySearchResult {
 function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<CommunitySearchResult[]>([])
+  const [featuredSpaces, setFeaturedSpaces] = useState<Array<{
+    id: string
+    slug?: string | null
+    name: string
+    description?: string
+    avatar?: string | null
+    emoji?: string | null
+  }>>([])
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [promptAnswer, setPromptAnswer] = useState('')
@@ -966,6 +974,20 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    fetch('/api/spaces/eligible-org-membership')
+      .then((res) => res.json())
+      .then((data) => {
+        const list = Array.isArray(data?.results) ? data.results : []
+        setFeaturedSpaces(
+          list
+            .filter((x: any) => x && typeof x.id === 'string' && typeof x.name === 'string')
+            .slice(0, 3)
+        )
+      })
+      .catch(() => setFeaturedSpaces([]))
+  }, [])
 
   useEffect(() => {
     if (!query.trim()) {
@@ -1001,8 +1023,8 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedId || !promptAnswer.trim()) {
-      setFeedback('Please provide an answer.')
+    if (!selectedId) {
+      setFeedback('Please select a space.')
       return
     }
     setSubmitting(true)
@@ -1051,18 +1073,87 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
   }
 
   const selectedCommunity =
-    results.find((r) => r.id === selectedId) ?? (selectedId ? { name: 'Community', id: selectedId } : null)
+    results.find((r) => r.id === selectedId) ?? (selectedId ? { name: 'Space', id: selectedId } : null)
 
   return (
     <>
       <Card variant="spacious" className="max-w-xl mx-auto">
         <Title as="h1" className="mb-2">
-          Join a community
+          Join a space
         </Title>
         <Content className="mb-4">
-          Search for a community to join, or skip this step for now.
+          If your email is eligible for an organization space, we’ll show it here. You can also search for any public space to join, or skip for now.
         </Content>
         <div className="space-y-4">
+          {featuredSpaces.length > 0 && (
+            <Card variant="subtle" padding="sm">
+              <div className="space-y-2">
+                <UIText className="text-gray-700">Recommended for you</UIText>
+                <div className="space-y-2">
+                  {featuredSpaces.map((s) => (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-white border border-gray-100"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <StickerAvatar
+                          src={s.avatar ?? undefined}
+                          alt={s.name}
+                          type="space"
+                          size={40}
+                          emoji={s.emoji ?? undefined}
+                          name={s.name}
+                        />
+                        <div className="min-w-0">
+                          <Content className="truncate">{s.name}</Content>
+                          {s.description ? (
+                            <UIText className="text-gray-600 truncate">{s.description}</UIText>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          onClick={async () => {
+                          setSubmitting(true)
+                          setFeedback(null)
+                          try {
+                            const result = await applyToActivityCallToJoin({
+                              portfolioId: s.id,
+                              promptAnswer: '',
+                            })
+                            if (!result?.success) {
+                              setFeedback(result?.error ?? 'Failed to join.')
+                              return
+                            }
+                            const flagResult = await setJoinCommunitySeen()
+                            if (!flagResult.success) {
+                              setFeedback(flagResult.error ?? 'Failed to update.')
+                              return
+                            }
+                            onComplete()
+                          } catch (_err) {
+                            setFeedback('An unexpected error occurred.')
+                          } finally {
+                            setSubmitting(false)
+                          }
+                          }}
+                          disabled={submitting}
+                        >
+                          <UIText>Join</UIText>
+                        </Button>
+                        <UIText className="text-green-700 text-right">
+                          You are verified as part of {s.name}, please join with one click!
+                        </UIText>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          )}
           <div>
             <UIText as="label" className="block mb-1">
               Search by name or slug
@@ -1107,7 +1198,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
                       <div className="flex-1 min-w-0 overflow-hidden">
                         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
                           <Content className="truncate min-w-0">{r.name}</Content>
-                          <UIButtonText className="text-gray-500 flex-shrink-0">Community</UIButtonText>
+                          <UIButtonText className="text-gray-500 flex-shrink-0">Space</UIButtonText>
                         </div>
                         {r.description && (
                           <div className="min-w-0 overflow-hidden">
@@ -1129,7 +1220,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
                           setFeedback(null)
                         }}
                       >
-                        <UIText>Apply</UIText>
+                        <UIText>Join</UIText>
                       </Button>
                     </div>
                   </div>
@@ -1154,22 +1245,21 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
         <div className="fixed inset-0 z-[101] flex items-center justify-center bg-black/40 p-4">
           <Card variant="spacious" className="w-full max-w-md">
             <Title as="h2" className="mb-2">
-              Request to join {selectedCommunity?.name ?? 'community'}
+              Request to join {selectedCommunity?.name ?? 'space'}
             </Title>
             <Content className="mb-3">
-              Please provide proofs of your membership.
+              If this space requires approval, the owner/managers will review your request.
             </Content>
             <form onSubmit={handleJoin} className="space-y-4">
               <div>
                 <UIText as="label" className="block mb-1">
-                  Your answer
+                  Message (optional)
                 </UIText>
                 <textarea
                   value={promptAnswer}
                   onChange={(e) => setPromptAnswer(e.target.value)}
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                  required
                 />
               </div>
               {feedback && (

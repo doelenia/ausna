@@ -18,20 +18,12 @@ import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
 import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
-interface HostProjectOption {
+interface HostSpaceOption {
   id: string
   name: string
   avatar?: string
   emoji?: string
   description?: string
-  projectType?: string | null
-}
-
-interface HostCommunityOption {
-  id: string
-  name: string
-  avatar?: string
-  emoji?: string
 }
 
 const DEFAULT_SPACE_EMOJIS = [
@@ -77,14 +69,10 @@ export function CreateActivityForm({
   const [activityValue, setActivityValue] = useState<ActivityDateTimeValue | null>(null)
   const [activityLocation, setActivityLocation] = useState<ActivityLocationValue | null>(null)
   const [projectStatus, setProjectStatus] = useState<string>('live')
-  const [hostProjects, setHostProjects] = useState<HostProjectOption[]>([])
-  const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
-  const [hostProjectIds, setHostProjectIds] = useState<string[]>([])
-  const [hostCommunities, setHostCommunities] = useState<HostCommunityOption[]>([])
-  const [hostCommunitiesLoading, setHostCommunitiesLoading] = useState(false)
-  const [hostCommunityIds, setHostCommunityIds] = useState<string[]>([])
+  const [hostSpaces, setHostSpaces] = useState<HostSpaceOption[]>([])
+  const [hostSpacesLoading, setHostSpacesLoading] = useState(false)
+  const [hostSpaceIds, setHostSpaceIds] = useState<string[]>([])
   const [showHostSelector, setShowHostSelector] = useState(false)
-  const [hostSelectorTab, setHostSelectorTab] = useState<'projects' | 'communities'>('projects')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -94,6 +82,7 @@ export function CreateActivityForm({
   const [callToJoinJoinByLocal, setCallToJoinJoinByLocal] = useState<string>('') // datetime-local value
   const [callToJoinRequireApproval, setCallToJoinRequireApproval] = useState<boolean>(true)
   const [callToJoinPrompt, setCallToJoinPrompt] = useState<string>('Why do you want to join this activity?')
+  const [orgMembershipEmailSuffixes, setOrgMembershipEmailSuffixes] = useState<string>('')
   const [callToJoinRoles, setCallToJoinRoles] = useState<
     Array<{ id: string; label: string; activityRole: 'member' | 'manager' }>
   >([
@@ -239,116 +228,66 @@ export function CreateActivityForm({
   useEffect(() => {
     const initialHost = searchParams?.get('host') || ''
     if (initialHost) {
-      setHostProjectIds((prev) => (prev.includes(initialHost) ? prev : [...prev, initialHost]))
+      setHostSpaceIds((prev) => (prev.includes(initialHost) ? prev : [...prev, initialHost]))
     }
   }, [searchParams])
 
   useEffect(() => {
-    const fetchHostProjects = async () => {
+    const fetchHostSpaces = async () => {
       if (!showHosts) return
-      setHostProjectsLoading(true)
+      setHostSpacesLoading(true)
       try {
         const {
           data: { user },
           error: authError,
         } = await supabase.auth.getUser()
         if (authError || !user) {
-          setHostProjects([])
-          setHostProjectsLoading(false)
+          setHostSpaces([])
+          setHostSpacesLoading(false)
           return
         }
 
-        const { data: projects } = await supabase
+        const { data: spaces } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
           .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
-        const options: HostProjectOption[] =
-          projects
+        const options: HostSpaceOption[] =
+          spaces
             ?.filter((p: any) => {
               const meta = p.metadata as any
               const managers: string[] = meta?.managers || []
               const isOwner = p.user_id === user.id
               const isManager = Array.isArray(managers) && managers.includes(user.id)
-              return isOwner || isManager
+              const isSelf =
+                existingActivity && typeof existingActivity.id === 'string'
+                  ? p.id === existingActivity.id
+                  : false
+              return (isOwner || isManager) && !isSelf
             })
             .map((p: any) => {
               const meta = p.metadata as any
               const basic = meta?.basic || {}
               return {
                 id: p.id as string,
-                name: (basic.name as string) || 'Project',
+                name: (basic.name as string) || 'Space',
                 avatar: basic.avatar as string | undefined,
                 emoji: basic.emoji as string | undefined,
                 description: basic.description as string | undefined,
-                projectType: (meta?.project_type_specific as string | undefined) ?? null,
               }
             }) ?? []
 
-        setHostProjects(options)
+        setHostSpaces(options)
       } catch (e) {
-        console.error('Failed to load host projects for activities', e)
-        setHostProjects([])
+        console.error('Failed to load host spaces for activities', e)
+        setHostSpaces([])
       } finally {
-        setHostProjectsLoading(false)
+        setHostSpacesLoading(false)
       }
     }
 
-    fetchHostProjects()
-  }, [supabase])
-
-  useEffect(() => {
-    const fetchHostCommunities = async () => {
-      if (!showHosts) return
-      setHostCommunitiesLoading(true)
-      try {
-        const {
-          data: { user },
-          error: authError,
-        } = await supabase.auth.getUser()
-        if (authError || !user) {
-          setHostCommunities([])
-          setHostCommunitiesLoading(false)
-          return
-        }
-
-        const { data: communities } = await supabase
-          .from('portfolios')
-          .select('id, user_id, metadata')
-          .in('type', [...DB_NON_HUMAN_TYPES])
-          .order('created_at', { ascending: false })
-
-        const options: HostCommunityOption[] =
-          communities
-            ?.filter((c: any) => {
-              const meta = c.metadata as any
-              const managers: string[] = meta?.managers || []
-              const isOwner = c.user_id === user.id
-              const isManager = Array.isArray(managers) && managers.includes(user.id)
-              return isOwner || isManager
-            })
-            .map((c: any) => {
-              const meta = c.metadata as any
-              const basic = meta?.basic || {}
-              return {
-                id: c.id as string,
-                name: (basic.name as string) || 'Community',
-                avatar: basic.avatar as string | undefined,
-                emoji: basic.emoji as string | undefined,
-              }
-            }) ?? []
-
-        setHostCommunities(options)
-      } catch (e) {
-        console.error('Failed to load host communities for activities', e)
-        setHostCommunities([])
-      } finally {
-        setHostCommunitiesLoading(false)
-      }
-    }
-
-    fetchHostCommunities()
+    fetchHostSpaces()
   }, [supabase])
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -443,13 +382,8 @@ export function CreateActivityForm({
       if (isExternal) {
         formData.append('is_external', 'true')
         formData.append('external_link', externalLink.trim())
-      } else {
-        if (showHosts && hostProjectIds.length > 0) {
-          formData.append('host_project_ids', JSON.stringify(hostProjectIds))
-        }
-        if (showHosts && hostCommunityIds.length > 0) {
-          formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
-        }
+      } else if (showHosts && hostSpaceIds.length > 0) {
+        formData.append('host_project_ids', JSON.stringify(hostSpaceIds))
       }
 
       if (avatarFile) {
@@ -492,6 +426,9 @@ export function CreateActivityForm({
         )
         if (callToJoinRequireApproval && callToJoinPrompt.trim().length > 0) {
           formData.append('activity_call_to_join_prompt', callToJoinPrompt.trim())
+        }
+        if (orgMembershipEmailSuffixes.trim().length > 0) {
+          formData.append('org_membership_email_suffixes', orgMembershipEmailSuffixes.trim())
         }
         if (callToJoinRoles.length > 0) {
           formData.append(
@@ -748,11 +685,11 @@ export function CreateActivityForm({
             Hosts (optional)
           </UIText>
           <UIText as="p" className="text-xs text-gray-500 mb-2">
-            Projects and communities that host this activity. You can add projects and communities where you are owner or manager.
+            Spaces that host this activity. You can add spaces where you are owner or manager.
           </UIText>
           <div className="flex flex-wrap gap-2">
-            {hostProjectIds.map((id) => {
-              const p = hostProjects.find((x) => x.id === id)
+            {hostSpaceIds.map((id) => {
+              const p = hostSpaces.find((x) => x.id === id)
               if (!p) return null
               return (
                 <div
@@ -770,9 +707,9 @@ export function CreateActivityForm({
                   <Content className="truncate max-w-[120px]">{p.name}</Content>
                   <button
                     type="button"
-                    onClick={() => setHostProjectIds((prev) => prev.filter((x) => x !== id))}
+                    onClick={() => setHostSpaceIds((prev) => prev.filter((x) => x !== id))}
                     className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
-                    aria-label="Remove host project"
+                    aria-label="Remove host space"
                     disabled={loading}
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -782,57 +719,23 @@ export function CreateActivityForm({
                 </div>
               )
             })}
-            {hostCommunityIds.map((id) => {
-              const c = hostCommunities.find((x) => x.id === id)
-              if (!c) return null
-              return (
-                <div
-                  key={`community-${id}`}
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 flex-shrink-0"
-                >
-                  <StickerAvatar
-                    src={c.avatar}
-                    alt={c.name}
-                    type="space"
-                    size={32}
-                    emoji={c.emoji}
-                    name={c.name}
-                  />
-                  <Content className="truncate max-w-[120px]">{c.name}</Content>
-                  <button
-                    type="button"
-                    onClick={() => setHostCommunityIds((prev) => prev.filter((x) => x !== id))}
-                    className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
-                    aria-label="Remove host community"
-                    disabled={loading}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              )
-            })}
-            {(hostProjectsLoading || hostCommunitiesLoading) ? (
+            {hostSpacesLoading ? (
               <UIText className="text-gray-500">Loading...</UIText>
             ) : (
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={() => {
-                  setHostSelectorTab('projects')
-                  setShowHostSelector(true)
-                }}
+                onClick={() => setShowHostSelector(true)}
                 disabled={loading}
               >
                 <UIText>Add host</UIText>
               </Button>
             )}
           </div>
-          {!hostProjectsLoading && !hostCommunitiesLoading && hostProjects.length === 0 && hostCommunities.length === 0 && (
+          {!hostSpacesLoading && hostSpaces.length === 0 && (
             <UIText className="text-gray-500 text-sm mt-1">
-              You can optionally link this activity to projects or communities where you are an owner or manager.
+              You can optionally link this activity to spaces where you are an owner or manager.
             </UIText>
           )}
         </div>
@@ -908,8 +811,7 @@ export function CreateActivityForm({
                           setExternalLink('')
                           setExistingActivity(null)
                           setIAmGoing(true)
-                          setHostProjectIds([])
-                          setHostCommunityIds([])
+                          setHostSpaceIds([])
                           setVisibility('public')
                         }
                         return next
@@ -1216,7 +1118,10 @@ export function CreateActivityForm({
       )}
 
       {showHostSelector && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
+        <div
+          className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40"
+          onClick={() => setShowHostSelector(false)}
+        >
           <div
             className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
@@ -1224,97 +1129,41 @@ export function CreateActivityForm({
             <Card variant="default" padding="sm">
               <div className="mb-4">
                 <UIText as="h2">Add host</UIText>
-                <div className="flex gap-2 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => setHostSelectorTab('projects')}
-                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                      hostSelectorTab === 'projects' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                  >
-                    Projects
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHostSelectorTab('communities')}
-                    className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                      hostSelectorTab === 'communities' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    }`}
-                  >
-                    Communities
-                  </button>
-                </div>
               </div>
-              {hostSelectorTab === 'projects' ? (
-                hostProjectsLoading ? (
-                  <div className="py-8 text-center">
-                    <UIText className="text-gray-500">Loading projects...</UIText>
-                  </div>
-                ) : hostProjects.filter((p) => !hostProjectIds.includes(p.id)).length === 0 ? (
-                  <UIText className="text-gray-500 text-sm mb-4">
-                    No more projects to add, or you are not owner/manager of any.
-                  </UIText>
-                ) : (
-                  <div className="grid grid-cols-3 gap-x-4 gap-y-8 mb-4">
-                    {hostProjects
-                      .filter((p) => !hostProjectIds.includes(p.id))
-                      .map((project) => (
-                        <button
-                          key={project.id}
-                          type="button"
-                          className="flex flex-col items-center gap-4 py-6 px-4 hover:opacity-80 transition-opacity"
-                          onClick={() => {
-                            setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
-                            setShowHostSelector(false)
-                          }}
-                        >
-                          <StickerAvatar
-                            src={project.avatar}
-                            alt={project.name}
-                            type="space"
-                            size={72}
-                            emoji={project.emoji}
-                            name={project.name}
-                          />
-                          <UIText className="text-center max-w-[96px] truncate" title={project.name}>
-                            {project.name}
-                          </UIText>
-                        </button>
-                      ))}
-                  </div>
-                )
-              ) : hostCommunitiesLoading ? (
+              {hostSpacesLoading ? (
                 <div className="py-8 text-center">
-                  <UIText className="text-gray-500">Loading communities...</UIText>
+                  <UIText className="text-gray-500">Loading spaces...</UIText>
                 </div>
-              ) : hostCommunities.filter((c) => !hostCommunityIds.includes(c.id)).length === 0 ? (
+              ) : hostSpaces.filter((p) => !hostSpaceIds.includes(p.id)).length === 0 ? (
                 <UIText className="text-gray-500 text-sm mb-4">
-                  No more communities to add, or you are not owner/manager of any.
+                  No more spaces to add, or you are not owner/manager of any.
                 </UIText>
               ) : (
                 <div className="grid grid-cols-3 gap-x-4 gap-y-8 mb-4">
-                  {hostCommunities
-                    .filter((c) => !hostCommunityIds.includes(c.id))
-                    .map((community) => (
+                  {hostSpaces
+                    .filter((p) => !hostSpaceIds.includes(p.id))
+                    .map((space) => (
                       <button
-                        key={community.id}
+                        key={space.id}
                         type="button"
                         className="flex flex-col items-center gap-4 py-6 px-4 hover:opacity-80 transition-opacity"
                         onClick={() => {
-                          setHostCommunityIds((prev) => (prev.includes(community.id) ? prev : [...prev, community.id]))
+                          setHostSpaceIds((prev) =>
+                            prev.includes(space.id) ? prev : [...prev, space.id]
+                          )
                           setShowHostSelector(false)
                         }}
                       >
                         <StickerAvatar
-                          src={community.avatar}
-                          alt={community.name}
+                          src={space.avatar}
+                          alt={space.name}
                           type="space"
                           size={72}
-                          emoji={community.emoji}
-                          name={community.name}
+                          emoji={space.emoji}
+                          name={space.name}
                         />
-                        <UIText className="text-center max-w-[96px] truncate" title={community.name}>
-                          {community.name}
+                        <UIText className="text-center max-w-[96px] truncate" title={space.name}>
+                          {space.name}
                         </UIText>
                       </button>
                     ))}
@@ -1380,17 +1229,34 @@ export function CreateActivityForm({
                   </UIText>
                 </div>
                 {callToJoinRequireApproval && (
-                  <div>
-                    <UIText as="label" className="block mb-1">
-                      Prompt (optional)
-                    </UIText>
-                    <textarea
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                      rows={3}
-                      value={callToJoinPrompt}
-                      onChange={(e) => setCallToJoinPrompt(e.target.value)}
-                    />
-                  </div>
+                  <>
+                    <div>
+                      <UIText as="label" className="block mb-1">
+                        Organization email suffixes (optional)
+                      </UIText>
+                      <input
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        value={orgMembershipEmailSuffixes}
+                        onChange={(e) => setOrgMembershipEmailSuffixes(e.target.value)}
+                        placeholder="e.g. company.com, school.edu"
+                        autoComplete="off"
+                      />
+                      <UIText as="p" className="text-xs text-gray-500 mt-1">
+                        People with matching email domains can join without approval.
+                      </UIText>
+                    </div>
+                    <div>
+                      <UIText as="label" className="block mb-1">
+                        Prompt (optional)
+                      </UIText>
+                      <textarea
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        rows={3}
+                        value={callToJoinPrompt}
+                        onChange={(e) => setCallToJoinPrompt(e.target.value)}
+                      />
+                    </div>
+                  </>
                 )}
                 <div className="flex justify-end gap-2 mt-4">
                   <Button

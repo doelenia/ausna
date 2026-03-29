@@ -411,6 +411,7 @@ export async function updatePortfolio(
     ) as string | null
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostCommunityIdsRaw = formData.get('host_community_ids') as string | null
+    const orgMembershipEmailSuffixesRaw = formData.get('org_membership_email_suffixes') as string | null
     const humanAutoCityLocationEnabledRaw = formData.get(
       'human_auto_city_location_enabled'
     ) as string | null
@@ -758,6 +759,24 @@ export async function updatePortfolio(
         })
         if (rpcError) {
           return { success: false, error: rpcError.message || 'Failed to update membership' }
+        }
+      }
+
+      // Optional: organizational membership rule (domain-based auto-join).
+      // Accepts comma/space separated suffixes; empty clears the config.
+      if (orgMembershipEmailSuffixesRaw !== null) {
+        const { normalizeEmailSuffixes } = await import('@/lib/portfolio/orgMembership')
+        const suffixes = normalizeEmailSuffixes(orgMembershipEmailSuffixesRaw || '')
+        const nextProps = (updatedMetadata.properties || properties || {}) as Record<string, any>
+        if (suffixes.length > 0) {
+          updatedMetadata.properties = {
+            ...nextProps,
+            org_membership: { enabled: true, email_suffixes: suffixes },
+          }
+        } else {
+          // Clear
+          const { org_membership, ...rest } = nextProps
+          updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
         }
       }
     }
@@ -1648,6 +1667,9 @@ export async function applyToActivityCallToJoin(
     const properties: Record<string, any> = (metadata.properties || {}) as Record<string, any>
     const callToJoin: ActivityCallToJoinConfig | undefined = properties.call_to_join
     const isExternal = properties.external === true
+    const orgMembership = (properties.org_membership || null) as
+      | { enabled?: boolean; email_suffixes?: unknown }
+      | null
 
     // External portfolios: always publicly joinable, no call-to-join config needed
     if (!isExternal && !callToJoin) {
@@ -1682,8 +1704,17 @@ export async function applyToActivityCallToJoin(
     const portfolioName = (basic.name as string) || 'this portfolio'
     const label = portfolioJoinRequestMessageLabel(portfolio)
 
-    // External activities: always auto-join. Non-external with approval: create pending request.
+    // External activities: always auto-join.
+    // Non-external with approval: create pending request unless org-membership rule allows bypass.
+    let bypassApproval = false
     if (!isExternal && callToJoin?.require_approval) {
+      if (orgMembership?.enabled === true) {
+        const { isEmailEligibleForOrgMembership } = await import('@/lib/portfolio/orgMembership')
+        bypassApproval = isEmailEligibleForOrgMembership((user as any)?.email ?? null, orgMembership.email_suffixes)
+      }
+    }
+
+    if (!isExternal && callToJoin?.require_approval && !bypassApproval) {
       // Create or reuse a pending join request
       const { data: existingRequest } = await supabase
         .from('portfolio_join_requests')

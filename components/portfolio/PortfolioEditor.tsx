@@ -253,6 +253,15 @@ export function PortfolioEditor({
   const [callToJoinConfig, setCallToJoinConfig] = useState<ActivityCallToJoinConfig | null>(
     initialCallToJoin
   )
+  const initialOrgMembershipSuffixes: string = (() => {
+    const raw = metadata?.properties?.org_membership?.email_suffixes
+    if (!Array.isArray(raw)) return ''
+    const list = raw.filter((v: any) => typeof v === 'string' && v.trim().length > 0)
+    return list.join(', ')
+  })()
+  const [orgMembershipEmailSuffixes, setOrgMembershipEmailSuffixes] = useState<string>(
+    initialOrgMembershipSuffixes
+  )
   const [showCallToJoinModal, setShowCallToJoinModal] = useState(false)
   const initialHostProjectIds: string[] =
     (metadata?.properties?.host_project_ids as string[] | undefined) ||
@@ -261,12 +270,9 @@ export function PortfolioEditor({
   const initialHostCommunityIds: string[] =
     (metadata?.properties?.host_community_ids as string[] | undefined) || []
   const [hostCommunityIds, setHostCommunityIds] = useState<string[]>(initialHostCommunityIds)
-  const [hostProjects, setHostProjects] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
-  const [hostProjectsLoading, setHostProjectsLoading] = useState(false)
-  const [hostCommunities, setHostCommunities] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
-  const [hostCommunitiesLoading, setHostCommunitiesLoading] = useState(false)
+  const [hostSpaces, setHostSpaces] = useState<Array<{ id: string; name: string; avatar?: string; emoji?: string }>>([])
+  const [hostSpacesLoading, setHostSpacesLoading] = useState(false)
   const [showHostSelector, setShowHostSelector] = useState(false)
-  const [hostSelectorTab, setHostSelectorTab] = useState<'projects' | 'communities'>('projects')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const membersList: string[] = metadata?.members || []
   const isExternalActivityInit =
@@ -302,72 +308,37 @@ export function PortfolioEditor({
     if (!isSpacePortfolio(portfolio)) return
     let cancelled = false
     const load = async () => {
-      setHostProjectsLoading(true)
+      setHostSpacesLoading(true)
       try {
         const { data: { user: u } } = await supabase.auth.getUser()
         if (!u || cancelled) return
-        const { data: projects } = await supabase
+        const { data: spaces } = await supabase
           .from('portfolios')
           .select('id, user_id, metadata')
           .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
-        const list = (projects || []).filter((p: any) => {
+        const list = (spaces || []).filter((p: any) => {
           const meta = p.metadata as any
           const managers: string[] = meta?.managers || []
-          return p.user_id === u.id || managers.includes(u.id)
+          const isOwner = p.user_id === u.id
+          const isManager = managers.includes(u.id)
+          const isSelf = p.id === portfolio.id
+          return (isOwner || isManager) && !isSelf
         }).map((p: any) => {
           const meta = p.metadata as any
           const basic = meta?.basic || {}
           return {
             id: p.id,
-            name: (basic.name as string) || 'Project',
+            name: (basic.name as string) || 'Space',
             avatar: basic.avatar as string | undefined,
             emoji: basic.emoji as string | undefined,
           }
         })
-        if (!cancelled) setHostProjects(list)
+        if (!cancelled) setHostSpaces(list)
       } catch (e) {
-        console.error('Failed to load host projects', e)
+        console.error('Failed to load host spaces', e)
       } finally {
-        if (!cancelled) setHostProjectsLoading(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [portfolio.id, portfolio.type, supabase])
-
-  useEffect(() => {
-    if (!isSpacePortfolio(portfolio)) return
-    let cancelled = false
-    const load = async () => {
-      setHostCommunitiesLoading(true)
-      try {
-        const { data: { user: u } } = await supabase.auth.getUser()
-        if (!u || cancelled) return
-        const { data: communities } = await supabase
-          .from('portfolios')
-          .select('id, user_id, metadata')
-          .in('type', [...DB_NON_HUMAN_TYPES])
-          .order('created_at', { ascending: false })
-        const list = (communities || []).filter((c: any) => {
-          const meta = c.metadata as any
-          const managers: string[] = meta?.managers || []
-          return c.user_id === u.id || managers.includes(u.id)
-        }).map((c: any) => {
-          const meta = c.metadata as any
-          const basic = meta?.basic || {}
-          return {
-            id: c.id,
-            name: (basic.name as string) || 'Community',
-            avatar: basic.avatar as string | undefined,
-            emoji: basic.emoji as string | undefined,
-          }
-        })
-        if (!cancelled) setHostCommunities(list)
-      } catch (e) {
-        console.error('Failed to load host communities', e)
-      } finally {
-        if (!cancelled) setHostCommunitiesLoading(false)
+        if (!cancelled) setHostSpacesLoading(false)
       }
     }
     load()
@@ -625,6 +596,7 @@ export function PortfolioEditor({
       if (isSpacePortfolio(portfolio) && !isExternalAct) {
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
         formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
+        formData.append('org_membership_email_suffixes', orgMembershipEmailSuffixes || '')
       }
       if (isSpacePortfolio(portfolio) && isExternalAct) {
         formData.append('i_am_going', creatorGoing ? 'true' : 'false')
@@ -706,7 +678,9 @@ export function PortfolioEditor({
       <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl mx-auto">
           <div className="bg-white shadow rounded-lg p-6">
-            <Title as="h2" className="mb-6">Edit Portfolio</Title>
+            <Title as="h2" className="mb-6">
+              {isHumanPortfolio(portfolio) ? 'Edit Profile' : 'Edit Space'}
+            </Title>
             
             <form onSubmit={handleSubmit} className="space-y-6">
               {/* Avatar Upload or Emoji Selection */}
@@ -852,7 +826,7 @@ export function PortfolioEditor({
               </div>
             )}
 
-            {/* Visibility and Status (spaces without date/time use Live/Archived here; see Advanced when scheduling) */}
+            {/* Visibility */}
             {isSpacePortfolio(portfolio) && (
               <>
                 <div>
@@ -881,39 +855,6 @@ export function PortfolioEditor({
                     Private spaces are only visible to you and will not appear in search or feeds.
                   </UIText>
                 </div>
-                <div className="mt-4">
-                  <UIText as="label" className="block mb-2">
-                    Status
-                  </UIText>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { key: 'live', label: 'Live' },
-                      { key: 'archived', label: 'Archived' },
-                    ].map((option) => {
-                      const selected = projectStatus === option.key
-                      return (
-                        <button
-                          key={option.key}
-                          type="button"
-                          onClick={() =>
-                            setProjectStatus(selected ? '' : option.key)
-                          }
-                          className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                            selected
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                          disabled={loading}
-                        >
-                          {option.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <UIText as="p" className="text-xs text-gray-500 mt-1">
-                    Used to indicate whether this space is live or archived.
-                  </UIText>
-                </div>
               </>
             )}
 
@@ -930,11 +871,11 @@ export function PortfolioEditor({
                     Hosts
                   </UIText>
                   <UIText as="p" className="text-xs text-gray-500 mb-2">
-                    Projects and communities that host this activity. You can add projects and communities where you are owner or manager.
+                    Spaces that host this activity. You can add spaces where you are owner or manager.
                   </UIText>
                   <div className="flex flex-wrap gap-2">
                     {hostProjectIds.map((id) => {
-                      const p = hostProjects.find((x) => x.id === id)
+                      const p = hostSpaces.find((x) => x.id === id)
                       if (!p) return null
                       return (
                         <div
@@ -944,7 +885,7 @@ export function PortfolioEditor({
                           <StickerAvatar
                             src={p.avatar}
                             alt={p.name}
-                            type="projects"
+                            type="space"
                             size={32}
                             emoji={p.emoji}
                             name={p.name}
@@ -954,7 +895,7 @@ export function PortfolioEditor({
                             type="button"
                             onClick={() => setHostProjectIds((prev) => prev.filter((x) => x !== id))}
                             className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
-                            aria-label="Remove host project"
+                            aria-label="Remove host space"
                             disabled={loading}
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -965,7 +906,7 @@ export function PortfolioEditor({
                       )
                     })}
                     {hostCommunityIds.map((id) => {
-                      const c = hostCommunities.find((x) => x.id === id)
+                      const c = hostSpaces.find((x) => x.id === id)
                       if (!c) return null
                       return (
                         <div
@@ -975,7 +916,7 @@ export function PortfolioEditor({
                           <StickerAvatar
                             src={c.avatar}
                             alt={c.name}
-                            type="community"
+                            type="space"
                             size={32}
                             emoji={c.emoji}
                             name={c.name}
@@ -985,7 +926,7 @@ export function PortfolioEditor({
                             type="button"
                             onClick={() => setHostCommunityIds((prev) => prev.filter((x) => x !== id))}
                             className="p-1 rounded-full hover:bg-gray-200 text-gray-600"
-                            aria-label="Remove host community"
+                            aria-label="Remove host space"
                             disabled={loading}
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -995,7 +936,7 @@ export function PortfolioEditor({
                         </div>
                       )
                     })}
-                    {(hostProjectsLoading || hostCommunitiesLoading) ? (
+                    {hostSpacesLoading ? (
                       <UIText className="text-gray-500">Loading...</UIText>
                     ) : (
                       <Button
@@ -1003,7 +944,6 @@ export function PortfolioEditor({
                         variant="secondary"
                         size="sm"
                         onClick={() => {
-                          setHostSelectorTab('projects')
                           setShowHostSelector(true)
                         }}
                         disabled={loading}
@@ -1105,7 +1045,7 @@ export function PortfolioEditor({
                             <>
                               <div className="flex flex-wrap gap-2">
                                 {[
-                                  { key: 'in-progress', label: 'Live' },
+                                  { key: 'live', label: 'Live' },
                                   { key: 'archived', label: 'Archived' },
                                 ].map((option) => {
                                   const selected = projectStatus === option.key
@@ -1449,96 +1389,44 @@ export function PortfolioEditor({
         </div>
       </div>
     )}
-    {/* Host selector for activities (projects and communities) */}
+    {/* Host selector for activities (spaces) */}
     {isSpacePortfolio(portfolio) && showHostSelector && (
       <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40">
         <div className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <Card variant="default" padding="sm">
             <div className="mb-4">
               <UIText as="h2">Add host</UIText>
-              <div className="flex gap-2 mt-2">
-                <button
-                  type="button"
-                  onClick={() => setHostSelectorTab('projects')}
-                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                    hostSelectorTab === 'projects' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Projects
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHostSelectorTab('communities')}
-                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                    hostSelectorTab === 'communities' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Communities
-                </button>
-              </div>
             </div>
-            {hostSelectorTab === 'projects' ? (
-              hostProjectsLoading ? (
-                <UIText className="text-gray-500">Loading projects...</UIText>
-              ) : hostProjects.filter((p) => !hostProjectIds.includes(p.id)).length === 0 ? (
-                <UIText className="text-gray-500 mb-4">No more projects to add, or you are not owner/manager of any.</UIText>
-              ) : (
-                <div className="grid grid-cols-3 gap-x-4 gap-y-6 mb-4">
-                  {hostProjects
-                    .filter((p) => !hostProjectIds.includes(p.id))
-                    .map((project) => (
-                      <button
-                        key={project.id}
-                        type="button"
-                        className="flex flex-col items-center gap-2 py-4 px-3 hover:opacity-80 transition-opacity"
-                        onClick={() => {
-                          setHostProjectIds((prev) => (prev.includes(project.id) ? prev : [...prev, project.id]))
-                          setShowHostSelector(false)
-                        }}
-                      >
-                        <StickerAvatar
-                          src={project.avatar}
-                          alt={project.name}
-                          type="projects"
-                          size={56}
-                          emoji={project.emoji}
-                          name={project.name}
-                        />
-                        <UIText className="text-center max-w-[96px] truncate" title={project.name}>
-                          {project.name}
-                        </UIText>
-                      </button>
-                    ))}
-                </div>
-              )
-            ) : hostCommunitiesLoading ? (
-              <UIText className="text-gray-500">Loading communities...</UIText>
-            ) : hostCommunities.filter((c) => !hostCommunityIds.includes(c.id)).length === 0 ? (
-              <UIText className="text-gray-500 mb-4">No more communities to add, or you are not owner/manager of any.</UIText>
+            {hostSpacesLoading ? (
+              <UIText className="text-gray-500">Loading spaces...</UIText>
+            ) : hostSpaces.filter((s) => !hostProjectIds.includes(s.id) && !hostCommunityIds.includes(s.id)).length === 0 ? (
+              <UIText className="text-gray-500 mb-4">
+                No more spaces to add, or you are not owner/manager of any.
+              </UIText>
             ) : (
               <div className="grid grid-cols-3 gap-x-4 gap-y-6 mb-4">
-                {hostCommunities
-                  .filter((c) => !hostCommunityIds.includes(c.id))
-                  .map((community) => (
+                {hostSpaces
+                  .filter((s) => !hostProjectIds.includes(s.id) && !hostCommunityIds.includes(s.id))
+                  .map((space) => (
                     <button
-                      key={community.id}
+                      key={space.id}
                       type="button"
                       className="flex flex-col items-center gap-2 py-4 px-3 hover:opacity-80 transition-opacity"
                       onClick={() => {
-                        setHostCommunityIds((prev) => (prev.includes(community.id) ? prev : [...prev, community.id]))
+                        setHostProjectIds((prev) => (prev.includes(space.id) ? prev : [...prev, space.id]))
                         setShowHostSelector(false)
                       }}
                     >
                       <StickerAvatar
-                        src={community.avatar}
-                        alt={community.name}
-                        type="community"
+                        src={space.avatar}
+                        alt={space.name}
+                        type="space"
                         size={56}
-                        emoji={community.emoji}
-                        name={community.name}
+                        emoji={space.emoji}
+                        name={space.name}
                       />
-                      <UIText className="text-center max-w-[96px] truncate" title={community.name}>
-                        {community.name}
+                      <UIText className="text-center max-w-[96px] truncate" title={space.name}>
+                        {space.name}
                       </UIText>
                     </button>
                   ))}
@@ -1668,6 +1556,23 @@ export function PortfolioEditor({
                   Require approval to join
                 </UIText>
               </div>
+              {(callToJoinConfig?.require_approval ?? true) && (
+                <div>
+                  <UIText as="label" className="block mb-1">
+                    Organization email suffixes (optional)
+                  </UIText>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    value={orgMembershipEmailSuffixes}
+                    onChange={(e) => setOrgMembershipEmailSuffixes(e.target.value)}
+                    placeholder="e.g. company.com, school.edu"
+                    autoComplete="off"
+                  />
+                  <UIText as="p" className="text-xs text-gray-500 mt-1">
+                    People with matching email domains can join without approval.
+                  </UIText>
+                </div>
+              )}
               {(callToJoinConfig?.require_approval ?? true) && (
                 <div>
                   <UIText as="label" className="block mb-1">

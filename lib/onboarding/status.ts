@@ -20,7 +20,7 @@ const STEP_LABELS: Record<OnboardingStepId, string> = {
   legal: 'Terms & Privacy',
   profile: 'Profile',
   availabilities: 'Availabilities',
-  join_community: 'Join community',
+  join_community: 'Join a space',
   open_calls: 'Open calls',
 }
 

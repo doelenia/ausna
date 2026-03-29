@@ -9,6 +9,7 @@ import { normalizeActivityDateTime } from '@/lib/datetime'
 import { normalizeExternalLink } from '@/lib/portfolio/normalizeExternalLink'
 import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
+import { normalizeEmailSuffixes } from '@/lib/portfolio/orgMembership'
 
 interface CreatePortfolioResult {
   success: boolean
@@ -54,6 +55,7 @@ export async function createPortfolio(
     const activityCallToJoinRequireApprovalRaw = formData.get('activity_call_to_join_require_approval') as string | null
     const activityCallToJoinPromptRaw = formData.get('activity_call_to_join_prompt') as string | null
     const activityCallToJoinRolesRaw = formData.get('activity_call_to_join_roles') as string | null
+    const orgMembershipEmailSuffixesRaw = formData.get('org_membership_email_suffixes') as string | null
     const isExternalRaw = formData.get('is_external') as string | null
     const isExternal = isExternalRaw === 'true'
     const externalLinkRaw = formData.get('external_link') as string | null
@@ -369,6 +371,21 @@ export async function createPortfolio(
           prompt,
           roles: callToJoinRoles,
         },
+      }
+    }
+
+    // Optional: organizational membership rule to allow domain-based auto-join.
+    // Only persists when at least one suffix is provided.
+    if (!isExternal && visibility !== 'private') {
+      const suffixes = normalizeEmailSuffixes(orgMembershipEmailSuffixesRaw || '')
+      if (suffixes.length > 0) {
+        metadata.properties = {
+          ...(metadata.properties || {}),
+          org_membership: {
+            enabled: true,
+            email_suffixes: suffixes,
+          },
+        }
       }
     }
 
