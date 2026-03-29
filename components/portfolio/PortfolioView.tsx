@@ -442,7 +442,10 @@ export function PortfolioView({
 
   // Pending join requests count for owner/manager (call-to-join card badge)
   useEffect(() => {
-    const hasCallToJoin = !!((portfolio.metadata as any)?.properties?.call_to_join)
+    const callToJoin = ((portfolio.metadata as any)?.properties?.call_to_join || null) as
+      | { enabled?: boolean }
+      | null
+    const hasCallToJoin = !!callToJoin && callToJoin.enabled !== false
     const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
 
     if (portfolio.type === 'human' || visibility === 'private' || !hasCallToJoin || (!isOwner && !isManager)) {
@@ -1441,8 +1444,12 @@ export function PortfolioView({
               )
             })()}
 
-            {/* Call-to-Join Card (any non-human portfolio; on when not private) */}
-            {portfolio.type !== 'human' && activityCallToJoin && (portfolio as any).visibility !== 'private' && (() => {
+            {/* Call-to-Join Card (any non-human portfolio; on when not private and enabled) */}
+            {portfolio.type !== 'human' &&
+              activityCallToJoin &&
+              activityCallToJoin.enabled !== false &&
+              (portfolio as any).visibility !== 'private' &&
+              (() => {
               const config = activityCallToJoin
               const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
               const activityDateTime = (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null

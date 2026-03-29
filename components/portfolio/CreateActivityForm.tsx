@@ -88,6 +88,7 @@ export function CreateActivityForm({
   >([
     { id: 'default-member', label: 'Member', activityRole: 'member' },
   ])
+  const [allowOthersToJoin, setAllowOthersToJoin] = useState<boolean>(false)
   const [showCallToJoinModal, setShowCallToJoinModal] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [isExternal, setIsExternal] = useState(false)
@@ -113,6 +114,12 @@ export function CreateActivityForm({
   const entityLabelTitle = mode === 'space' ? 'Space' : 'Activity'
   const externalKindLabel = mode === 'space' ? 'space' : 'activity'
   const showHosts = mode !== 'space'
+
+  useEffect(() => {
+    if (isExternal || visibility === 'private') {
+      setAllowOthersToJoin(false)
+    }
+  }, [isExternal, visibility])
 
   useEffect(() => {
     if (mode !== 'space') return
@@ -409,8 +416,8 @@ export function CreateActivityForm({
       formData.append('visibility', isExternal ? 'public' : visibility)
       formData.append('project_status', projectStatus || '')
 
-      // Call-to-join: only for non-external, when activity is public
-      if (!isExternal && visibility !== 'private') {
+      // Call-to-join: only for non-external, when activity is public, and explicitly enabled.
+      if (!isExternal && visibility !== 'private' && allowOthersToJoin) {
         if (callToJoinDescription.trim().length > 0) {
           formData.append('activity_call_to_join_description', callToJoinDescription.trim())
         }
@@ -769,6 +776,68 @@ export function CreateActivityForm({
           </div>
         </div>
 
+        {/* Call to join (outside Advanced) */}
+        {!isExternal && visibility !== 'private' && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between gap-3">
+              <UIText as="label" className="block" id="allow-others-to-join-label">
+                Allow others to join
+              </UIText>
+              <button
+                type="button"
+                role="switch"
+                aria-labelledby="allow-others-to-join-label"
+                aria-checked={allowOthersToJoin}
+                onClick={() => setAllowOthersToJoin((prev) => !prev)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  allowOthersToJoin ? 'bg-blue-600' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition ${
+                    allowOthersToJoin ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+            {allowOthersToJoin && (
+              <div className="mt-2">
+                <Card variant="subtle" padding="sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <UIText as="h3" className="mb-1">
+                        Call to join preview
+                      </UIText>
+                      <Content className="mb-1">
+                        {callToJoinDescription || 'Join this activity.'}
+                      </Content>
+                      <UIText className="text-gray-600 text-xs">
+                        {callToJoinJoinByLocal
+                          ? `Join by: ${new Date(callToJoinJoinByLocal).toLocaleString()}`
+                          : 'No join-by date: applications close when the activity ends or is archived.'}
+                      </UIText>
+                      <UIText className="text-gray-600 text-xs mt-1">
+                        {callToJoinRequireApproval ? 'Requires approval' : 'Auto-join'}
+                      </UIText>
+                    </div>
+                    <div className="flex-shrink-0">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowCallToJoinModal(true)}
+                        disabled={loading}
+                      >
+                        <UIText>Edit</UIText>
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Advanced: external space (membership model) vs category, visibility, call to join, role */}
         <div className="border border-gray-200 rounded-lg overflow-hidden">
           <button
@@ -921,50 +990,6 @@ export function CreateActivityForm({
                       Private activities are only visible to you and will not appear in search or feeds.
                     </UIText>
                   </div>
-
-                  {visibility !== 'private' && (
-                    <div>
-                      <UIText as="label" className="block mb-2">
-                        Call to join
-                      </UIText>
-                      <UIText as="p" className="text-xs text-gray-500 mb-2">
-                        Public activities show a call-to-join card so visitors can apply. Configure it below.
-                      </UIText>
-                      <div className="mt-2">
-                        <Card variant="subtle" padding="sm">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <UIText as="h3" className="mb-1">
-                                Call to join preview
-                              </UIText>
-                              <Content className="mb-1">
-                                {callToJoinDescription || 'Join this activity.'}
-                              </Content>
-                              <UIText className="text-gray-600 text-xs">
-                                {callToJoinJoinByLocal
-                                  ? `Join by: ${new Date(callToJoinJoinByLocal).toLocaleString()}`
-                                  : 'No join-by date: applications close when the activity ends or is archived.'}
-                              </UIText>
-                              <UIText className="text-gray-600 text-xs mt-1">
-                                {callToJoinRequireApproval ? 'Requires approval' : 'Auto-join'}
-                              </UIText>
-                            </div>
-                            <div className="flex-shrink-0">
-                              <Button
-                                type="button"
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => setShowCallToJoinModal(true)}
-                                disabled={loading}
-                              >
-                                <UIText>Edit</UIText>
-                              </Button>
-                            </div>
-                          </div>
-                        </Card>
-                      </div>
-                    </div>
-                  )}
 
                   <div>
                     <UIText as="label" htmlFor="creator_role" className="block mb-2">
