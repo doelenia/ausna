@@ -10,7 +10,7 @@ import { getSpaceUrl } from '@/lib/portfolio/routes'
 import { getFaviconUrl } from '@/lib/portfolio/getFaviconUrl'
 import { ProjectTypeSelector } from './ProjectTypeSelector'
 import { UIText, Button, Card, Content, UIButtonText } from '@/components/ui'
-import { DescriptionFieldSection } from './DescriptionPopups'
+import { DescriptionFieldSection, SPACE_DESCRIPTION_HELP_TEXT } from './DescriptionPopups'
 import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import { ActivityDateTimeField, ActivityLocationField } from './activity-fields'
@@ -107,8 +107,10 @@ export function CreateActivityForm({
   const [extractingLink, setExtractingLink] = useState(false)
   const [autoFillModalOpen, setAutoFillModalOpen] = useState(false)
   const [autoFillUrl, setAutoFillUrl] = useState('')
+  const [autoFillModalDescription, setAutoFillModalDescription] = useState('')
   const [autoFillModalError, setAutoFillModalError] = useState<string | null>(null)
   const [autofillFaviconUrl, setAutofillFaviconUrl] = useState<string | null>(null)
+  const lastAutoFillSuggestedEmojiRef = useRef<string | null>(null)
   const [description, setDescription] = useState('')
   const [existingActivity, setExistingActivity] = useState<{
     id: string
@@ -132,33 +134,41 @@ export function CreateActivityForm({
   const closeAutoFillModal = () => {
     setAutoFillModalOpen(false)
     setAutoFillUrl('')
+    setAutoFillModalDescription('')
     setAutoFillModalError(null)
     setExistingActivity(null)
   }
 
   const runAutoFillFromLink = async () => {
     const url = autoFillUrl.trim()
-    if (!url) {
-      setAutoFillModalError('Please enter a link')
+    const userDescription = autoFillModalDescription.trim()
+    if (!url && !userDescription) {
+      setAutoFillModalError('Enter a link and/or a description')
       return
     }
     setExtractingLink(true)
     setAutoFillModalError(null)
     setExistingActivity(null)
+    lastAutoFillSuggestedEmojiRef.current = null
     try {
-      const checkRes = await fetch(
-        `/api/portfolios/external-link/find?url=${encodeURIComponent(url)}`
-      )
-      const checkData = await checkRes.json()
-      if (checkData.existing && checkData.portfolio) {
-        setExistingActivity(checkData.portfolio)
-        return
+      if (url) {
+        const checkRes = await fetch(
+          `/api/portfolios/external-link/find?url=${encodeURIComponent(url)}`
+        )
+        const checkData = await checkRes.json()
+        if (checkData.existing && checkData.portfolio) {
+          setExistingActivity(checkData.portfolio)
+          return
+        }
       }
 
       const res = await fetch('/api/portfolios/external-link/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({
+          ...(url ? { url } : {}),
+          ...(userDescription ? { userDescription } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -183,10 +193,19 @@ export function CreateActivityForm({
       } else if (data.location) {
         setActivityLocation({ line1: data.location })
       }
-      if (isExternal) {
+      if (isExternal && url) {
         setExternalLink(url)
       }
-      const fav = getFaviconUrl(url.trim())
+
+      const suggested =
+        typeof data.suggestedEmoji === 'string' && data.suggestedEmoji.trim()
+          ? data.suggestedEmoji.trim()
+          : ''
+      const grapheme: string =
+        suggested.length > 0 ? (Array.from(suggested)[0] as string) : ''
+      lastAutoFillSuggestedEmojiRef.current = grapheme || null
+
+      const fav = url ? getFaviconUrl(url.trim()) : ''
       if (fav) {
         setAvatarFile(null)
         setAvatarPreview(null)
@@ -198,6 +217,16 @@ export function CreateActivityForm({
           setAutofillFaviconUrl(fav)
         } else {
           setAutofillFaviconUrl(null)
+        }
+      } else {
+        setAutofillFaviconUrl(null)
+        if (grapheme) {
+          setAvatarFile(null)
+          setAvatarPreview(null)
+          if (fileInputRef.current) {
+            fileInputRef.current.value = ''
+          }
+          setSelectedEmoji(grapheme)
         }
       }
       closeAutoFillModal()
@@ -562,12 +591,13 @@ export function CreateActivityForm({
             onClick={() => {
               setAutoFillModalError(null)
               setAutoFillUrl('')
+              setAutoFillModalDescription('')
               setExistingActivity(null)
               setAutoFillModalOpen(true)
             }}
             disabled={loading}
           >
-            <UIText>Auto fill with a link</UIText>
+            <UIText>Auto fill</UIText>
           </Button>
         )}
 
@@ -601,6 +631,13 @@ export function CreateActivityForm({
                   src={autofillFaviconUrl}
                   alt="Site favicon from autofill"
                   className="h-20 w-20 rounded-full object-cover border-2 border-gray-300 bg-white"
+                  onError={() => {
+                    setAutofillFaviconUrl(null)
+                    const fallback = lastAutoFillSuggestedEmojiRef.current
+                    if (fallback) {
+                      setSelectedEmoji(fallback)
+                    }
+                  }}
                 />
               ) : selectedEmoji ? (
                 <StickerAvatar alt={name || 'Preview'} type="activities" size={80} emoji={selectedEmoji} />
@@ -669,7 +706,7 @@ export function CreateActivityForm({
               <UIText as="p" className="text-xs text-gray-500">
                 {isExternal
                   ? 'Uses site favicon by default. Upload or select emoji to override.'
-                  : 'Upload an image, pick an emoji, or use Auto fill with a link to apply that site’s favicon.'}
+                  : 'Upload an image, pick an emoji, or use Auto fill to apply a site favicon or AI-suggested emoji.'}
               </UIText>
             </div>
           </div>
@@ -1085,18 +1122,19 @@ export function CreateActivityForm({
           >
             <Card variant="default" padding="sm">
               <UIText as="h2" id="autofill-modal-title" className="mb-2">
-                Fill the form from a link
+                Fill the form from a link or description
               </UIText>
               <Content className="mb-4">
-                We use AI to read a public page about a project, community, activity, or event and fill this form. Date,
-                time, and location are only filled when the page is clearly a scheduled event; otherwise you get title
-                and description only. Edit anything afterwards. This does not enable External space unless you turn that
-                on in Advanced settings.
+                Provide a public page URL, a short description of your space, or both. With a URL, we use AI to read the
+                page and fill the form; date, time, and location are only filled when the page is clearly a scheduled
+                event. With description only, we infer a title and optional polish. Your description is kept unless a
+                small edit makes it more informative. Edit anything afterwards. This does not enable External space
+                unless you turn that on in Advanced settings.
               </Content>
               <div className="space-y-3">
                 <div>
                   <UIText as="label" className="block mb-1" htmlFor="autofill-url">
-                    Page URL
+                    Page URL <span className="text-gray-500">(optional if description is filled)</span>
                   </UIText>
                   <input
                     id="autofill-url"
@@ -1112,6 +1150,20 @@ export function CreateActivityForm({
                     disabled={extractingLink}
                   />
                 </div>
+                <DescriptionFieldSection
+                  value={autoFillModalDescription}
+                  onChange={(next) => {
+                    setAutoFillModalDescription(next)
+                    setAutoFillModalError(null)
+                    setExistingActivity(null)
+                  }}
+                  disabled={extractingLink}
+                  helperContent={
+                    <Content className="text-gray-500 whitespace-pre-wrap">{SPACE_DESCRIPTION_HELP_TEXT}</Content>
+                  }
+                  previewEmptyText="Click to add a description (optional)"
+                  editorPlaceholder="Describe this space…"
+                />
                 {autoFillModalError && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md">
                     <UIText>{autoFillModalError}</UIText>
@@ -1151,7 +1203,9 @@ export function CreateActivityForm({
                     type="button"
                     variant="primary"
                     onClick={() => void runAutoFillFromLink()}
-                    disabled={extractingLink || !autoFillUrl.trim()}
+                    disabled={
+                      extractingLink || (!autoFillUrl.trim() && !autoFillModalDescription.trim())
+                    }
                   >
                     <UIText>{extractingLink ? 'Working…' : 'Extract and apply'}</UIText>
                   </Button>
