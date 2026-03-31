@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { buildLoginHref } from '@/lib/auth/login-redirect'
 
 /**
  * Client component to handle auth hash fragments from Supabase.
@@ -20,6 +21,54 @@ export function InviteHandler() {
 
     const handleAuthHash = async () => {
       if (typeof window === 'undefined') return
+
+      // Handle query `code` (PKCE exchange) — needed for email confirmation redirects.
+      try {
+        const url = new URL(window.location.href)
+        const code = url.searchParams.get('code')
+        const emailConfirmation = url.searchParams.get('emailConfirmation') === '1'
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code)
+
+          // Always remove `code` from URL. If exchange succeeded, show success banner.
+          // If exchange failed due to missing PKCE verifier (common when Safari/storage is cleared),
+          // still show "verified" but prompt the user to sign in.
+          url.searchParams.delete('code')
+          url.searchParams.delete('emailConfirmation')
+          if (emailConfirmation) url.searchParams.set('email_confirmed', '1')
+          if (error) {
+            const msg = String(error.message || '')
+            if (msg.includes('PKCE code verifier not found')) {
+              url.searchParams.set('verified_needs_login', '1')
+            } else {
+              url.searchParams.set('verified_needs_login', '1')
+            }
+          } else {
+            url.searchParams.delete('verified_needs_login')
+          }
+          // On success, do a full navigation so server components see fresh cookies immediately.
+          if (!error) {
+            window.location.href = url.toString()
+            return
+          }
+
+          // On failure, route user to login (clearer than leaving them on /main while logged out).
+          if (emailConfirmation) {
+            const loginUrl = new URL(buildLoginHref({ returnTo: '/main' }), window.location.origin)
+            loginUrl.searchParams.set('email_confirmed', '1')
+            loginUrl.searchParams.set('verified_needs_login', '1')
+            window.location.href = loginUrl.toString()
+            return
+          }
+
+          window.history.replaceState(null, '', url.toString())
+          router.refresh()
+          return
+        }
+      } catch {
+        // ignore and fall back to hash handling
+      }
 
       const hash = window.location.hash
       if (!hash) return
@@ -71,7 +120,15 @@ export function InviteHandler() {
         }
 
         if (data.session) {
-          window.history.replaceState(null, '', window.location.pathname)
+          const url = new URL(window.location.href)
+          url.hash = ''
+          const otpType = typeof type === 'string' ? type : ''
+          // Email confirmation and magiclink should show a one-time "verified" banner.
+          if (otpType === 'signup' || otpType === 'magiclink') {
+            url.searchParams.set('email_confirmed', '1')
+          }
+          // Preserve existing query params (e.g. returnTo-derived params) while removing the hash.
+          window.history.replaceState(null, '', url.toString())
           router.refresh()
         } else {
           console.warn('No session returned after setting auth hash')

@@ -7,6 +7,7 @@ import { DataCacheProvider } from '@/lib/cache/DataCacheContext'
 import { createClient } from '@/lib/supabase/server'
 import { getOnboardingStatus } from '@/lib/onboarding/status'
 import { OnboardingGate } from '@/components/onboarding/OnboardingGate'
+import { EmailVerificationBanner } from '@/components/auth/EmailVerificationBanner'
 
 export const metadata: Metadata = {
   title: 'Ausna - Creative Community',
@@ -41,6 +42,7 @@ export default async function RootLayout({
       <body className="light bg-white text-gray-900">
         <DataCacheProvider>
           <InviteHandler />
+          <EmailVerificationBanner />
           {user && initialOnboardingStatus && (
             <OnboardingGate initialStatus={initialOnboardingStatus} />
           )}

@@ -69,6 +69,46 @@ export async function updateSession(request: NextRequest) {
   // - logged-in users  -> main feed
   if (request.nextUrl.pathname === '/') {
     const url = request.nextUrl.clone()
+    // Supabase email confirmation can land on "/" with query params.
+    // If we redirect "/" to /login or /main blindly, we can drop the params and
+    // prevent the code exchange (session creation) or hide the error banner.
+    const code = request.nextUrl.searchParams.get('code')
+    const errorCode = request.nextUrl.searchParams.get('error_code')
+    const error = request.nextUrl.searchParams.get('error')
+    const errorDescription = request.nextUrl.searchParams.get('error_description')
+
+    if (code) {
+      const cb = request.nextUrl.clone()
+      cb.pathname = '/auth/callback'
+      cb.search = new URLSearchParams({
+        code,
+        returnTo: '/main',
+        emailConfirmation: '1',
+      }).toString()
+
+      const redirectResponse = NextResponse.redirect(cb)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
+
+    if (errorCode || error) {
+      const dest = request.nextUrl.clone()
+      dest.pathname = '/main'
+      const sp = new URLSearchParams()
+      if (error) sp.set('error', error)
+      if (errorCode) sp.set('error_code', errorCode)
+      if (errorDescription) sp.set('error_description', errorDescription)
+      dest.search = sp.toString()
+
+      const redirectResponse = NextResponse.redirect(dest)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
+
     if (user) {
       url.pathname = '/main'
     } else {

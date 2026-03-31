@@ -138,7 +138,11 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
         email,
         password,
         options: {
-          emailRedirectTo: `${getAuthCallbackUrl()}?returnTo=${encodeURIComponent(returnTo)}`,
+          // Route through our server-side callback to exchange `code` for a session.
+          // We also pass `emailConfirmation=1` so we can show a one-time banner.
+          emailRedirectTo: `${getAuthCallbackUrl()}?returnTo=${encodeURIComponent(
+            returnTo
+          )}&emailConfirmation=1`,
           data: {
             username: username.toLowerCase() || undefined,
           },
