@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { isJoinablePublicSpaceRow } from '@/lib/portfolio/spaceCapabilities'
 import { isEmailEligibleForOrgMembership } from '@/lib/portfolio/orgMembership'
+import { ONBOARDING_JOIN_SPACES_PINNED_PORTFOLIO_ID } from '@/lib/onboarding/status'
 
 export async function GET() {
   try {
@@ -27,7 +28,20 @@ export async function GET() {
       return NextResponse.json({ results: [], error: error.message }, { status: 200 })
     }
 
-    const eligible = (rows || [])
+    function toFeaturedPayload(p: any, featuredSource: 'org' | 'pinned') {
+      const basic = (p.metadata as any)?.basic || {}
+      return {
+        id: p.id,
+        slug: p.slug,
+        name: (basic.name as string) || 'Space',
+        description: (basic.description as string) || '',
+        avatar: (basic.avatar as string) || null,
+        emoji: (basic.emoji as string) || null,
+        featuredSource,
+      }
+    }
+
+    const orgEligible = (rows || [])
       .filter((p: any) =>
         isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
       )
@@ -38,19 +52,29 @@ export async function GET() {
         return isEmailEligibleForOrgMembership((user as any).email ?? null, org.email_suffixes)
       })
       .slice(0, 3)
-      .map((p: any) => {
-        const basic = (p.metadata as any)?.basic || {}
-        return {
-          id: p.id,
-          slug: p.slug,
-          name: (basic.name as string) || 'Space',
-          description: (basic.description as string) || '',
-          avatar: (basic.avatar as string) || null,
-          emoji: (basic.emoji as string) || null,
-        }
-      })
+      .map((p: any) => toFeaturedPayload(p, 'org'))
 
-    return NextResponse.json({ results: eligible }, { status: 200 })
+    const { data: pinnedRow } = await supabase
+      .from('portfolios')
+      .select('id, type, slug, metadata, visibility, is_pseudo')
+      .eq('id', ONBOARDING_JOIN_SPACES_PINNED_PORTFOLIO_ID)
+      .maybeSingle()
+
+    let results = orgEligible
+    if (
+      pinnedRow &&
+      isJoinablePublicSpaceRow(
+        (pinnedRow as any).type,
+        (pinnedRow as any).metadata,
+        (pinnedRow as any).visibility,
+        (pinnedRow as any).is_pseudo
+      )
+    ) {
+      const pinned = toFeaturedPayload(pinnedRow, 'pinned')
+      results = [pinned, ...orgEligible.filter((x) => x.id !== pinned.id)]
+    }
+
+    return NextResponse.json({ results }, { status: 200 })
   } catch (e: any) {
     return NextResponse.json({ results: [], error: e?.message || 'Failed' }, { status: 200 })
   }

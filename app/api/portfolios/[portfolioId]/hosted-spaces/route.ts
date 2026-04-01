@@ -17,30 +17,17 @@ type PortfolioRow = {
 type MemberPreview = { userId: string; name?: string | null; avatar?: string | null }
 
 function hostedBySpace(candidate: PortfolioRow, space: PortfolioRow): boolean {
+  if (candidate.id === space.id) return false
+
   const props = (candidate.metadata?.properties as any) || {}
   const hostProjectIds: string[] = Array.isArray(props?.host_project_ids) ? props.host_project_ids : []
   const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids) ? props.host_community_ids : []
   const legacyHost = candidate.host_project_id ? [candidate.host_project_id] : []
   const candidateHosts = [...hostProjectIds, ...hostCommunityIds, ...legacyHost]
 
-  if (candidateHosts.includes(space.id)) return true
-
-  const spaceProps = (space.metadata?.properties as any) || {}
-  const spaceHostProjectIds: string[] = Array.isArray(spaceProps?.host_project_ids)
-    ? spaceProps.host_project_ids
-    : []
-  const spaceHostCommunityIds: string[] = Array.isArray(spaceProps?.host_community_ids)
-    ? spaceProps.host_community_ids
-    : []
-  const spaceLegacyHost = space.host_project_id ? [space.host_project_id] : []
-  const spaceHostSet = new Set<string>([
-    ...spaceHostProjectIds,
-    ...spaceHostCommunityIds,
-    ...spaceLegacyHost,
-  ])
-
-  if (spaceHostSet.size === 0) return false
-  return candidateHosts.some((id) => spaceHostSet.has(id))
+  // A space S should only show spaces that explicitly declare S as their host.
+  // Do not include spaces hosted by S's host space.
+  return candidateHosts.includes(space.id)
 }
 
 export async function GET(_request: NextRequest, { params }: { params: { portfolioId: string } }) {
