@@ -5,10 +5,90 @@ import { NotePageClient } from './NotePageClient'
 import { notFound, redirect } from 'next/navigation'
 import { UIText } from '@/components/ui'
 import type { Note } from '@/types/note'
+import type { Metadata } from 'next'
+import { getSiteUrl } from '@/lib/utils/site-url'
 
 interface NotePageProps {
   params: {
     id: string
+  }
+}
+
+function normalizeNoteText(text: string): string {
+  return String(text || '').replace(/\s+/g, ' ').trim()
+}
+
+function excerpt(text: string, maxLen: number): string {
+  const t = normalizeNoteText(text)
+  if (!t) return ''
+  if (t.length <= maxLen) return t
+  return `${t.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...`
+}
+
+export async function generateMetadata({
+  params,
+}: NotePageProps): Promise<Metadata> {
+  const noteId = params.id
+  if (!noteId || typeof noteId !== 'string') return {}
+
+  const base = getSiteUrl()
+  const url = `${base}/notes/${encodeURIComponent(noteId)}`
+
+  const noteResult = await getNoteById(noteId, true)
+  if (!noteResult.success || !noteResult.notes || noteResult.notes.length === 0) {
+    return { alternates: { canonical: url } }
+  }
+
+  const rawNote = noteResult.notes[0] as Note
+
+  // If user shares an annotation/reaction link, preview the root note instead.
+  if (rawNote.mentioned_note_id) {
+    const rootNoteId = rawNote.parent_note_id ?? rawNote.mentioned_note_id
+    if (rootNoteId) {
+      const canonical = `${base}/notes/${encodeURIComponent(rootNoteId)}`
+      return { alternates: { canonical } }
+    }
+  }
+
+  if (rawNote.deleted_at) {
+    return { alternates: { canonical: url } }
+  }
+
+  const authorName =
+    rawNote.author_profiles?.find((p) => p?.id === rawNote.owner_account_id)?.name ||
+    rawNote.author_profiles?.[0]?.name ||
+    'Someone'
+
+  const content = normalizeNoteText(rawNote.text || '')
+  const noteTitle = (rawNote.metadata as any)?.title
+  const hasTitle = typeof noteTitle === 'string' && noteTitle.trim().length > 0
+
+  const title = hasTitle
+    ? `${authorName}: ${noteTitle.trim()}`
+    : `A note from ${authorName}: ${excerpt(content, 80)}`
+
+  const description = excerpt(content, 140)
+
+  const ogImageUrl = `${base}/notes/${encodeURIComponent(noteId)}/opengraph-image`
+
+  // The og image endpoint handles: first image ref -> cover, else url ref -> link icon, else fallback.
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      type: 'article',
+      url,
+      images: [{ url: ogImageUrl, width: 1200, height: 630, alt: title }],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [ogImageUrl],
+    },
   }
 }
 

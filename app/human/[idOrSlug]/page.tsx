@@ -11,9 +11,61 @@ import { getTopInterestedTopics } from '@/lib/indexing/interest-tracking'
 import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
+import type { Metadata } from 'next'
+import { getSiteUrl } from '@/lib/utils/site-url'
 
 interface HumanPortfolioPageProps {
   params: { idOrSlug: string }
+}
+
+export async function generateMetadata({
+  params,
+}: HumanPortfolioPageProps): Promise<Metadata> {
+  const idOrSlug = params.idOrSlug
+  if (!idOrSlug || typeof idOrSlug !== 'string') return {}
+
+  const supabase = await createClient()
+  const portfolio = await loadPortfolioForPage(supabase, idOrSlug)
+  if (!portfolio) return {}
+
+  if (!isHumanPortfolio(portfolio)) {
+    const canonical = getSpaceUrl(portfolio.slug || portfolio.id)
+    const base = getSiteUrl()
+    return { alternates: { canonical: `${base}${canonical}` } }
+  }
+
+  const canonicalPath = getHumanProfileUrl(portfolio.slug || portfolio.id)
+  const base = getSiteUrl()
+  const basic = getPortfolioBasic(portfolio)
+
+  const title = basic.name || 'Human'
+  const description = basic.description || ''
+
+  return {
+    title,
+    description,
+    alternates: { canonical: `${base}${canonicalPath}` },
+    openGraph: {
+      title,
+      description,
+      type: 'profile',
+      url: `${base}${canonicalPath}`,
+      images: [
+        {
+          url: `${base}${canonicalPath}/opengraph-image`,
+          width: 1200,
+          height: 630,
+          alt: title,
+        },
+      ],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+      images: [`${base}${canonicalPath}/opengraph-image`],
+    },
+  }
 }
 
 export default async function HumanPortfolioPage({ params }: HumanPortfolioPageProps) {
