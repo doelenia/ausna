@@ -971,6 +971,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     description?: string
     avatar?: string | null
     emoji?: string | null
+    featuredSource?: 'org' | 'pinned'
   }>>([])
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -986,9 +987,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
       .then((data) => {
         const list = Array.isArray(data?.results) ? data.results : []
         setFeaturedSpaces(
-          list
-            .filter((x: any) => x && typeof x.id === 'string' && typeof x.name === 'string')
-            .slice(0, 3)
+          list.filter((x: any) => x && typeof x.id === 'string' && typeof x.name === 'string')
         )
       })
       .catch(() => setFeaturedSpaces([]))
@@ -1087,7 +1086,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
           Join a space
         </Title>
         <Content className="mb-4">
-          If your email is eligible for an organization space, we’ll show it here. You can also search for any public space to join, or skip for now.
+          We always show a featured space you can join in one click when available. If your email is eligible for an organization space, we’ll show those here too. You can also search for any public space to join, or skip for now.
         </Content>
         <div className="space-y-4">
           {featuredSpaces.length > 0 && (
@@ -1150,7 +1149,9 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
                           <UIText>Join</UIText>
                         </Button>
                         <UIText className="text-green-700 text-right">
-                          You are verified as part of {s.name}, please join with one click!
+                          {s.featuredSource === 'pinned'
+                            ? 'Join this space with one click.'
+                            : `You are verified as part of ${s.name}, please join with one click!`}
                         </UIText>
                       </div>
                     </div>
