@@ -11,6 +11,7 @@ type PortfolioRow = {
   user_id: string
   host_project_id?: string | null
   visibility?: string | null
+  created_at?: string
   metadata: any
 }
 
@@ -41,7 +42,7 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
 
     const { data: target, error: targetError } = await supabase
       .from('portfolios')
-      .select('id, type, slug, user_id, host_project_id, visibility, metadata')
+      .select('id, type, slug, user_id, host_project_id, visibility, created_at, metadata')
       .eq('id', portfolioId)
       .single()
 
@@ -55,7 +56,7 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
 
     const { data: rows } = await supabase
       .from('portfolios')
-      .select('id, type, slug, user_id, host_project_id, visibility, metadata')
+      .select('id, type, slug, user_id, host_project_id, visibility, created_at, metadata')
       .in('type', [...DB_NON_HUMAN_TYPES])
       .limit(1000)
 
@@ -107,6 +108,7 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
         slug: row.slug ?? null,
         user_id: row.user_id,
         visibility: row.visibility ?? null,
+        created_at: (row.created_at as string | undefined) ?? null,
         metadata: row.metadata ?? {},
         member_preview,
       }

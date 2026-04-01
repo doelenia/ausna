@@ -419,6 +419,7 @@ export async function updatePortfolio(
       'human_availability_schedule'
     ) as string | null
     const iAmGoingRaw = formData.get('i_am_going') as string | null
+    const hostingPermissionRaw = formData.get('hosting_permission') as string | null
 
     if (!portfolioId) {
       return {
@@ -680,9 +681,13 @@ export async function updatePortfolio(
               for (const proj of projects) {
                 const hostMeta = (proj.metadata as any) || {}
                 const managers: string[] = hostMeta?.managers || []
+                const members: string[] = hostMeta?.members || []
+                const permission = (hostMeta?.properties?.hosting_permission as string | undefined) || 'managers'
                 const isOwner = proj.user_id === user.id
                 const isManager = Array.isArray(managers) && managers.includes(user.id)
-                if (isOwner || isManager) {
+                const isMember = Array.isArray(members) && members.includes(user.id)
+                const allowed = isOwner || isManager || (permission === 'members' && isMember)
+                if (allowed) {
                   resolvedHostProjectIds.push(proj.id)
                 }
               }
@@ -776,6 +781,18 @@ export async function updatePortfolio(
         } else {
           // Clear
           const { org_membership, ...rest } = nextProps
+          updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+        }
+      }
+
+      // Permission: who can host spaces from this space.
+      // Default is managers only; missing should be treated as managers only.
+      if (hostingPermissionRaw !== null && hostingPermissionRaw !== undefined) {
+        const nextProps = (updatedMetadata.properties || properties || {}) as Record<string, any>
+        if (hostingPermissionRaw === 'members') {
+          updatedMetadata.properties = { ...nextProps, hosting_permission: 'members' }
+        } else {
+          const { hosting_permission, ...rest } = nextProps
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
         }
       }

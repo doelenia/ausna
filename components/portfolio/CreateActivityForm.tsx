@@ -83,6 +83,7 @@ export function CreateActivityForm({
   const [callToJoinRequireApproval, setCallToJoinRequireApproval] = useState<boolean>(true)
   const [callToJoinPrompt, setCallToJoinPrompt] = useState<string>('Why do you want to join this activity?')
   const [orgMembershipEmailSuffixes, setOrgMembershipEmailSuffixes] = useState<string>('')
+  const [hostingPermission, setHostingPermission] = useState<'managers' | 'members'>('managers')
   const [callToJoinRoles, setCallToJoinRoles] = useState<
     Array<{ id: string; label: string; activityRole: 'member' | 'manager' }>
   >([
@@ -113,7 +114,8 @@ export function CreateActivityForm({
   const entityLabel = mode === 'space' ? 'space' : 'activity'
   const entityLabelTitle = mode === 'space' ? 'Space' : 'Activity'
   const externalKindLabel = mode === 'space' ? 'space' : 'activity'
-  const showHosts = mode !== 'space'
+  // Spaces can be hosted by other spaces; allow selecting hosts during space creation too.
+  const showHosts = true
 
   useEffect(() => {
     if (isExternal || visibility === 'private') {
@@ -265,13 +267,20 @@ export function CreateActivityForm({
             ?.filter((p: any) => {
               const meta = p.metadata as any
               const managers: string[] = meta?.managers || []
+              const members: string[] = meta?.members || []
+              const hostingPermission = (meta?.properties?.hosting_permission as string | undefined) || 'managers'
               const isOwner = p.user_id === user.id
               const isManager = Array.isArray(managers) && managers.includes(user.id)
+              const isMember = Array.isArray(members) && members.includes(user.id)
               const isSelf =
                 existingActivity && typeof existingActivity.id === 'string'
                   ? p.id === existingActivity.id
                   : false
-              return (isOwner || isManager) && !isSelf
+              const canHostFrom =
+                isOwner ||
+                isManager ||
+                (hostingPermission === 'members' && isMember)
+              return canHostFrom && !isSelf
             })
             .map((p: any) => {
               const meta = p.metadata as any
@@ -389,8 +398,11 @@ export function CreateActivityForm({
       if (isExternal) {
         formData.append('is_external', 'true')
         formData.append('external_link', externalLink.trim())
-      } else if (showHosts && hostSpaceIds.length > 0) {
+      } else if (hostSpaceIds.length > 0) {
         formData.append('host_project_ids', JSON.stringify(hostSpaceIds))
+      }
+      if (!isExternal && mode === 'space') {
+        formData.append('hosting_permission', hostingPermission)
       }
 
       if (avatarFile) {
@@ -954,6 +966,40 @@ export function CreateActivityForm({
 
               {!isExternal && (
                 <>
+                  {mode === 'space' && (
+                    <div>
+                      <UIText as="label" className="block mb-2">
+                        Who can host spaces from this space?
+                      </UIText>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { key: 'managers' as const, label: 'Managers only' },
+                          { key: 'members' as const, label: 'All members' },
+                        ].map((option) => {
+                          const selected = hostingPermission === option.key
+                          return (
+                            <button
+                              key={option.key}
+                              type="button"
+                              onClick={() => setHostingPermission(option.key)}
+                              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                                selected
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                              }`}
+                              disabled={loading}
+                            >
+                              {option.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <UIText as="p" className="text-xs text-gray-500 mt-1">
+                        Default is managers only. If this setting is missing, we treat it as managers only.
+                      </UIText>
+                    </div>
+                  )}
+
                   <div>
                     <UIText as="label" className="block mb-2">
                       Category

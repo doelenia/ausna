@@ -57,6 +57,9 @@ export function ActivityLocationBadge({
           ? 'button'
           : 'div'
 
+  const rootIsButton =
+    !disableRootClick && !isOnlineWithUrl && !!(onClick || onUnauthorizedClick)
+
   const handleClick = (e: React.MouseEvent) => {
     if (isOnlineWithUrl) return
     if (disableRootClick) return
@@ -131,16 +134,37 @@ export function ActivityLocationBadge({
             )}
           </div>
           {showEditIcon && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                if (onEditIconClick) onEditIconClick()
-              }}
-              className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <Pencil className="w-3 h-3" />
-            </button>
+            rootIsButton ? (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (onEditIconClick) onEditIconClick()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (onEditIconClick) onEditIconClick()
+                  }
+                }}
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Pencil className="w-3 h-3" aria-hidden />
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (onEditIconClick) onEditIconClick()
+                }}
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Pencil className="w-3 h-3" aria-hidden />
+              </button>
+            )
           )}
         </div>
       </Card>
