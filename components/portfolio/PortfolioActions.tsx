@@ -308,11 +308,11 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
       <>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" onClick={() => setShowCreateTypePrompt(true)}>
-            <Pen className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Pen className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Create Note</UIText>
           </Button>
           <Button variant="secondary" onClick={() => setShowAddContactDialog(true)}>
-            <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <UserPlus className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Add contact</UIText>
           </Button>
           {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
@@ -535,7 +535,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
       return (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" onClick={handleShare}>
-            <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Share2 className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Share</UIText>
           </Button>
           <Button
@@ -543,7 +543,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
             asLink
             href={`/messages/${portfolio.user_id}`}
           >
-            <MessageCircle className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <MessageCircle className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Message</UIText>
           </Button>
           {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
@@ -567,15 +567,15 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
       return (
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="primary" onClick={() => router.push(loginHref)}>
-            <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Share2 className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Share</UIText>
           </Button>
           <Button variant="secondary" onClick={() => router.push(loginHref)}>
-            <MessageCircle className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <MessageCircle className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Message</UIText>
           </Button>
           <Button variant="secondary" onClick={() => router.push(loginHref)}>
-            <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <UserPlus className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Friend</UIText>
           </Button>
         </div>
@@ -587,7 +587,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={handleShare}>
-          <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+          <Share2 className="w-4 h-4" strokeWidth={1.5} />
           <UIText>Share</UIText>
         </Button>
         <FriendButton friendId={portfolio.user_id} />
@@ -636,11 +636,11 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
             variant="primary"
             onClick={() => setShowProjectActivityCreatePrompt(true)}
           >
-            <Pen className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Pen className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Create Note</UIText>
           </Button>
         <Button variant="secondary" onClick={handleShare}>
-          <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+          <Share2 className="w-4 h-4" strokeWidth={1.5} />
           <UIText>Share</UIText>
         </Button>
         {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
@@ -707,7 +707,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
     return (
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" onClick={handleShare}>
-          <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+          <Share2 className="w-4 h-4" strokeWidth={1.5} />
           <UIText>Share</UIText>
         </Button>
         {isAuthenticated ? (
@@ -718,7 +718,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
           ) : isSubscribed ? (
             <>
               <Button variant="secondary" onClick={handleUnsubscribe}>
-                <BellOff className="w-4 h-4 mr-2" strokeWidth={1.5} />
+                <BellOff className="w-4 h-4" strokeWidth={1.5} />
                 <UIText>Unsubscribe</UIText>
               </Button>
               {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
@@ -726,7 +726,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
           ) : (
             <>
               <Button variant="secondary" onClick={handleSubscribe}>
-                <Bell className="w-4 h-4 mr-2" strokeWidth={1.5} />
+                <Bell className="w-4 h-4" strokeWidth={1.5} />
                 <UIText>Subscribe</UIText>
               </Button>
               {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
@@ -734,7 +734,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
           )
         ) : (
           <Button variant="secondary" onClick={() => router.push(loginHref)}>
-            <Bell className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Bell className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Subscribe</UIText>
           </Button>
         )}
@@ -782,11 +782,11 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
             variant="primary"
             onClick={() => setShowProjectActivityCreatePrompt(true)}
           >
-            <Pen className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Pen className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Create Note</UIText>
           </Button>
           <Button variant="secondary" onClick={handleShare}>
-            <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <Share2 className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Share</UIText>
           </Button>
           {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
@@ -863,12 +863,12 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
               onOpenCommunityJoin()
             }}
           >
-            <UserPlus className="w-4 h-4 mr-2" strokeWidth={1.5} />
+            <UserPlus className="w-4 h-4" strokeWidth={1.5} />
             <UIText>Join</UIText>
           </Button>
         )}
         <Button variant="primary" onClick={handleShare}>
-          <Share2 className="w-4 h-4 mr-2" strokeWidth={1.5} />
+          <Share2 className="w-4 h-4" strokeWidth={1.5} />
           <UIText>Share</UIText>
         </Button>
 

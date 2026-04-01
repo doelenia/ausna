@@ -25,15 +25,17 @@ const variantStyles: Record<ButtonVariant, string> = {
 }
 
 const sizeStyles: Record<ButtonSize, string> = {
-  sm: 'px-3 py-1.5',
-  md: 'px-4 py-2',
-  lg: 'px-6 py-3',
+  // Single canonical size across the app (keep keys for backwards compatibility).
+  sm: 'h-9 px-4',
+  md: 'h-9 px-4',
+  lg: 'h-9 px-4',
 }
 
 // inline-flex ensures button sizes to content width (not full width)
 // items-center justify-center ensures content is always vertically and horizontally centered
 // leading-none ensures consistent line height regardless of text content
-const baseStyles = 'rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center leading-none'
+const baseStyles =
+  'rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 leading-none'
 
 /**
  * Recursively processes children and replaces UIText components with UIButtonText

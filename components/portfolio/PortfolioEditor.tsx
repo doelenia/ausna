@@ -276,6 +276,9 @@ export function PortfolioEditor({
   const [hostSpacesLoading, setHostSpacesLoading] = useState(false)
   const [showHostSelector, setShowHostSelector] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const initialHostingPermission: 'managers' | 'members' =
+    (metadata?.properties?.hosting_permission as string | undefined) === 'members' ? 'members' : 'managers'
+  const [hostingPermission, setHostingPermission] = useState<'managers' | 'members'>(initialHostingPermission)
   const membersList: string[] = metadata?.members || []
   const isExternalActivityInit =
     isSpacePortfolio(portfolio) && (metadata?.properties as any)?.external === true
@@ -330,10 +333,17 @@ export function PortfolioEditor({
         const list = (spaces || []).filter((p: any) => {
           const meta = p.metadata as any
           const managers: string[] = meta?.managers || []
+          const members: string[] = meta?.members || []
+          const hostingPermission = (meta?.properties?.hosting_permission as string | undefined) || 'managers'
           const isOwner = p.user_id === u.id
           const isManager = managers.includes(u.id)
+          const isMember = Array.isArray(members) && members.includes(u.id)
           const isSelf = p.id === portfolio.id
-          return (isOwner || isManager) && !isSelf
+          const canHostFrom =
+            isOwner ||
+            isManager ||
+            (hostingPermission === 'members' && isMember)
+          return canHostFrom && !isSelf
         }).map((p: any) => {
           const meta = p.metadata as any
           const basic = meta?.basic || {}
@@ -607,6 +617,7 @@ export function PortfolioEditor({
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
         formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
         formData.append('org_membership_email_suffixes', orgMembershipEmailSuffixes || '')
+        formData.append('hosting_permission', hostingPermission)
       }
       if (isSpacePortfolio(portfolio) && isExternalAct) {
         formData.append('i_am_going', creatorGoing ? 'true' : 'false')
@@ -1170,6 +1181,40 @@ export function PortfolioEditor({
                               </UIText>
                             </>
                           )}
+                        </div>
+                      )}
+
+                      {isSpacePortfolio(portfolio) && (
+                        <div>
+                          <UIText as="label" className="block mb-2">
+                            Who can host spaces from this space?
+                          </UIText>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              { key: 'managers' as const, label: 'Managers only' },
+                              { key: 'members' as const, label: 'All members' },
+                            ].map((option) => {
+                              const selected = hostingPermission === option.key
+                              return (
+                                <button
+                                  key={option.key}
+                                  type="button"
+                                  onClick={() => setHostingPermission(option.key)}
+                                  className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+                                    selected
+                                      ? 'bg-blue-600 text-white'
+                                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                                  }`}
+                                  disabled={loading}
+                                >
+                                  {option.label}
+                                </button>
+                              )
+                            })}
+                          </div>
+                          <UIText as="p" className="text-xs text-gray-500 mt-1">
+                            Default is managers only. If this setting is missing, we treat it as managers only.
+                          </UIText>
                         </div>
                       )}
 

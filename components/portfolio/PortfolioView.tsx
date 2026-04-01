@@ -42,7 +42,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar, Card, UIButtonText } from '@/components/ui'
-import { Apple, ChevronRight, Lock, Megaphone, Timer, History, X } from 'lucide-react'
+import { Apple, ChevronRight, Lock, Megaphone, Timer, History, X, Plus } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -709,6 +709,7 @@ export function PortfolioView({
     slug: string | null
     user_id: string
     visibility: string | null
+    created_at?: string | null
     metadata: any
     member_preview?: Array<{ userId: string; name?: string | null; avatar?: string | null }>
   }
@@ -719,6 +720,7 @@ export function PortfolioView({
   const [spacesSearchMode, setSpacesSearchMode] = useState(false)
   const [spacesQuery, setSpacesQuery] = useState('')
   const [spacesHighlights, setSpacesHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
+  const [spacesLastNoteById, setSpacesLastNoteById] = useState<Record<string, string | null>>({})
 
   const getSpaceName = (p: SpacesApiPortfolio): string => {
     const basic = (p.metadata as any)?.basic || {}
@@ -750,6 +752,55 @@ export function PortfolioView({
     const start = dt?.start ? new Date(dt.start) : null
     if (!start || Number.isNaN(start.getTime())) return false
     return start.getTime() > Date.now()
+  }
+
+  const renderSpaceLiveOrUpcomingPill = (p: SpacesApiPortfolio): React.ReactNode => {
+    const dt = getSpaceActivityDateTime(p)
+    const status = getSpaceStatus(p)
+    const hasActivity = !!dt?.start
+
+    // Match the exact pill styles used next to the portfolio title.
+    if (!hasActivity) {
+      if (status === 'live') {
+        return (
+          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <UIText as="span" className="text-[11px] text-black leading-none">
+              LIVE
+            </UIText>
+          </div>
+        )
+      }
+      return null
+    }
+
+    const live = isActivityLive(dt as ActivityDateTimeValue, status)
+    if (live) {
+      return (
+        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          <UIText as="span" className="text-[11px] text-black leading-none">
+            LIVE
+          </UIText>
+        </div>
+      )
+    }
+
+    const start = dt?.start ? new Date(dt.start) : null
+    const validStart = start && !Number.isNaN(start.getTime()) ? start : null
+    if (!validStart) return null
+    if (status === 'archived') return null
+    if (new Date() >= validStart) return null
+
+    const label = formatDistanceToNowStrict(validStart, { addSuffix: true })
+    return (
+      <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+        <Timer className="w-3 h-3 text-blue-600 flex-shrink-0" aria-hidden />
+        <UIText as="span" className="text-[11px] leading-none text-blue-600">
+          {label}
+        </UIText>
+      </div>
+    )
   }
 
   const isSpaceJoinable = (p: SpacesApiPortfolio): boolean => {
@@ -904,6 +955,33 @@ export function PortfolioView({
       cancelled = true
     }
   }, [currentUserId, spacesList])
+
+  useEffect(() => {
+    if (!spacesList || spacesList.length === 0) {
+      setSpacesLastNoteById({})
+      return
+    }
+
+    let cancelled = false
+    const run = async () => {
+      try {
+        const ids = spacesList.map((p) => p.id).filter(Boolean)
+        const qs = new URLSearchParams({ portfolio_ids: ids.join(',') })
+        const res = await fetch(`/api/portfolios/last-note-created-at?${qs.toString()}`)
+        const data = await res.json()
+        if (cancelled) return
+        const next = (data?.lastNoteByPortfolioId as Record<string, string | null> | undefined) || {}
+        setSpacesLastNoteById(next)
+      } catch {
+        if (!cancelled) setSpacesLastNoteById({})
+      }
+    }
+
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [spacesList])
 
   const metadata = portfolio.metadata as any
   const members = metadata?.members || []
@@ -1942,253 +2020,350 @@ export function PortfolioView({
 
           {/* Portfolios Row (for all visitors, human portfolios only) */}
           {isHumanPortfolio(portfolio) && (
-            <div className="mt-4 mb-8 group">
-              <div className="flex items-center gap-2 mb-4">
-                <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                <UIText>Live spaces</UIText>
-              </div>
-              <div className="relative">
-                {/* Horizontal scroll buttons for mouse users */}
-                <button
-                  type="button"
-                  className="hidden group-hover:flex items-center justify-center absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
-                  onClick={() => {
-                    if (involvementScrollRef.current) {
-                      involvementScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' })
-                    }
-                  }}
-                >
-                  <ChevronRight className="w-5 h-5 rotate-180 text-gray-700" strokeWidth={1.5} />
-                </button>
-                <button
-                  type="button"
-                  className="hidden group-hover:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
-                  onClick={() => {
-                    if (involvementScrollRef.current) {
-                      involvementScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' })
-                    }
-                  }}
-                >
-                  <ChevronRight className="w-5 h-5 text-gray-700" strokeWidth={1.5} />
-                </button>
-                <div
-                  ref={involvementScrollRef}
-                  className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth"
-                >
-                {(() => {
-                  const liveSpaces = spacesList.filter((p) => isSpaceLive(p))
-                  return spacesLoading ? (
-                    <UIText className="text-gray-500">Loading spaces...</UIText>
-                  ) : liveSpaces.length === 0 ? (
-                    <UIText className="text-gray-500">No live spaces right now.</UIText>
-                  ) : (
-                    <>
-                      {liveSpaces.map((p) => {
-                        const basic = (p.metadata as any)?.basic || {}
-                        const name = (basic.name as string) || 'Space'
-                        const avatar = basic.avatar as string | undefined
-                        const emoji = basic.emoji as string | undefined
-                        const joinable = isSpaceJoinable(p)
-                        return (
-                          <div
-                            key={p.id}
-                            className="flex flex-col items-center flex-shrink-0 w-48 relative"
-                          >
-                            {(p.visibility || 'public') === 'private' && (
-                              <Lock
-                                className="absolute top-2 right-3 w-4 h-4 text-gray-500 z-10"
-                                aria-label="Private"
-                              />
-                            )}
-                            <Link
-                              href={getSpaceUrl(p.slug || p.id)}
-                              className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                            >
-                              <div className="flex flex-col items-center gap-3">
-                                <StickerAvatar
-                                  src={avatar}
-                                  alt={name}
-                                  type="space"
-                                  size={96}
-                                  emoji={emoji}
-                                  name={name}
-                                />
-                                <div className="flex flex-col items-center gap-1 w-full">
-                                  <Content
-                                    className="text-center max-w-[140px] mx-auto line-clamp-2"
-                                    title={name}
+            <>
+              {(() => {
+                const canCreateSpaces = authChecked && isOwner && isAuthenticated
+                const eligible = spacesList.filter((p) => isSpaceLive(p) || isSpaceUpcoming(p))
+                const sorted = [...eligible].sort((a, b) => {
+                  const aKey = spacesLastNoteById[a.id] || a.created_at || null
+                  const bKey = spacesLastNoteById[b.id] || b.created_at || null
+                  const ad = aKey ? new Date(aKey) : null
+                  const bd = bKey ? new Date(bKey) : null
+                  const at = ad && !Number.isNaN(ad.getTime()) ? ad.getTime() : 0
+                  const bt = bd && !Number.isNaN(bd.getTime()) ? bd.getTime() : 0
+                  return bt - at
+                })
+                const top = sorted.slice(0, 10)
+
+                if (!spacesLoading && top.length === 0 && !canCreateSpaces) return null
+
+                return (
+                  <div className="mt-4 mb-8 group">
+                    <div className="flex items-center justify-between gap-2 mb-4">
+                      <div className="flex items-center gap-2">
+                        <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                        <UIText>Spaces</UIText>
+                      </div>
+                      {shouldShowSpacesTab && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('spaces')}
+                          className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-800 transition-colors"
+                        >
+                          <UIText as="span">View all</UIText>
+                          <ChevronRight className="w-4 h-4" strokeWidth={1.5} aria-hidden />
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      {/* Horizontal scroll buttons for mouse users */}
+                      <button
+                        type="button"
+                        className="hidden group-hover:flex items-center justify-center absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
+                        onClick={() => {
+                          if (involvementScrollRef.current) {
+                            involvementScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' })
+                          }
+                        }}
+                      >
+                        <ChevronRight className="w-5 h-5 rotate-180 text-gray-700" strokeWidth={1.5} />
+                      </button>
+                      <button
+                        type="button"
+                        className="hidden group-hover:flex items-center justify-center absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 w-8 h-8 rounded-full p-0 bg-gray-200 hover:bg-gray-300 border border-gray-300 shadow-sm z-10 transition-colors"
+                        onClick={() => {
+                          if (involvementScrollRef.current) {
+                            involvementScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' })
+                          }
+                        }}
+                      >
+                        <ChevronRight className="w-5 h-5 text-gray-700" strokeWidth={1.5} />
+                      </button>
+                      <div
+                        ref={involvementScrollRef}
+                        className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth"
+                      >
+                        {spacesLoading ? (
+                          <UIText className="text-gray-500">Loading spaces...</UIText>
+                        ) : top.length === 0 ? (
+                          canCreateSpaces ? (
+                            <div className="flex flex-col items-center flex-shrink-0 w-48">
+                              <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                                <div className="flex flex-col items-center gap-3">
+                                  <Link
+                                    href={getSpaceCreateUrl()}
+                                    className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
                                   >
-                                    {name}
-                                  </Content>
-                                  {joinable && (
-                                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                                      <UIText as="span" className="text-gray-700">
-                                        Joinable
-                                      </UIText>
-                                    </div>
-                                  )}
-                                  {p.slug && (
-                                    <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
-                                      {p.slug}
-                                    </UIText>
-                                  )}
+                                    <svg
+                                      className="h-12 w-12 text-gray-600"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 4v16m8-8H4"
+                                      />
+                                    </svg>
+                                  </Link>
+                                  <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                    Create Space
+                                  </UIText>
                                 </div>
                               </div>
-                            </Link>
-                          </div>
-                        )
-                      })}
-
-                      {/* Create Space Button - Only visible to owner */}
-                      {authChecked && isOwner && isAuthenticated && (
-                        <div className="flex flex-col items-center flex-shrink-0 w-48">
-                          <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                            <div className="flex flex-col items-center gap-3">
-                              <Link
-                                href={getSpaceCreateUrl()}
-                                className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                              >
-                                <svg
-                                  className="h-12 w-12 text-gray-600"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M12 4v16m8-8H4"
-                                  />
-                                </svg>
-                              </Link>
-                              <UIText className="text-center max-w-[140px] mx-auto truncate">
-                                Create Space
-                              </UIText>
                             </div>
-                          </div>
-                        </div>
-                      )}
+                          ) : null
+                        ) : (
+                          <>
+                            {/* Create Space first */}
+                            {canCreateSpaces && (
+                              <div className="flex flex-col items-center flex-shrink-0 w-48">
+                                <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                                  <div className="flex flex-col items-center gap-3">
+                                    <Link
+                                      href={getSpaceCreateUrl()}
+                                      className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                                    >
+                                      <svg
+                                        className="h-12 w-12 text-gray-600"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
+                                      >
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M12 4v16m8-8H4"
+                                        />
+                                      </svg>
+                                    </Link>
+                                    <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                      Create Space
+                                    </UIText>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
 
-                      {/* Create Community button - Admin only, owner only */}
-                      {authChecked && isOwner && isAuthenticated && isAdmin === true && (
-                        <div className="flex flex-col items-center flex-shrink-0 w-48">
-                          <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                            <div className="flex flex-col items-center gap-3">
-                              <Link
-                                href={getSpaceCreateUrl()}
-                                className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                              >
-                                <svg
-                                  className="h-12 w-12 text-gray-600"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
+                            {top.map((p) => {
+                              const basic = (p.metadata as any)?.basic || {}
+                              const name = (basic.name as string) || 'Space'
+                              const avatar = basic.avatar as string | undefined
+                              const emoji = basic.emoji as string | undefined
+                              const joinable = isSpaceJoinable(p)
+                              const pill = renderSpaceLiveOrUpcomingPill(p)
+                              return (
+                                <div
+                                  key={p.id}
+                                  className="flex flex-col items-center flex-shrink-0 w-48 relative"
                                 >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                                  />
-                                </svg>
-                              </Link>
-                              <UIText className="text-center max-w-[140px] mx-auto truncate">
-                                Create Space
-                              </UIText>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )
-                })()}
-                </div>
-              </div>
-            </div>
+                                  <div className="absolute top-2 right-3 z-10 flex flex-col items-end gap-1">
+                                    {(p.visibility || 'public') === 'private' && (
+                                      <Lock
+                                        className="w-4 h-4 text-gray-500"
+                                        aria-label="Private"
+                                      />
+                                    )}
+                                    {pill}
+                                  </div>
+                                  <Link
+                                    href={getSpaceUrl(p.slug || p.id)}
+                                    className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                                  >
+                                    <div className="flex flex-col items-center gap-3">
+                                      <StickerAvatar
+                                        src={avatar}
+                                        alt={name}
+                                        type="space"
+                                        size={96}
+                                        emoji={emoji}
+                                        name={name}
+                                      />
+                                      <div className="flex flex-col items-center gap-1 w-full">
+                                        <Content
+                                          className="text-center max-w-[140px] mx-auto line-clamp-2"
+                                          title={name}
+                                        >
+                                          {name}
+                                        </Content>
+                                        {joinable && (
+                                          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                                            <UIText as="span" className="text-gray-700">
+                                              Joinable
+                                            </UIText>
+                                          </div>
+                                        )}
+                                        {p.slug && (
+                                          <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
+                                            {p.slug}
+                                          </UIText>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </Link>
+                                </div>
+                              )
+                            })}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+            </>
           )}
 
           {/* Live spaces section (space portfolios only) */}
           {!isHumanPortfolio(portfolio) &&
             normalizePortfolioType(portfolio.type) === 'space' && (
-              <div className="mt-4 mb-8 group">
-                <div className="flex items-center gap-2 mb-4">
-                  <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
-                  <UIText>Live spaces</UIText>
-                </div>
-                <div className="relative">
-                  <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth">
-                    {(() => {
-                      const liveHosted = spacesList.filter((p) => isSpaceLive(p))
-                      if (spacesLoading) {
-                        return <UIText className="text-gray-500">Loading spaces...</UIText>
-                      }
-                      if (liveHosted.length === 0) {
-                        return <UIText className="text-gray-500">No live spaces right now.</UIText>
-                      }
-                      return (
-                        <>
-                          {liveHosted.map((p) => {
-                            const basic = (p.metadata as any)?.basic || {}
-                            const name = (basic.name as string) || 'Space'
-                            const avatar = basic.avatar as string | undefined
-                            const emoji = basic.emoji as string | undefined
-                            const joinable = isSpaceJoinable(p)
-                            return (
-                              <div
-                                key={p.id}
-                                className="flex flex-col items-center flex-shrink-0 w-48 relative"
-                              >
-                                {(p.visibility || 'public') === 'private' && (
-                                  <Lock
-                                    className="absolute top-2 right-3 w-4 h-4 text-gray-500 z-10"
-                                    aria-label="Private"
-                                  />
-                                )}
-                                <Link
-                                  href={getSpaceUrl(p.slug || p.id)}
-                                  className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                                >
+              <>
+                {(() => {
+                  const permission =
+                    ((portfolio.metadata as any)?.properties?.hosting_permission as string | undefined) || 'managers'
+                  const canCreateHostedSpace =
+                    authChecked &&
+                    isAuthenticated &&
+                    (isOwner || isManager || (permission === 'members' && isMember))
+                  const eligible = spacesList.filter((p) => isSpaceLive(p) || isSpaceUpcoming(p))
+                  const sorted = [...eligible].sort((a, b) => {
+                    const aKey = spacesLastNoteById[a.id] || a.created_at || null
+                    const bKey = spacesLastNoteById[b.id] || b.created_at || null
+                    const ad = aKey ? new Date(aKey) : null
+                    const bd = bKey ? new Date(bKey) : null
+                    const at = ad && !Number.isNaN(ad.getTime()) ? ad.getTime() : 0
+                    const bt = bd && !Number.isNaN(bd.getTime()) ? bd.getTime() : 0
+                    return bt - at
+                  })
+                  const top = sorted.slice(0, 10)
+
+                  // If there are no live/upcoming spaces, hide this section unless the viewer can create one.
+                  if (!spacesLoading && top.length === 0 && !canCreateHostedSpace) {
+                    return null
+                  }
+
+                  return (
+                    <div className="mt-4 mb-8 group">
+                      <div className="flex items-center justify-between gap-2 mb-4">
+                        <div className="flex items-center gap-2">
+                          <Apple className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
+                          <UIText>Spaces</UIText>
+                        </div>
+                        {shouldShowSpacesTab && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('spaces')}
+                            className="inline-flex items-center gap-1 text-gray-600 hover:text-gray-800 transition-colors"
+                          >
+                            <UIText as="span">View all</UIText>
+                            <ChevronRight className="w-4 h-4" strokeWidth={1.5} aria-hidden />
+                          </button>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth">
+                          {spacesLoading ? (
+                            <UIText className="text-gray-500">Loading spaces...</UIText>
+                          ) : top.length === 0 ? (
+                            // Placeholder: show only when viewer can create a hosted space.
+                            canCreateHostedSpace ? (
+                              <div className="flex flex-col items-center flex-shrink-0 w-48">
+                                <div className="w-full rounded-2xl px-3 pt-3 pb-4">
                                   <div className="flex flex-col items-center gap-3">
-                                    <StickerAvatar
-                                      src={avatar}
-                                      alt={name}
-                                      type="space"
-                                      size={96}
-                                      emoji={emoji}
-                                      name={name}
-                                    />
-                                    <div className="flex flex-col items-center gap-1 w-full">
-                                      <Content
-                                        className="text-center max-w-[140px] mx-auto line-clamp-2"
-                                        title={name}
+                                    <Link
+                                      href={`${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`}
+                                      className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                                    >
+                                      <svg
+                                        className="h-12 w-12 text-gray-600"
+                                        fill="none"
+                                        viewBox="0 0 24 24"
+                                        stroke="currentColor"
                                       >
-                                        {name}
-                                      </Content>
-                                      {joinable && (
-                                        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                                          <UIText as="span" className="text-gray-700">
-                                            Joinable
-                                          </UIText>
-                                        </div>
-                                      )}
-                                      {p.slug && (
-                                        <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
-                                          {p.slug}
-                                        </UIText>
-                                      )}
-                                    </div>
+                                        <path
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          strokeWidth={2}
+                                          d="M12 4v16m8-8H4"
+                                        />
+                                      </svg>
+                                    </Link>
+                                    <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                      Create Space
+                                    </UIText>
                                   </div>
-                                </Link>
+                                </div>
                               </div>
-                            )
-                          })}
-                        </>
-                      )
-                    })()}
-                  </div>
-                </div>
-              </div>
+                            ) : null
+                          ) : (
+                            <>
+                              {top.map((p) => {
+                                const basic = (p.metadata as any)?.basic || {}
+                                const name = (basic.name as string) || 'Space'
+                                const avatar = basic.avatar as string | undefined
+                                const emoji = basic.emoji as string | undefined
+                                const joinable = isSpaceJoinable(p)
+                                const pill = renderSpaceLiveOrUpcomingPill(p)
+                                return (
+                                  <div
+                                    key={p.id}
+                                    className="flex flex-col items-center flex-shrink-0 w-48 relative"
+                                  >
+                                    <div className="absolute top-2 right-3 z-10 flex flex-col items-end gap-1">
+                                      {(p.visibility || 'public') === 'private' && (
+                                        <Lock className="w-4 h-4 text-gray-500" aria-label="Private" />
+                                      )}
+                                      {pill}
+                                    </div>
+                                    <Link
+                                      href={getSpaceUrl(p.slug || p.id)}
+                                      className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                                    >
+                                      <div className="flex flex-col items-center gap-3">
+                                        <StickerAvatar
+                                          src={avatar}
+                                          alt={name}
+                                          type="space"
+                                          size={96}
+                                          emoji={emoji}
+                                          name={name}
+                                        />
+                                        <div className="flex flex-col items-center gap-1 w-full">
+                                          <Content
+                                            className="text-center max-w-[140px] mx-auto line-clamp-2"
+                                            title={name}
+                                          >
+                                            {name}
+                                          </Content>
+                                          {joinable && (
+                                            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                                              <UIText as="span" className="text-gray-700">
+                                                Joinable
+                                              </UIText>
+                                            </div>
+                                          )}
+                                          {p.slug && (
+                                            <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
+                                              {p.slug}
+                                            </UIText>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </Link>
+                                  </div>
+                                )
+                              })}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </>
             )}
 
           {/* Notes feed (unified overview layout) */}
@@ -2249,6 +2424,36 @@ export function PortfolioView({
                   </Button>
                 )}
               </div>
+
+              {(() => {
+                const isSpace = !isHumanPortfolio(portfolio) && normalizePortfolioType(portfolio.type) === 'space'
+                const permission =
+                  ((portfolio.metadata as any)?.properties?.hosting_permission as string | undefined) || 'managers'
+                const canCreateFromThisSpace =
+                  authChecked &&
+                  isAuthenticated &&
+                  isSpace &&
+                  (isOwner || isManager || (permission === 'members' && isMember))
+
+                const canCreateAsHuman = authChecked && isAuthenticated && isHumanPortfolio(portfolio) && isOwner
+
+                if (!canCreateFromThisSpace && !canCreateAsHuman) return null
+
+                const href = canCreateFromThisSpace
+                  ? `${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`
+                  : getSpaceCreateUrl()
+
+                return (
+                  <div className="mb-4 flex justify-start">
+                    <Link href={href}>
+                      <Button variant="primary">
+                        <Plus className="w-4 h-4" aria-hidden />
+                        <UIText>Create Space</UIText>
+                      </Button>
+                    </Link>
+                  </div>
+                )
+              })()}
 
               {spacesLoading ? (
                 <UIText className="text-gray-500">Loading...</UIText>

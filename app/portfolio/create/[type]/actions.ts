@@ -68,6 +68,9 @@ export async function createPortfolio(
     const descriptionRaw = formData.get('description') as string | null
     const description = descriptionRaw || ''
     const descriptionTrimmed = description.trim()
+    const hostingPermissionRaw = formData.get('hosting_permission') as string | null
+    const hostingPermission: 'managers' | 'members' =
+      hostingPermissionRaw === 'members' ? 'members' : 'managers'
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostProjectIds: string[] =
       hostProjectIdsRaw && typeof hostProjectIdsRaw === 'string'
@@ -320,6 +323,20 @@ export async function createPortfolio(
       }
     }
 
+    // Permission: who can host spaces from this space.
+    // Default is managers only; missing should be treated as managers only.
+    if (!isExternal) {
+      if (hostingPermission === 'members') {
+        metadata.properties = {
+          ...(metadata.properties || {}),
+          hosting_permission: 'members',
+        }
+      } else if (metadata.properties && Object.prototype.hasOwnProperty.call(metadata.properties, 'hosting_permission')) {
+        const { hosting_permission, ...rest } = metadata.properties as Record<string, any>
+        metadata.properties = Object.keys(rest).length > 0 ? rest : undefined
+      }
+    }
+
     // Call-to-join: ONLY when explicitly enabled by the create form.
     // (Do not default to enabled just because the space is public.)
     const callToJoinEnabled = activityCallToJoinEnabledRaw === 'true'
@@ -430,12 +447,16 @@ export async function createPortfolio(
       for (const proj of projects) {
         const hostMeta = (proj.metadata as any) || {}
         const managers: string[] = hostMeta?.managers || []
+        const members: string[] = hostMeta?.members || []
+        const permission = (hostMeta?.properties?.hosting_permission as string | undefined) || 'managers'
         const isOwner = proj.user_id === user.id
         const isManager = Array.isArray(managers) && managers.includes(user.id)
-        if (!isOwner && !isManager) {
+        const isMember = Array.isArray(members) && members.includes(user.id)
+        const allowed = isOwner || isManager || (permission === 'members' && isMember)
+        if (!allowed) {
           return {
             success: false,
-            error: 'You must be owner or manager of each host project',
+            error: 'You must be allowed to host from each selected host space',
           }
         }
         resolvedHostProjectIds.push(proj.id)
