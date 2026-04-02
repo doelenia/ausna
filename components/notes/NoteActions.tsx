@@ -24,6 +24,8 @@ interface NoteActionsProps {
   onLeftCollaboration?: () => void
   /** Owner only: opens edit collaborators modal in parent */
   onOpenEditCollaborators?: () => void
+  /** Owner only: opens edit spaces modal in parent */
+  onOpenEditSpaces?: () => void
   isDeleting?: boolean
   isRemoving?: boolean
 }
@@ -53,6 +55,7 @@ export function NoteActions({
   onVisibilityChange,
   onLeftCollaboration,
   onOpenEditCollaborators,
+  onOpenEditSpaces,
   isDeleting = false,
   isRemoving = false,
 }: NoteActionsProps) {
@@ -517,6 +520,20 @@ export function NoteActions({
                   <div className="border-t border-gray-200 my-1" />
                 </>
               )}
+              {onOpenEditSpaces && (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsOpen(false)
+                      onOpenEditSpaces()
+                    }}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    Edit spaces
+                  </button>
+                  <div className="border-t border-gray-200 my-1" />
+                </>
+              )}
               {onDelete && !isCollaborator && (
                 <button
                   onClick={() => {
@@ -573,7 +590,9 @@ export function NoteActions({
                             }`}
                           >
                             {visibility === 'members' ? '✓ ' : ''}
-                            {assignedPortfolioName ? `Members of ${assignedPortfolioName}` : 'Members'}
+                            {note.assigned_portfolios && note.assigned_portfolios.length > 1
+                              ? `Members of ${note.assigned_portfolios.length} spaces`
+                              : (assignedPortfolioName ? `Members of ${assignedPortfolioName}` : 'Members')}
                           </button>
                         </>
                       ) : (

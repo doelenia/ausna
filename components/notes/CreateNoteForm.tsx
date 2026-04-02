@@ -13,7 +13,7 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import Link from 'next/link'
 import { ensureBrowserCompatibleImage } from '@/lib/utils/heic-converter'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
-import { Image as ImageIcon, Link2, Megaphone, Plus } from 'lucide-react'
+import { Image as ImageIcon, Link2, Megaphone, Plus, Circle, CheckCircle2 } from 'lucide-react'
 import {
   addDays,
   addMonths,
@@ -115,35 +115,38 @@ export function CreateNoteForm({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [showAssignPanel, setShowAssignPanel] = useState(false)
   const [userSelectedPortfolio, setUserSelectedPortfolio] = useState<Portfolio | null>(null)
-  const [assignableProjects, setAssignableProjects] = useState<Portfolio[]>([])
-  const [assignableActivities, setAssignableActivities] = useState<Portfolio[]>([])
-  const [assignableCommunities, setAssignableCommunities] = useState<Portfolio[]>([])
+  const [assignableSpaces, setAssignableSpaces] = useState<Portfolio[]>([])
   const [assignableLoading, setAssignableLoading] = useState(false)
   /** When collaborators are added: portfolio id -> true if all (owner + collaborators) can create there */
   const [portfolioIdsAllCanCreate, setPortfolioIdsAllCanCreate] = useState<Record<string, boolean>>({})
   const [portfolioIdsAllCanCreateLoading, setPortfolioIdsAllCanCreateLoading] = useState(false)
   const supabase = useMemo(() => createClient(), [])
 
-  // Effective list: props portfolios + portfolio selected from assign panel (for display and submit)
+  // Effective list: props portfolios + any assignable space we selected (for display and submit)
   const effectivePortfolios = useMemo(() => {
     const list = [...portfolios]
-    if (userSelectedPortfolio && !list.some((p) => p.id === userSelectedPortfolio.id)) {
-      list.push(userSelectedPortfolio)
+    // Ensure any selected spaces are present (portfolios prop may not include them on /notes/create).
+    for (const id of selectedPortfolios) {
+      if (list.some((p) => p.id === id)) continue
+      const fromAssignable = assignableSpaces.find((p) => p.id === id)
+      if (fromAssignable) list.push(fromAssignable)
     }
     return list
-  }, [portfolios, userSelectedPortfolio])
+  }, [portfolios, selectedPortfolios, assignableSpaces])
 
   // Filter to show portfolios passed in (currently projects/activities/communities)
   const displayablePortfolios = effectivePortfolios
 
-  // Get the selected context portfolio ID (project, activity, or community)
-  const selectedContextId = selectedPortfolios.find((id) => {
-    const portfolio = effectivePortfolios.find((p) => p.id === id)
-    return (
-      portfolio &&
-      isSpacePortfolio(portfolio)
-    )
-  })
+  // With multi-space assignment, "context" features (collections, pin info, members label)
+  // are only well-defined when exactly one space is selected.
+  const selectedSpaceIds = useMemo(() => {
+    return selectedPortfolios.filter((id) => {
+      const p = effectivePortfolios.find((x) => x.id === id)
+      return !!p && isSpacePortfolio(p)
+    })
+  }, [selectedPortfolios, effectivePortfolios])
+
+  const selectedContextId = selectedSpaceIds.length === 1 ? selectedSpaceIds[0] : undefined
 
   // Fetch collections for the selected project or activity
   useEffect(() => {
@@ -244,7 +247,7 @@ export function CreateNoteForm({
 
   // Keep visibility valid when assignment changes (unassigned: public/friends/private; assigned: public/members)
   useEffect(() => {
-    if (selectedContextId) {
+    if (selectedSpaceIds.length >= 1) {
       if (visibility === 'friends' || visibility === 'private') {
         setVisibility('members')
       }
@@ -253,7 +256,7 @@ export function CreateNoteForm({
         setVisibility('public')
       }
     }
-  }, [selectedContextId, visibility])
+  }, [selectedSpaceIds.length, visibility])
 
   // Fetch assignable projects and activities when assign panel opens
   useEffect(() => {
@@ -264,8 +267,7 @@ export function CreateNoteForm({
       try {
         const { data: { user: authUser } } = await supabase.auth.getUser()
         if (!authUser) {
-          setAssignableProjects([])
-          setAssignableActivities([])
+          setAssignableSpaces([])
           return
         }
 
@@ -275,77 +277,24 @@ export function CreateNoteForm({
           .in('type', [...DB_NON_HUMAN_TYPES])
           .order('created_at', { ascending: false })
 
-        const allProjects = allSpaces
-        const allActivities = allSpaces
-        const allCommunities = allSpaces
-
-        const projects = (allProjects || [])
+        // All eligible spaces: user is owner, manager, or member.
+        const spaces = (allSpaces || [])
           .filter((p: any) => {
             const metadata = p.metadata as any
             const managers = metadata?.managers || []
             const members = metadata?.members || []
-            const status = (metadata?.status as string | undefined) || null
-            const isMemberOrManager =
+            return (
               p.user_id === authUser.id ||
               (Array.isArray(managers) && managers.includes(authUser.id)) ||
               (Array.isArray(members) && members.includes(authUser.id))
-            const isActive = status !== 'archived'
-            return isMemberOrManager && isActive
+            )
           })
           .map((p: any) => ({ ...p, type: 'space' as const } as Portfolio))
 
-        const projectNameById = new Map<string, string>()
-        ;(allProjects || []).forEach((p: any) => {
-          const meta = p.metadata as any
-          const basic = meta?.basic || {}
-          projectNameById.set(p.id, (basic.name as string) || 'Project')
-        })
-
-        const now = new Date()
-        const activities = (allActivities || [])
-          .filter((p: any) => {
-            const metadata = p.metadata as any
-            const managers: string[] = metadata?.managers || []
-            const members: string[] = metadata?.members || []
-            const isOwner = p.user_id === authUser.id
-            const isManager = Array.isArray(managers) && managers.includes(authUser.id)
-            const isMember = Array.isArray(members) && members.includes(authUser.id)
-            if (!isOwner && !isManager && !isMember) return false
-            const props = metadata?.properties || {}
-            const activity = props.activity_datetime as { start?: string; end?: string | null } | undefined
-            if (!activity?.start) return false
-            const start = new Date(activity.start)
-            if (Number.isNaN(start.getTime())) return false
-            let end: Date | null = null
-            if (activity.end) {
-              const parsedEnd = new Date(activity.end)
-              end = Number.isNaN(parsedEnd.getTime()) ? null : parsedEnd
-            }
-            const effectiveEnd = end ?? start
-            return effectiveEnd >= now
-          })
-          .map((p: any) => ({ ...p, type: 'space' as const } as Portfolio))
-
-        const communities = (allCommunities || [])
-          .filter((p: any) => {
-            const metadata = p.metadata as any
-            const managers: string[] = metadata?.managers || []
-            const members: string[] = metadata?.members || []
-            const isOwner = p.user_id === authUser.id
-            const isManager = Array.isArray(managers) && managers.includes(authUser.id)
-            const isMember = Array.isArray(members) && members.includes(authUser.id)
-            return isOwner || isManager || isMember
-          })
-          .map((p: any) => ({ ...p, type: 'space' as const } as Portfolio))
-
-        setAssignableProjects(projects)
-        setAssignableActivities(activities)
-        setAssignableCommunities(communities)
+        setAssignableSpaces(spaces)
       } catch (err) {
         console.error('Failed to fetch assignable portfolios:', err)
-        setAssignableProjects([])
-        setAssignableActivities([])
-        setAssignableCommunities([])
+        setAssignableSpaces([])
       } finally {
         setAssignableLoading(false)
       }
@@ -360,11 +309,7 @@ export function CreateNoteForm({
       setPortfolioIdsAllCanCreate({})
       return
     }
-    const portfolioIds = [
-      ...assignableProjects.map((p) => p.id),
-      ...assignableActivities.map((p) => p.id),
-      ...assignableCommunities.map((p) => p.id),
-    ]
+    const portfolioIds = [...assignableSpaces.map((p) => p.id)]
     if (portfolioIds.length === 0 || !currentUserId) {
       setPortfolioIdsAllCanCreate({})
       return
@@ -380,7 +325,7 @@ export function CreateNoteForm({
       .then((data) => setPortfolioIdsAllCanCreate(data.result || {}))
       .catch(() => setPortfolioIdsAllCanCreate({}))
       .finally(() => setPortfolioIdsAllCanCreateLoading(false))
-  }, [collaborators, currentUserId, assignableProjects, assignableActivities, assignableCommunities])
+  }, [collaborators, currentUserId, assignableSpaces])
 
   // If a portfolio is selected and collaborators are added such that not all can post there, clear the selection
   useEffect(() => {
@@ -1013,12 +958,7 @@ export function CreateNoteForm({
       const contextPortfolios = selectedPortfolios.filter((id) =>
         effectivePortfolios.some((p) => p.id === id)
       )
-      // Allow zero or one portfolio (assignment is optional)
-      if (contextPortfolios.length > 1) {
-        setError('Note can be assigned to at most one portfolio')
-        setIsSubmitting(false)
-        return
-      }
+      // Allow zero or more portfolios (assignment is optional)
       formData.append('assigned_portfolios', JSON.stringify(contextPortfolios))
 
       // Collaborators are invited after note is created (invite flow), not added directly
@@ -1663,81 +1603,74 @@ export function CreateNoteForm({
         </div>
       )}
 
-      {/* Assigned portfolio: badge or "Assign to" placeholder */}
-      {selectedContextId ? (() => {
-        const context = effectivePortfolios.find(
-          (p) =>
-            p.id === selectedContextId &&
-            isSpacePortfolio(p)
-        )
-        if (!context) return null
-        const basic = getPortfolioBasic(context)
-        const metadata = context.metadata as {
-          basic?: { emoji?: string }
-          project_type_specific?: string
-        } | undefined
-        const emoji = metadata?.basic?.emoji
-        const projectType = metadata?.project_type_specific ?? null
-        const description = basic.description
-        const canClear = !!userSelectedPortfolio && userSelectedPortfolio.id === selectedContextId
-        return (
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-gray-100">
-            <Link
-              href={getPortfolioUrl(context)}
-              className="flex items-start gap-3 flex-1 min-w-0 overflow-hidden"
+      {/* Assigned spaces: removable pills + persistent "+" pill */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {selectedSpaceIds.map((spaceId, idx) => {
+          const space = effectivePortfolios.find((p) => p.id === spaceId)
+          if (!space || !isSpacePortfolio(space)) return null
+          const basic = getPortfolioBasic(space)
+          const meta = space.metadata as any
+          const isPrimary = idx === 0
+          return (
+            <div
+              key={space.id}
+              className="inline-flex items-center gap-2 pl-2 pr-1 h-8 rounded-full bg-gray-100"
+              title={basic.name}
             >
-              <div className="flex-shrink-0">
+              <Link
+                href={getPortfolioUrl(space)}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-2 min-w-0 hover:opacity-90 transition-opacity"
+              >
                 <StickerAvatar
                   src={basic.avatar}
                   alt={basic.name}
-                  type={context.type}
-                  size={48}
-                  emoji={emoji}
+                  type={space.type}
+                  size={24}
+                  emoji={meta?.basic?.emoji}
                   name={basic.name}
+                  variant="mini"
                 />
-              </div>
-              <div className="flex-1 min-w-0 overflow-hidden">
-                <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
-                  <Content className="truncate min-w-0">{basic.name}</Content>
-                  {projectType && (
-                    <UIButtonText className="text-gray-500 flex-shrink-0">{projectType}</UIButtonText>
-                  )}
-                </div>
-                {description && (
-                  <div className="min-w-0 overflow-hidden">
-                    <UIText className="text-gray-500 truncate block w-full">{description}</UIText>
-                  </div>
+                <UIText as="span" className="max-w-[160px] truncate text-gray-700">
+                  {basic.name}
+                </UIText>
+                {isPrimary && (
+                  <UIText as="span" className="text-gray-500">
+                    Primary
+                  </UIText>
                 )}
-              </div>
-            </Link>
-            {canClear && (
+              </Link>
               <button
                 type="button"
                 onClick={() => {
-                  setUserSelectedPortfolio(null)
-                  setSelectedPortfolios([])
+                  setSelectedPortfolios((prev) => prev.filter((id) => id !== space.id))
+                  if (userSelectedPortfolio?.id === space.id) {
+                    setUserSelectedPortfolio(null)
+                  }
                 }}
-                className="p-1.5 rounded text-gray-500 hover:bg-gray-200 flex-shrink-0"
-                title="Remove assignment"
-                aria-label="Remove assignment"
+                className="w-7 h-7 inline-flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-500"
+                aria-label={`Remove ${basic.name}`}
+                title="Remove"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <span className="leading-none">×</span>
               </button>
-            )}
-          </div>
-        )
-      })() : (
+            </div>
+          )
+        })}
+
         <button
           type="button"
           onClick={() => setShowAssignPanel(true)}
-          className="flex items-center justify-center gap-2 w-full p-3 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors text-left"
+          className="inline-flex items-center gap-2 px-3 h-8 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+          title="Add space"
+          aria-label="Add space"
         >
-          <Plus className="w-5 h-5 text-gray-500 flex-shrink-0" />
-          <UIText as="span" className="font-medium text-gray-700">Assign to</UIText>
+          <Plus className="w-4 h-4 text-gray-600" />
+          <UIText as="span" className="text-gray-700">
+            Add space
+          </UIText>
         </button>
-      )}
+      </div>
 
       {/* Assign portfolio panel (project or activity) */}
       {showAssignPanel && (
@@ -1746,157 +1679,62 @@ export function CreateNoteForm({
           onClick={() => setShowAssignPanel(false)}
         >
           <div
-            className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-y-auto"
+            className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <Card variant="default" padding="sm">
-              <div className="mb-4">
-                <UIText>
-                  Choose a project, activity, or community to assign this note to
-                </UIText>
+            <Card variant="default" padding="sm" className="flex flex-col flex-1 min-h-0">
+              <div className="mb-3">
+                <UIText>Select a space to add</UIText>
               </div>
-              {assignableLoading ? (
-                <div className="py-8 text-center">
-                  <UIText className="text-gray-500">Loading...</UIText>
-                </div>
-              ) : (
-                <>
-                  {assignableProjects.length > 0 && (
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                {assignableLoading ? (
+                  <div className="py-8 text-center">
+                    <UIText className="text-gray-500">Loading...</UIText>
+                  </div>
+                ) : (
+                  <>
+                  {assignableSpaces.length > 0 && (
                     <div className="mb-4">
-                      <UIText as="p" className="mb-2 font-medium text-gray-700">Projects</UIText>
                       {collaborators.length > 0 && (
                         <UIText as="p" className="mb-2 text-xs text-gray-500">
-                          Only projects where all collaborators can post are selectable.
+                          Only spaces where all collaborators can post are selectable.
                         </UIText>
                       )}
                       <div className="grid grid-cols-3 gap-x-4 gap-y-6">
-                        {assignableProjects.map((project) => {
-                          const basic = getPortfolioBasic(project)
-                          const metadata = project.metadata as { basic?: { emoji?: string } } | undefined
-                          const canSelect = collaborators.length === 0 || portfolioIdsAllCanCreate[project.id] === true
-                          return (
-                            <button
-                              key={project.id}
-                              type="button"
-                              disabled={!canSelect}
-                              onClick={() => {
-                                if (!canSelect) return
-                                setUserSelectedPortfolio(project)
-                                setSelectedPortfolios([project.id])
-                                setShowAssignPanel(false)
-                              }}
-                              className={`flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
-                                canSelect
-                                  ? 'hover:opacity-80'
-                                  : 'opacity-50 cursor-not-allowed grayscale'
-                              }`}
-                              title={!canSelect ? 'Not available: not all collaborators can post here' : basic.name}
-                            >
-                              <StickerAvatar
-                                src={basic.avatar}
-                                alt={basic.name}
-                                type="space"
-                                size={72}
-                                emoji={metadata?.basic?.emoji}
-                                name={basic.name}
-                              />
-                              <UIText className="text-center max-w-[96px] truncate" title={basic.name}>
-                                {basic.name}
-                              </UIText>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-                  {assignableActivities.length > 0 && (
-                    <div className="mb-4">
-                      <UIText as="p" className="mb-2 font-medium text-gray-700">Activities</UIText>
-                      {collaborators.length > 0 && (
-                        <UIText as="p" className="mb-2 text-xs text-gray-500">
-                          Only activities where all collaborators can post are selectable.
-                        </UIText>
-                      )}
-                      <div className="grid grid-cols-3 gap-x-4 gap-y-6">
-                        {assignableActivities.map((activity) => {
-                          const basic = getPortfolioBasic(activity)
-                          const metadata = activity.metadata as { basic?: { emoji?: string } } | undefined
-                          const canSelect = collaborators.length === 0 || portfolioIdsAllCanCreate[activity.id] === true
-                          return (
-                            <button
-                              key={activity.id}
-                              type="button"
-                              disabled={!canSelect}
-                              onClick={() => {
-                                if (!canSelect) return
-                                setUserSelectedPortfolio(activity)
-                                setSelectedPortfolios([activity.id])
-                                setShowAssignPanel(false)
-                              }}
-                              className={`flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
-                                canSelect
-                                  ? 'hover:opacity-80'
-                                  : 'opacity-50 cursor-not-allowed grayscale'
-                              }`}
-                              title={!canSelect ? 'Not available: not all collaborators can post here' : basic.name}
-                            >
-                              <StickerAvatar
-                                src={basic.avatar}
-                                alt={basic.name}
-                                type="space"
-                                size={72}
-                                emoji={metadata?.basic?.emoji}
-                                name={basic.name}
-                              />
-                              <UIText className="text-center max-w-[96px] truncate" title={basic.name}>
-                                {basic.name}
-                              </UIText>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-                  {assignableCommunities.length > 0 && (
-                    <div className="mb-4">
-                      <UIText as="p" className="mb-2 font-medium text-gray-700">
-                        Communities
-                      </UIText>
-                      {collaborators.length > 0 && (
-                        <UIText as="p" className="mb-2 text-xs text-gray-500">
-                          Only communities where all collaborators can post are selectable.
-                        </UIText>
-                      )}
-                      <div className="grid grid-cols-3 gap-x-4 gap-y-6">
-                        {assignableCommunities.map((community) => {
-                          const basic = getPortfolioBasic(community)
-                          const metadata =
-                            (community.metadata as { basic?: { emoji?: string } }) || undefined
+                        {assignableSpaces.map((space) => {
+                          const basic = getPortfolioBasic(space)
+                          const metadata = space.metadata as { basic?: { emoji?: string } } | undefined
                           const canSelect =
-                            collaborators.length === 0 ||
-                            portfolioIdsAllCanCreate[community.id] === true
+                            collaborators.length === 0 || portfolioIdsAllCanCreate[space.id] === true
+                          const isSelected = selectedPortfolios.includes(space.id)
                           return (
                             <button
-                              key={community.id}
+                              key={space.id}
                               type="button"
                               disabled={!canSelect}
                               onClick={() => {
                                 if (!canSelect) return
-                                setUserSelectedPortfolio(community)
-                                setSelectedPortfolios([community.id])
+                                if (isSelected) return
+                                setUserSelectedPortfolio(space)
+                                setSelectedPortfolios((prev) => [...prev, space.id])
                                 setShowAssignPanel(false)
                               }}
-                              className={`flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
-                                canSelect
-                                  ? 'hover:opacity-80'
-                                  : 'opacity-50 cursor-not-allowed grayscale'
+                              className={`relative flex flex-col items-center gap-2 py-4 px-3 transition-opacity ${
+                                isSelected
+                                  ? 'bg-gray-100'
+                                  : ''
+                              } ${
+                                canSelect ? 'hover:opacity-80' : 'opacity-50 cursor-not-allowed grayscale'
                               }`}
                               title={
-                                !canSelect
-                                  ? 'Not available: not all collaborators can post here'
-                                  : basic.name
+                                !canSelect ? 'Not available: not all collaborators can post here' : basic.name
                               }
                             >
+                              {isSelected && (
+                                <div className="absolute top-2 right-2">
+                                  <CheckCircle2 className="w-5 h-5 text-gray-600" strokeWidth={2} />
+                                </div>
+                              )}
                               <StickerAvatar
                                 src={basic.avatar}
                                 alt={basic.name}
@@ -1905,10 +1743,7 @@ export function CreateNoteForm({
                                 emoji={metadata?.basic?.emoji}
                                 name={basic.name}
                               />
-                              <UIText
-                                className="text-center max-w-[96px] truncate"
-                                title={basic.name}
-                              >
+                              <UIText className="text-center max-w-[96px] truncate" title={basic.name}>
                                 {basic.name}
                               </UIText>
                             </button>
@@ -1918,19 +1753,13 @@ export function CreateNoteForm({
                     </div>
                   )}
                   {!assignableLoading &&
-                    assignableProjects.length === 0 &&
-                    assignableActivities.length === 0 &&
-                    assignableCommunities.length === 0 && (
+                    assignableSpaces.length === 0 && (
                       <UIText className="text-gray-500 py-4">
-                        No projects, activities, or communities available.
+                        No spaces available.
                       </UIText>
                     )}
-                </>
-              )}
-              <div className="flex justify-end mt-4">
-                <Button variant="secondary" onClick={() => setShowAssignPanel(false)}>
-                  <UIText>Cancel</UIText>
-                </Button>
+                  </>
+                )}
               </div>
             </Card>
           </div>
@@ -1983,14 +1812,16 @@ export function CreateNoteForm({
                 Visibility
               </UIText>
               <div className="flex flex-wrap gap-2">
-                {selectedContextId
+                {selectedSpaceIds.length >= 1
                   ? (
                       [
                         { value: 'public' as const, label: 'Public' },
                         {
                           value: 'members' as const,
                           label: (() => {
-                            const context = effectivePortfolios.find((p) => p.id === selectedContextId)
+                            if (selectedSpaceIds.length > 1) return `Members of ${selectedSpaceIds.length} spaces`
+                            const onlyId = selectedSpaceIds[0]
+                            const context = effectivePortfolios.find((p) => p.id === onlyId)
                             const name = context ? getPortfolioName(context) : 'this portfolio'
                             return `Members of ${name}`
                           })(),
@@ -2032,8 +1863,8 @@ export function CreateNoteForm({
                     ))}
               </div>
               <UIText as="p" className="text-xs text-gray-500 mt-1">
-                {selectedContextId
-                  ? 'Members-only notes are only visible to members of the assigned portfolio.'
+                {selectedSpaceIds.length >= 1
+                  ? 'Members-only notes are only visible to members of the assigned space(s).'
                   : 'Friends-only notes are only visible to your friends. Private notes are only visible to you.'}
               </UIText>
             </div>

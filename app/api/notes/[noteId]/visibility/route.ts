@@ -52,7 +52,7 @@ export async function POST(
 
     const assignedCount = Array.isArray(note.assigned_portfolios) ? note.assigned_portfolios.length : 0
     const allowed: NoteVisibility[] =
-      assignedCount === 1 ? ['public', 'members'] : ['public', 'friends', 'private']
+      assignedCount >= 1 ? ['public', 'members'] : ['public', 'friends', 'private']
     if (!allowed.includes(visibility)) {
       return NextResponse.json(
         { success: false, error: 'Invalid visibility for this note' },
