@@ -1097,7 +1097,9 @@ export function PortfolioView({
   useEffect(() => {
     if (!spacesList || spacesList.length === 0) {
       setSpacesLastNoteById({})
-      setSpacesLastNoteLoaded(false)
+      // Empty list: feed-tab row ordering is trivially ready; otherwise the top row
+      // (including create-space placeholder for eligible users) never renders.
+      setSpacesLastNoteLoaded(true)
       return
     }
 

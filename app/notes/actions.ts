@@ -95,13 +95,10 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // Allow zero or one portfolio assigned (optional assignment)
-    if (portfolioIds.length > 1) {
-      return {
-        success: false,
-        error: 'Note can be assigned to at most one portfolio',
-      }
-    }
+    // Allow zero or more assigned portfolios (optional assignment)
+    portfolioIds = Array.isArray(portfolioIds)
+      ? [...new Set(portfolioIds.filter((id) => typeof id === 'string' && id.trim()))]
+      : []
 
     // Parse collaborators (must be valid UUIDs, exclude self)
     let collaboratorAccountIds: string[] = []
@@ -120,21 +117,22 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // For new notes (not annotations or reactions), if a portfolio is assigned, user must be a member.
+    // For new notes (not annotations or reactions), if any portfolios are assigned, user must be allowed to post in each.
     const isAnnotation = !!mentionedNoteId && noteTypeRaw !== 'reaction'
     const isReaction = noteTypeRaw === 'reaction'
     const isResourceRaw = noteTypeRaw === 'resource'
-    if (portfolioIds.length === 1 && !isAnnotation && !isReaction) {
-      const portfolioId = portfolioIds[0]
-      const canCreate = isResourceRaw
-        ? await canCreateResourceInPortfolio(portfolioId, user.id)
-        : await canCreateNoteInPortfolio(portfolioId, user.id)
-      if (!canCreate) {
-        return {
-          success: false,
-          error: isResourceRaw
-            ? 'You are not allowed to create resources in this portfolio'
-            : 'You must be a member of the portfolio to create notes',
+    if (portfolioIds.length >= 1 && !isAnnotation && !isReaction) {
+      for (const portfolioId of portfolioIds) {
+        const canCreate = isResourceRaw
+          ? await canCreateResourceInPortfolio(portfolioId, user.id)
+          : await canCreateNoteInPortfolio(portfolioId, user.id)
+        if (!canCreate) {
+          return {
+            success: false,
+            error: isResourceRaw
+              ? 'You are not allowed to create resources in one of the selected spaces'
+              : 'You must be a member of each selected space to create notes there',
+          }
         }
       }
     }
@@ -178,11 +176,11 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     // - Assigned notes: public | members
     const assignedCount = portfolioIds.length
     const allowedVisibilities: NoteVisibility[] =
-      assignedCount === 1 ? ['public', 'members'] : ['public', 'friends', 'private']
+      assignedCount >= 1 ? ['public', 'members'] : ['public', 'friends', 'private']
     let visibility: NoteVisibility =
       visibilityRaw && (allowedVisibilities as string[]).includes(visibilityRaw)
         ? (visibilityRaw as NoteVisibility)
-        : assignedCount === 1
+        : assignedCount >= 1
           ? 'members'
           : 'public'
     // Annotations/reactions should follow the parent note's audience and not become "members-only" by default.

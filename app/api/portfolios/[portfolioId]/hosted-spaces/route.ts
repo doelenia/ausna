@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { DB_NON_HUMAN_TYPES, normalizePortfolioType } from '@/types/portfolio'
+import { getDeclaredHostSpaceIds } from '@/lib/portfolio/hostRefs'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,16 +20,7 @@ type MemberPreview = { userId: string; name?: string | null; avatar?: string | n
 
 function hostedBySpace(candidate: PortfolioRow, space: PortfolioRow): boolean {
   if (candidate.id === space.id) return false
-
-  const props = (candidate.metadata?.properties as any) || {}
-  const hostProjectIds: string[] = Array.isArray(props?.host_project_ids) ? props.host_project_ids : []
-  const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids) ? props.host_community_ids : []
-  const legacyHost = candidate.host_project_id ? [candidate.host_project_id] : []
-  const candidateHosts = [...hostProjectIds, ...hostCommunityIds, ...legacyHost]
-
-  // A space S should only show spaces that explicitly declare S as their host.
-  // Do not include spaces hosted by S's host space.
-  return candidateHosts.includes(space.id)
+  return getDeclaredHostSpaceIds(candidate).includes(space.id)
 }
 
 export async function GET(_request: NextRequest, { params }: { params: { portfolioId: string } }) {

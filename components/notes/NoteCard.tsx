@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import ReactDOM from 'react-dom'
 import { Note, NoteReference, ImageReference, UrlReference, NoteSource, type NoteVisibility } from '@/types/note'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
@@ -100,6 +100,14 @@ export function NoteCard({
   const renderPortal = (node: React.ReactNode) =>
     isBrowser ? ReactDOM.createPortal(node, document.body) : node
   const router = useRouter()
+  // Prevent SSR/client hydration mismatch for relative time strings.
+  const [isMounted, setIsMounted] = useState(false)
+  useEffect(() => setIsMounted(true), [])
+
+  const createdAtLabel = useMemo(() => {
+    if (!isMounted) return ''
+    return formatRelativeTime(note.created_at)
+  }, [isMounted, note.created_at])
   const { getCachedPortfolioData, setCachedPortfolioData, getCachedPortfolio, setCachedPortfolio } = useDataCache()
   const [ownerPortfolio, setOwnerPortfolio] = useState<Portfolio | null>(null)
   const [collaboratorPortfolios, setCollaboratorPortfolios] = useState<Portfolio[]>([])
@@ -112,6 +120,11 @@ export function NoteCard({
   const [editCollabCandidatesLoading, setEditCollabCandidatesLoading] = useState(false)
   const [removingCollaboratorId, setRemovingCollaboratorId] = useState<string | null>(null)
   const [sendingInviteToId, setSendingInviteToId] = useState<string | null>(null)
+  const [showEditSpacesModal, setShowEditSpacesModal] = useState(false)
+  const [editSpacesSearchQuery, setEditSpacesSearchQuery] = useState('')
+  const [memberSpaces, setMemberSpaces] = useState<Portfolio[]>([])
+  const [memberSpacesLoading, setMemberSpacesLoading] = useState(false)
+  const [updatingSpaceId, setUpdatingSpaceId] = useState<string | null>(null)
   const [sessionRecoveryTrigger, setSessionRecoveryTrigger] = useState(0)
   const [imageAspectRatio, setImageAspectRatio] = useState<number | null>(null)
   const [currentImageIndex, setCurrentImageIndex] = useState(0)
@@ -348,7 +361,16 @@ export function NoteCard({
             }
           } else if (assignedPortfolios && assignedPortfolios.length > 0) {
             const portfolios = assignedPortfolios as Portfolio[]
-            setAssignedProjects(portfolios)
+            // Preserve the note's assigned_portfolios order (earliest-added first).
+            // Supabase `.in()` does not guarantee ordering.
+            const order = new Map<string, number>()
+            ;(note.assigned_portfolios || []).forEach((id, idx) => order.set(id, idx))
+            const sorted = [...portfolios].sort((a, b) => {
+              const ai = order.get(a.id) ?? Number.MAX_SAFE_INTEGER
+              const bi = order.get(b.id) ?? Number.MAX_SAFE_INTEGER
+              return ai - bi
+            })
+            setAssignedProjects(sorted)
             // Cache each portfolio
             portfolios.forEach(p => {
               setCachedPortfolio(p.id, p)
@@ -444,6 +466,52 @@ export function NoteCard({
       .catch(() => setEditCollabCandidates([]))
       .finally(() => setEditCollabCandidatesLoading(false))
   }, [showEditCollaboratorsModal, note.assigned_portfolios, editCollabSearchQuery])
+
+  // Load member spaces for current user when Edit spaces modal is open
+  useEffect(() => {
+    if (!showEditSpacesModal) {
+      setMemberSpaces([])
+      return
+    }
+    if (!currentUserId) {
+      setMemberSpaces([])
+      return
+    }
+
+    let cancelled = false
+    const load = async () => {
+      setMemberSpacesLoading(true)
+      try {
+        const supabase = createClient()
+        const { data: myHuman } = await supabase
+          .from('portfolios')
+          .select('id')
+          .eq('type', 'human')
+          .eq('user_id', currentUserId)
+          .maybeSingle()
+
+        const myHumanId = (myHuman as any)?.id as string | undefined
+        if (!myHumanId) {
+          if (!cancelled) setMemberSpaces([])
+          return
+        }
+
+        const res = await fetch(`/api/portfolios/${myHumanId}/member-spaces`)
+        const data = res.ok ? await res.json().catch(() => ({})) : {}
+        const portfolios = Array.isArray(data.portfolios) ? (data.portfolios as Portfolio[]) : []
+        if (!cancelled) setMemberSpaces(portfolios)
+      } catch {
+        if (!cancelled) setMemberSpaces([])
+      } finally {
+        if (!cancelled) setMemberSpacesLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [showEditSpacesModal, currentUserId])
 
   const isOpenCall = note.type === 'open_call'
   const isResource = note.type === 'resource'
@@ -1490,56 +1558,92 @@ export function NoteCard({
   const projectBanner = loadingPortfolios ? (
     <SkeletonBanner avatarSize={48} />
   ) : assignedProjects.length > 0 ? (() => {
-    const portfolio = assignedProjects[0]
-    const basic = getPortfolioBasic(portfolio)
-    const metadata = portfolio.metadata as any
-    const emoji = metadata?.basic?.emoji
-    // Match search result logic: use project_type_specific when available
-    const projectType: string | null = metadata?.project_type_specific || null
-    const description: string | undefined = basic.description
+    const primary = assignedProjects[0]
+    const primaryBasic = getPortfolioBasic(primary)
+    const primaryMeta = primary.metadata as any
+    const primaryEmoji = primaryMeta?.basic?.emoji
+    const primaryTypeLabel: string | null = primaryMeta?.project_type_specific || null
+    const primaryDescription: string | undefined = primaryBasic.description
+    const extraCount = Math.max(0, assignedProjects.length - 1)
+    const avatarList = assignedProjects.slice(0, 5)
 
     return (
-      <Link
-        href={getPortfolioUrl(portfolio)}
-        onClick={(e) => e.stopPropagation()}
-        className="mt-3 flex items-start gap-3 p-3 rounded-lg bg-gray-100"
-      >
-        {/* Avatar (same size/feel as search results) */}
-        <div className="flex-shrink-0">
-          <StickerAvatar
-            src={basic.avatar}
-            alt={basic.name}
-            type={portfolio.type}
-            size={48}
-            emoji={emoji}
-            name={basic.name}
-          />
-        </div>
-
-        {/* Text content */}
-        <div className="flex-1 min-w-0 overflow-hidden">
-          {/* First row: Name + Type label */}
-          <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
-            <Content className="truncate min-w-0">
-              {basic.name}
-            </Content>
-            {projectType && (
-              <UIButtonText className="text-gray-500 flex-shrink-0">
-                {projectType}
-              </UIButtonText>
-            )}
+      <div className="mt-3">
+        <Link
+          href={getPortfolioUrl(primary)}
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-start gap-3 p-3 rounded-lg bg-gray-100"
+        >
+          <div className="flex-shrink-0">
+            <StickerAvatar
+              src={primaryBasic.avatar}
+              alt={primaryBasic.name}
+              type={primary.type}
+              size={48}
+              emoji={primaryEmoji}
+              name={primaryBasic.name}
+            />
           </div>
 
-          {/* Second row: Description (if any) */}
-          {description && (
-            <div className="min-w-0 overflow-hidden">
-              <UIText className="text-gray-500 truncate block w-full">
-                {description}
-              </UIText>
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+              <Content className="truncate min-w-0">{primaryBasic.name}</Content>
+              {primaryTypeLabel && (
+                <UIButtonText className="text-gray-500 flex-shrink-0">
+                  {primaryTypeLabel}
+                </UIButtonText>
+              )}
+              {extraCount > 0 && (
+                <UIButtonText className="text-gray-500 flex-shrink-0">{`+${extraCount} more`}</UIButtonText>
+              )}
             </div>
-          )}
-        </div>
-      </Link>
+
+            {primaryDescription && (
+              <div className="min-w-0 overflow-hidden">
+                <UIText className="text-gray-500 truncate block w-full">{primaryDescription}</UIText>
+              </div>
+            )}
+          </div>
+        </Link>
+
+        {assignedProjects.length > 1 && (
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
+            {avatarList.map((p) => {
+              const b = getPortfolioBasic(p)
+              const meta = p.metadata as any
+              return (
+                <Link
+                  key={p.id}
+                  href={getPortfolioUrl(p)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                  title={b.name}
+                >
+                  <StickerAvatar
+                    src={b.avatar}
+                    alt={b.name}
+                    type={p.type}
+                    size={24}
+                    emoji={meta?.basic?.emoji}
+                    name={b.name}
+                    variant="mini"
+                  />
+                  <UIText as="span" className="max-w-[180px] truncate text-gray-700">
+                    {b.name}
+                  </UIText>
+                </Link>
+              )
+            })}
+            {assignedProjects.length > avatarList.length && (
+              <div className="inline-flex items-center px-2 py-1 rounded-full bg-gray-100">
+                <UIText as="span" className="text-gray-600">
+                  {`+${assignedProjects.length - avatarList.length} more`}
+                </UIText>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     )
   })() : null
 
@@ -1729,7 +1833,9 @@ export function NoteCard({
               )}
               {!isOpenCallPreview && (
                 <UIButtonText as="span" className="text-gray-500">
-                  {ownerLocationText ? `${ownerLocationText} · ${formatRelativeTime(note.created_at)}` : formatRelativeTime(note.created_at)}
+                  <span suppressHydrationWarning>
+                    {ownerLocationText ? `${ownerLocationText} · ${createdAtLabel}` : createdAtLabel}
+                  </span>
                 </UIButtonText>
               )}
               {isOpenCallPreview && (() => {
@@ -1778,6 +1884,7 @@ export function NoteCard({
                   onLeftCollaboration={onLeftCollaboration}
                   onVisibilityChange={setLocalVisibility}
                   onOpenEditCollaborators={isOwner ? () => setShowEditCollaboratorsModal(true) : undefined}
+                  onOpenEditSpaces={isOwner ? () => setShowEditSpacesModal(true) : undefined}
                 />
               </div>
             )}
@@ -1852,9 +1959,9 @@ export function NoteCard({
                 </button>
               )}
               <UIButtonText as="span" className="text-gray-500">
-                {ownerLocationText
-                  ? `${ownerLocationText} · ${formatRelativeTime(note.created_at)}`
-                  : formatRelativeTime(note.created_at)}
+                <span suppressHydrationWarning>
+                  {ownerLocationText ? `${ownerLocationText} · ${createdAtLabel}` : createdAtLabel}
+                </span>
               </UIButtonText>
               {/* Feed source label - only show in "all" feed */}
               {note.feedSource && (
@@ -1889,6 +1996,7 @@ export function NoteCard({
                     onLeftCollaboration={onLeftCollaboration}
                     onVisibilityChange={setLocalVisibility}
                     onOpenEditCollaborators={isOwner ? () => setShowEditCollaboratorsModal(true) : undefined}
+                    onOpenEditSpaces={isOwner ? () => setShowEditSpacesModal(true) : undefined}
                   />
                 )}
               </div>
@@ -2567,6 +2675,169 @@ export function NoteCard({
                     )}
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+      {/* Edit spaces popup modal (same style as edit collaborators) */}
+      {showEditSpacesModal &&
+        renderPortal(
+          <div
+            className="fixed inset-0 z-[10000] flex items-center justify-center bg-black bg-opacity-40"
+            onClick={(e) => {
+              e.stopPropagation()
+              setShowEditSpacesModal(false)
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 max-h-[80vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-4 py-3 flex items-center justify-center border-b border-gray-100">
+                <UIText>Spaces</UIText>
+              </div>
+              <div className="px-4 py-3 overflow-y-auto flex-1" style={{ maxHeight: '60vh' }}>
+                {(() => {
+                  const assignedIds = Array.isArray(note.assigned_portfolios) ? note.assigned_portfolios : []
+                  const assignedSpaces = assignedProjects.filter((p) => assignedIds.includes(p.id))
+
+                  const updateSpaces = async (nextIds: string[], busyKey: string) => {
+                    setUpdatingSpaceId(busyKey)
+                    try {
+                      const res = await fetch(`/api/notes/${note.id}/assigned-portfolios`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ assigned_portfolios: nextIds }),
+                      })
+                      const data = await res.json().catch(() => ({}))
+                      if (!res.ok || !data.success) {
+                        alert(data.error || 'Failed to update spaces')
+                        return
+                      }
+                      router.refresh()
+                      setShowEditSpacesModal(false)
+                    } finally {
+                      setUpdatingSpaceId(null)
+                    }
+                  }
+
+                  const q = editSpacesSearchQuery.trim().toLowerCase()
+                  const candidates = (memberSpaces || [])
+                    .filter((p) => !assignedIds.includes(p.id))
+                    .filter((p) => {
+                      if (!q) return true
+                      const basic = getPortfolioBasic(p)
+                      const slug = (p.slug || '').toLowerCase()
+                      return (
+                        (basic.name || '').toLowerCase().includes(q) ||
+                        (basic.description || '').toLowerCase().includes(q) ||
+                        slug.includes(q)
+                      )
+                    })
+                    .slice(0, 20)
+
+                  return (
+                    <>
+                      {assignedSpaces.length === 0 ? (
+                        <UIText className="text-gray-500 text-sm">No spaces assigned</UIText>
+                      ) : (
+                        <div className="space-y-2">
+                          {assignedSpaces.map((space) => {
+                            const basic = getPortfolioBasic(space)
+                            const busyKey = `remove:${space.id}`
+                            return (
+                              <div key={space.id} className="flex items-center justify-between gap-3 py-1">
+                                <Link
+                                  href={getPortfolioUrl(space)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex items-center gap-3 hover:opacity-80 transition-opacity min-w-0"
+                                >
+                                  <StickerAvatar
+                                    src={basic.avatar}
+                                    alt={basic.name}
+                                    type={space.type}
+                                    size={32}
+                                    emoji={(space.metadata as any)?.basic?.emoji}
+                                    name={basic.name}
+                                  />
+                                  <div className="min-w-0">
+                                    <UIText as="span" className="block truncate">
+                                      {basic.name}
+                                    </UIText>
+                                  </div>
+                                </Link>
+                                <button
+                                  type="button"
+                                  disabled={updatingSpaceId === busyKey}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    updateSpaces(
+                                      assignedIds.filter((id) => id !== space.id),
+                                      busyKey
+                                    )
+                                  }}
+                                  className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
+                                >
+                                  {updatingSpaceId === busyKey ? 'Updating...' : 'Remove'}
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      <div className="border-t border-gray-100 pt-3 mt-3">
+                        <UIText as="p" className="text-xs text-gray-500 mb-2">
+                          Add space
+                        </UIText>
+                        <input
+                          type="text"
+                          value={editSpacesSearchQuery}
+                          onChange={(e) => setEditSpacesSearchQuery(e.target.value)}
+                          placeholder="Search your spaces..."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2"
+                        />
+                        {memberSpacesLoading ? (
+                          <UIText className="text-gray-500 text-sm">Loading...</UIText>
+                        ) : candidates.length === 0 ? (
+                          <UIText className="text-gray-500 text-sm">No matches</UIText>
+                        ) : (
+                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                            {candidates.map((space) => {
+                              const basic = getPortfolioBasic(space)
+                              const busyKey = `add:${space.id}`
+                              return (
+                                <button
+                                  key={space.id}
+                                  type="button"
+                                  disabled={updatingSpaceId === busyKey}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    updateSpaces([...new Set([...assignedIds, space.id])], busyKey)
+                                  }}
+                                  className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 text-left text-sm disabled:opacity-50"
+                                >
+                                  <StickerAvatar
+                                    src={basic.avatar}
+                                    alt={basic.name}
+                                    type={space.type}
+                                    size={28}
+                                    emoji={(space.metadata as any)?.basic?.emoji}
+                                    name={basic.name}
+                                  />
+                                  <span className="flex-1 truncate">{basic.name}</span>
+                                  <UIText className="text-blue-600 text-xs">
+                                    {updatingSpaceId === busyKey ? 'Updating...' : 'Add'}
+                                  </UIText>
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
             </div>
           </div>
