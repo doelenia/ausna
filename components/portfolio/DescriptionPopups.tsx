@@ -314,9 +314,13 @@ export function DescriptionFieldSection({
           aria-label={value.trim() ? 'Edit description' : 'Add description'}
         >
           {value.trim() ? (
-            <Content className="whitespace-pre-wrap line-clamp-5 cursor-pointer">{value}</Content>
+            <Content className="whitespace-pre-wrap line-clamp-5 cursor-pointer">
+              {value}
+            </Content>
           ) : (
-            <Content className="cursor-pointer text-gray-500">{previewEmptyText}</Content>
+            <Content as="span" className="block cursor-pointer text-gray-500">
+              {previewEmptyText}
+            </Content>
           )}
         </button>
       </div>

@@ -13,6 +13,10 @@ import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { MessagePortfolioCard } from '@/components/messages/MessagePortfolioCard'
 import { NoteCollaborationInvitationCard } from '@/components/notes/NoteCollaborationInvitationCard'
 import { CommentPreviewCard } from '@/components/notes/CommentPreviewCard'
+import {
+  parseActivityUpdatePortfolioRefFromMessage,
+  parseActivityUpdateMessageDetails,
+} from '@/lib/messages/activityUpdateMessage'
 import { Content, UIText, UIButtonText, Button, Dropdown, Card } from '@/components/ui'
 import { Archive } from 'lucide-react'
 
@@ -116,52 +120,66 @@ function ConversationViewContent() {
     }
   }, [userId])
 
-  // Load activity portfolios referenced by activity update messages
+  // Load space portfolios referenced by time/location update messages (/space/… or legacy path)
   useEffect(() => {
-    const activityIds = new Set<string>()
+    const refs = new Set<string>()
     messages.forEach((message) => {
-      if (!message.text || typeof message.text !== 'string') return
-      const match = message.text.match(
-        /updated the (?:time and location|time|location) for .+? \(activity\)\. View details: \/portfolio\/activities\/([a-f0-9-]+)/i
-      )
-      if (match && match[1]) {
-        activityIds.add(match[1])
-      }
+      const ref = parseActivityUpdatePortfolioRefFromMessage(message.text)
+      if (ref) refs.add(ref)
     })
 
-    const missingIds = Array.from(activityIds).filter(
-      (id) => !activityUpdatePortfolios.has(id)
-    )
-    if (missingIds.length === 0) {
+    const missing = Array.from(refs).filter((r) => !activityUpdatePortfolios.has(r))
+    if (missing.length === 0) {
       return
     }
+
+    const uuidPattern = /^[a-f0-9-]{36}$/i
+    const byId = missing.filter((r) => uuidPattern.test(r))
+    const bySlug = missing.filter((r) => !uuidPattern.test(r))
 
     let cancelled = false
     const load = async () => {
       try {
-        const { data: portfolios, error } = await supabase
-          .from('portfolios')
-          .select('*')
-          .in('type', [...DB_NON_HUMAN_TYPES])
-          .in('id', missingIds)
-
-        if (error || !portfolios || cancelled) {
+        const rows: any[] = []
+        if (byId.length > 0) {
+          const { data, error } = await supabase
+            .from('portfolios')
+            .select('*')
+            .in('type', [...DB_NON_HUMAN_TYPES])
+            .in('id', byId)
           if (error) {
-            console.error('Error loading activity portfolios for messages:', error)
+            console.error('Error loading space portfolios for messages:', error)
+            return
           }
-          return
+          if (data?.length) rows.push(...data)
         }
+        if (bySlug.length > 0) {
+          const { data, error } = await supabase
+            .from('portfolios')
+            .select('*')
+            .in('type', [...DB_NON_HUMAN_TYPES])
+            .in('slug', bySlug)
+          if (error) {
+            console.error('Error loading space portfolios for messages (slug):', error)
+            return
+          }
+          if (data?.length) rows.push(...data)
+        }
+
+        if (cancelled || rows.length === 0) return
 
         setActivityUpdatePortfolios((prev) => {
           const next = new Map(prev)
-          portfolios.forEach((p: any) => {
-            next.set(p.id as string, p)
+          rows.forEach((p: any) => {
+            const id = p.id as string
+            next.set(id, p)
+            if (p.slug) next.set(p.slug as string, p)
           })
           return next
         })
       } catch (error) {
         if (!cancelled) {
-          console.error('Error loading activity portfolios for messages:', error)
+          console.error('Error loading space portfolios for messages:', error)
         }
       }
     }
@@ -968,11 +986,9 @@ function ConversationViewContent() {
               const sharedPortfolioType = (portfolioShareMatch?.[2] || null) as Portfolio['type'] | null
               const sharedPortfolioIdentifier = portfolioShareMatch?.[3] || null
 
-              const activityUpdateMatch = messageText.match(
-                /updated the (?:time and location|time|location) for (.+?) \(activity\)\. View details: \/portfolio\/activities\/([a-f0-9-]+)/i
-              )
-              const isActivityUpdateMessage = !!activityUpdateMatch
-              const activityIdFromMessage = activityUpdateMatch ? activityUpdateMatch[2] : null
+              const activityUpdateRef = parseActivityUpdatePortfolioRefFromMessage(messageText)
+              const isActivityUpdateMessage = activityUpdateRef !== null
+              const activityUpdateDetails = parseActivityUpdateMessageDetails(messageText)
               
               let portfolioInvitation: { invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string } | null = null
               if (isPortfolioInvitationMessage && portfolioInvitations.size > 0 && currentUserId) {
@@ -1044,9 +1060,10 @@ function ConversationViewContent() {
                 ? portfolioDetails.get(portfolioInvitation.portfolioId) 
                 : null
 
-              const activityUpdatePortfolio = isActivityUpdateMessage && activityIdFromMessage
-                ? activityUpdatePortfolios.get(activityIdFromMessage)
-                : null
+              const activityUpdatePortfolio =
+                isActivityUpdateMessage && activityUpdateRef
+                  ? activityUpdatePortfolios.get(activityUpdateRef)
+                  : null
 
               return (
                 <div
@@ -1095,9 +1112,19 @@ function ConversationViewContent() {
                     </div>
                   )}
                   
-                  {isActivityUpdateMessage && activityUpdatePortfolio && (
+                  {isActivityUpdateMessage &&
+                    activityUpdatePortfolio &&
+                    activityUpdateDetails && (
                     <div className={`mb-1 max-w-xs lg:max-w-md`}>
-                      <ActivityUpdateCard portfolio={activityUpdatePortfolio as Portfolio} />
+                      <ActivityUpdateCard
+                        portfolio={activityUpdatePortfolio as Portfolio}
+                        senderLabel={isSent ? 'You' : displayName}
+                        parsedUpdate={activityUpdateDetails}
+                        isSent={isSent}
+                      />
+                      <UIButtonText as="p" className="text-xs mt-1 text-gray-500">
+                        {new Date(message.created_at).toLocaleTimeString()}
+                      </UIButtonText>
                     </div>
                   )}
 
@@ -1111,7 +1138,11 @@ function ConversationViewContent() {
                     </div>
                   )}
                   
-                  {message.text && message.text.trim() && !isNoteCollaborationInviteMessage && !isPortfolioShareMessage && (
+                  {message.text &&
+                    message.text.trim() &&
+                    !isNoteCollaborationInviteMessage &&
+                    !isPortfolioShareMessage &&
+                    !(isActivityUpdateMessage && activityUpdatePortfolio) && (
                     <div
                       className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
                         isSent
