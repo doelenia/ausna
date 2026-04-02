@@ -287,14 +287,17 @@ export function renderFeedDigestEmail(input: {
   totalNew: number
   mainFeedUrl: string
   unsubscribeUrl?: string
+  /** E.g. "Alice, Bob & 2 others" */
+  names?: string
 }): string {
-  const { siteUrl, displayItems, totalNew, mainFeedUrl, unsubscribeUrl } = input
-  const documentTitle = 'New feeds on Ausna'
+  const { siteUrl, displayItems, totalNew, mainFeedUrl, unsubscribeUrl, names } = input
+  const documentTitle = names ? `New on your feed: ${names}` : 'New on your feed'
   const heading = 'New on your feed'
-  const intro =
+  const baseIntro =
     totalNew === 1
       ? 'There is 1 new item on your Ausna feed since we last checked.'
       : `There are ${totalNew} new items on your Ausna feed since we last checked.`
+  const intro = names ? `Featuring ${names}. ${baseIntro}` : baseIntro
 
   const ctaLabel = totalNew === 1 ? 'Check 1 new feed' : `Check ${totalNew} new feeds`
 

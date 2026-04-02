@@ -362,7 +362,6 @@ async function determineNoteSource(
   note: any,
   userId: string,
   friendIds: string[],
-  spacesMap: Map<string, { id: string; name: string; members: string[] }>,
   subscribedPortfolioIds: string[],
   supabase: any
 ): Promise<NoteSource> {
@@ -384,18 +383,15 @@ async function determineNoteSource(
     return { type: 'subscribed' }
   }
 
-  // Priority 4: Member of a shared space
-  for (const [, space] of spacesMap.entries()) {
-    if (space.members.includes(noteOwnerId)) {
-      return {
-        type: 'space',
-        spaceName: space.name,
-        spaceId: space.id,
-      }
-    }
-  }
-
   return null
+}
+
+function getPortfolioHostSpaceIds(portfolio: any): string[] {
+  const props = (portfolio?.metadata as any)?.properties || {}
+  const hostProjectIds: string[] = Array.isArray(props?.host_project_ids) ? props.host_project_ids : []
+  const hostCommunityIds: string[] = Array.isArray(props?.host_community_ids) ? props.host_community_ids : []
+  const legacyHost = portfolio?.host_project_id ? [String(portfolio.host_project_id)] : []
+  return [...hostProjectIds, ...hostCommunityIds, ...legacyHost].map(String).filter(Boolean)
 }
 
 /**
@@ -539,29 +535,15 @@ export async function getFeedNotes(
       }
       notesQuery = notesQuery.in('owner_account_id', memberIds)
     } else {
-      // "all" feed: friends + community members + subscribed portfolios + member portfolios
+      // "all" feed: ONLY friends, and notes assigned to joined/subscribed spaces.
       const friendIds = await getFriendIds(user.id, supabase)
-      const spacesMap = await getUserSpacesMap(user.id, supabase)
-      const spaceMemberIds = await getAllSpaceMemberIds(user.id, supabase)
-      const subscribedPortfolioIds = await getSubscribedPortfolioIds(
-        user.id,
-        supabase
-      )
+      const subscribedPortfolioIds = await getSubscribedPortfolioIds(user.id, supabase)
       const memberPortfolioIds = await getMemberPortfolioIds(user.id, supabase)
 
-      // Combine all relevant user IDs (for "owner is visible")
-      const allUserIds = Array.from(
-        new Set([...friendIds, ...spaceMemberIds])
-      )
+      // Eligible spaces: joined (member/owner) or explicitly subscribed.
+      const eligibleSpaceIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds].map(String)))
 
-      // For portfolio-based notes, we need to check if any assigned_portfolio matches.
-      // Since Supabase doesn't support array overlap directly, we'll fetch a pool and filter.
-      const allPortfolioIds = Array.from(
-        new Set([...subscribedPortfolioIds, ...memberPortfolioIds])
-      )
-
-      if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
-        // No friends, no communities, no portfolios
+      if (friendIds.length === 0 && eligibleSpaceIds.length === 0) {
         return { success: true, notes: [], hasMore: false }
       }
 
@@ -569,17 +551,17 @@ export async function getFeedNotes(
       const poolTarget = offset + limit + 1
       const poolLimit = Math.min(Math.max(poolTarget * 2, 50), 200)
 
-      // Fetch user-based notes (friends/community members); visibility via RLS
+      // Fetch friend notes (visibility via RLS)
       let userNotes: any[] = []
       let userNotesMaybeMore = false
-      if (allUserIds.length > 0) {
+      if (friendIds.length > 0) {
         const { data: userNotesData, error: userError } = await supabase
           .from('notes')
           .select('*')
           .is('deleted_at', null)
           .is('mentioned_note_id', null)
           .neq('type', 'resource')
-          .in('owner_account_id', allUserIds)
+          .in('owner_account_id', friendIds)
           .order('created_at', { ascending: false })
           .limit(poolLimit)
 
@@ -610,8 +592,8 @@ export async function getFeedNotes(
       // Also fetch notes assigned to portfolios; visibility via RLS
       let portfolioNotes: any[] = []
       let portfolioNotesMaybeMore = false
-      if (allPortfolioIds.length > 0) {
-        // Fetch notes that have any of these portfolios in assigned_portfolios
+      if (eligibleSpaceIds.length > 0) {
+        // Supabase doesn't support array overlap directly; fetch a pool and filter.
         const { data: portfolioNotesData, error: portfolioError } =
           await supabase
             .from('notes')
@@ -627,7 +609,7 @@ export async function getFeedNotes(
           portfolioNotes = portfolioNotesData.filter((note: any) => {
             const assigned = note.assigned_portfolios || []
             return assigned.some((pid: string) =>
-              allPortfolioIds.includes(pid)
+              eligibleSpaceIds.includes(String(pid))
             )
           })
           portfolioNotesMaybeMore = portfolioNotesData.length >= poolLimit
@@ -653,16 +635,16 @@ export async function getFeedNotes(
         const collaboratorIds = (note.collaborator_account_ids || []) as string[]
         const isCollaborator = collaboratorIds.includes(user.id)
 
-        // Check if note owner is a friend or space member
-        const isOwnerVisible = allUserIds.includes(noteOwnerId)
+        // Owner must be a friend (or you’re a collaborator).
+        const isOwnerFriend = friendIds.includes(noteOwnerId)
 
-        // Check if note is assigned to a portfolio the user subscribes to or is a member of
+        // Or note is assigned to a joined/subscribed space.
         const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) =>
-          allPortfolioIds.includes(pid)
+          eligibleSpaceIds.includes(String(pid))
         )
 
         // Collaborators see the note in their feed (treated as creator)
-        return isOwnerVisible || isAssignedToVisiblePortfolio || isCollaborator
+        return isOwnerFriend || isAssignedToVisiblePortfolio || isCollaborator
       })
 
       const sortedAllNotes = validatedNotes.sort(
@@ -679,8 +661,7 @@ export async function getFeedNotes(
             note,
             user.id,
             friendIds,
-            spacesMap,
-            subscribedPortfolioIds,
+            eligibleSpaceIds,
             supabase
           )
           return {
@@ -888,30 +869,29 @@ export async function getFeedItemsForUserId(
       return { success: true, items: page, hasMore }
     }
 
-    // "all" feed: reuse existing visibility logic for notes; add space creations by friends / space members.
+    // "all" feed: ONLY friends, and notes/spaces tied to spaces you joined/subscribed to.
     const friendIds = await getFriendIds(userId, supabase)
-    const spacesMap = await getUserSpacesMap(userId, supabase)
-    const spaceMemberIds = await getAllSpaceMemberIds(userId, supabase)
     const subscribedPortfolioIds = await getSubscribedPortfolioIds(userId, supabase)
     const memberPortfolioIds = await getMemberPortfolioIds(userId, supabase)
 
-    const allUserIds = Array.from(new Set([userId, ...friendIds, ...spaceMemberIds]))
-    const allPortfolioIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds]))
+    const eligibleSpaceIds = Array.from(
+      new Set([...subscribedPortfolioIds, ...memberPortfolioIds].map(String))
+    )
 
-    if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
+    if (friendIds.length === 0 && eligibleSpaceIds.length === 0) {
       return { success: true, items: [], hasMore: false }
     }
 
     let userNotes: any[] = []
     let userNotesMaybeMore = false
-    if (allUserIds.length > 0) {
+    if (friendIds.length > 0) {
       const { data: userNotesData } = await supabase
         .from('notes')
         .select('*')
         .is('deleted_at', null)
         .is('mentioned_note_id', null)
         .neq('type', 'resource')
-        .in('owner_account_id', allUserIds)
+        .in('owner_account_id', friendIds)
         .order('created_at', { ascending: false })
         .limit(poolLimit)
       userNotes = userNotesData || []
@@ -931,7 +911,7 @@ export async function getFeedItemsForUserId(
 
     let portfolioNotes: any[] = []
     let portfolioNotesMaybeMore = false
-    if (allPortfolioIds.length > 0) {
+    if (eligibleSpaceIds.length > 0) {
       const { data: portfolioNotesData, error: portfolioError } = await supabase
         .from('notes')
         .select('*')
@@ -943,7 +923,7 @@ export async function getFeedItemsForUserId(
       if (!portfolioError && portfolioNotesData) {
         portfolioNotes = portfolioNotesData.filter((note: any) => {
           const assigned = note.assigned_portfolios || []
-          return assigned.some((pid: string) => allPortfolioIds.includes(pid))
+          return assigned.some((pid: string) => eligibleSpaceIds.includes(String(pid)))
         })
         portfolioNotesMaybeMore = portfolioNotesData.length >= poolLimit
       }
@@ -959,23 +939,34 @@ export async function getFeedItemsForUserId(
       const assignedPortfolios = note.assigned_portfolios || []
       const collaboratorIds = (note.collaborator_account_ids || []) as string[]
       const isCollaborator = collaboratorIds.includes(userId)
-      const isOwnerVisible = allUserIds.includes(noteOwnerId)
-      const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) => allPortfolioIds.includes(pid))
-      return isOwnerVisible || isAssignedToVisiblePortfolio || isCollaborator
+      const isOwnerFriend = friendIds.includes(noteOwnerId)
+      const isAssignedToEligibleSpace = assignedPortfolios.some((pid: string) =>
+        eligibleSpaceIds.includes(String(pid))
+      )
+      return isOwnerFriend || isAssignedToEligibleSpace || isCollaborator
     })
 
     const sortedNotesPool = validatedNotes.sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     )
 
+    // Space creation activity: either created by a friend, OR hosted by a joined/subscribed space.
     const { data: portfoliosData } = await supabase
       .from('portfolios')
       .select('*')
       .in('type', nonHumanTypes)
-      .in('user_id', allUserIds)
       .order('created_at', { ascending: false })
       .limit(poolLimit)
-    const rawPortfolios = (portfoliosData || []).filter(portfolioIsPublicOrNull)
+
+    const rawPortfolios = (portfoliosData || [])
+      .filter(portfolioIsPublicOrNull)
+      .filter((p: any) => {
+        const creatorIsFriend = friendIds.includes(String(p.user_id))
+        if (creatorIsFriend) return true
+        if (eligibleSpaceIds.length === 0) return false
+        const hostIds = getPortfolioHostSpaceIds(p)
+        return hostIds.some((id) => eligibleSpaceIds.includes(String(id)))
+      })
     const enrichedPortfolios = await enrichPortfoliosWithCreatorProfiles(rawPortfolios, supabase, userId)
 
     const mergedPool: FeedItem[] = [
@@ -1004,8 +995,7 @@ export async function getFeedItemsForUserId(
           note,
           userId,
           friendIds,
-          spacesMap,
-          subscribedPortfolioIds,
+          eligibleSpaceIds,
           supabase
         )
         return { ...note, feedSource: source }

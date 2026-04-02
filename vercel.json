@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/feed-digest",
-      "schedule": "5 * * * *"
+      "schedule": "5 8 * * *"
     },
     {
       "path": "/api/cron/open-call-digest",

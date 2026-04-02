@@ -697,11 +697,142 @@ export function PortfolioView({
   const [communityJoinFeedback, setCommunityJoinFeedback] = useState<string | null>(null)
   const [isCommunityLoginRequiredOpen, setIsCommunityLoginRequiredOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'feed' | 'spaces'>('overview')
+  const [isFriendVisitor, setIsFriendVisitor] = useState(false)
+  const [isCurrentPortfolioSubscribed, setIsCurrentPortfolioSubscribed] = useState(false)
+  const didSetInitialTabRef = useRef(false)
+
+  const userIsInThisPortfolio = (userId: string | undefined, p: Portfolio): boolean => {
+    if (!userId) return false
+    if (p.user_id === userId) return true
+    const meta = (p.metadata as any) || {}
+    const members: string[] = Array.isArray(meta?.members) ? meta.members : []
+    const managers: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+    return members.includes(userId) || managers.includes(userId)
+  }
+
+  const getHumanRoleForSpace = (space: any, humanUserId: string | undefined): string | null => {
+    if (!humanUserId) return null
+    if (String(space?.user_id || '') === String(humanUserId)) return 'Host'
+    const meta = (space?.metadata as any) || {}
+    const memberRoles = (meta?.memberRoles as Record<string, unknown> | undefined) || undefined
+    const assignedRoleRaw = memberRoles ? memberRoles[String(humanUserId)] : undefined
+    const assignedRole = typeof assignedRoleRaw === 'string' ? assignedRoleRaw.trim() : ''
+    if (assignedRole) return assignedRole
+    const managers: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+    const members: string[] = Array.isArray(meta?.members) ? meta.members : []
+    if (managers.map(String).includes(String(humanUserId))) return 'Manager'
+    if (members.map(String).includes(String(humanUserId))) return 'Member'
+    return null
+  }
 
   const shouldShowSpacesTab = isHumanPortfolio(portfolio) || normalizePortfolioType(portfolio.type) === 'space'
   const spacesApiPath = isHumanPortfolio(portfolio)
     ? `/api/portfolios/${encodeURIComponent(portfolio.id)}/member-spaces`
     : `/api/portfolios/${encodeURIComponent(portfolio.id)}/hosted-spaces`
+
+  // For human portfolios: determine whether the visitor is an accepted friend of this human.
+  useEffect(() => {
+    if (!authChecked || !currentUserId) {
+      setIsFriendVisitor(false)
+      return
+    }
+    if (!isHumanPortfolio(portfolio)) {
+      setIsFriendVisitor(false)
+      return
+    }
+    if (portfolio.user_id === currentUserId) {
+      setIsFriendVisitor(false)
+      return
+    }
+
+    let cancelled = false
+    supabase
+      .from('friends')
+      .select('status')
+      .or(
+        `and(user_id.eq.${currentUserId},friend_id.eq.${portfolio.user_id}),and(user_id.eq.${portfolio.user_id},friend_id.eq.${currentUserId})`
+      )
+      .eq('status', 'accepted')
+      .maybeSingle()
+      .then((res: { data: unknown; error: unknown }) => {
+        if (cancelled) return
+        if (res.error) {
+          setIsFriendVisitor(false)
+          return
+        }
+        setIsFriendVisitor(!!res.data)
+      })
+      .catch(() => {
+        if (!cancelled) setIsFriendVisitor(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authChecked, currentUserId, portfolio, supabase])
+
+  // For space portfolios: detect whether the visitor is subscribed (used for initial tab defaulting).
+  useEffect(() => {
+    if (!authChecked || !currentUserId) {
+      setIsCurrentPortfolioSubscribed(false)
+      return
+    }
+    if (normalizePortfolioType(portfolio.type) !== 'space') {
+      setIsCurrentPortfolioSubscribed(false)
+      return
+    }
+    if (userIsInThisPortfolio(currentUserId, portfolio)) {
+      setIsCurrentPortfolioSubscribed(false)
+      return
+    }
+
+    let cancelled = false
+    supabase
+      .from('subscriptions')
+      .select('portfolio_id')
+      .eq('user_id', currentUserId)
+      .eq('portfolio_id', portfolio.id)
+      .maybeSingle()
+      .then((res: { data: unknown; error: unknown }) => {
+        if (cancelled) return
+        if (res.error) {
+          setIsCurrentPortfolioSubscribed(false)
+          return
+        }
+        setIsCurrentPortfolioSubscribed(!!res.data)
+      })
+      .catch(() => {
+        if (!cancelled) setIsCurrentPortfolioSubscribed(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authChecked, currentUserId, portfolio, supabase])
+
+  // Initial tab: land on Feed when visiting your own/friend human, or a joined/subscribed space.
+  useEffect(() => {
+    if (didSetInitialTabRef.current) return
+    if (!authChecked) return
+
+    const shouldDefaultToFeed =
+      (isHumanPortfolio(portfolio) && (portfolio.user_id === currentUserId || isFriendVisitor)) ||
+      (normalizePortfolioType(portfolio.type) === 'space' &&
+        (userIsInThisPortfolio(currentUserId, portfolio) || isCurrentPortfolioSubscribed))
+
+    if (!shouldDefaultToFeed) return
+    if (activeTab !== 'overview') return
+
+    didSetInitialTabRef.current = true
+    setActiveTab('feed')
+  }, [
+    activeTab,
+    authChecked,
+    currentUserId,
+    isCurrentPortfolioSubscribed,
+    isFriendVisitor,
+    portfolio,
+  ])
 
   type SpacesApiPortfolio = {
     id: string
@@ -721,6 +852,10 @@ export function PortfolioView({
   const [spacesQuery, setSpacesQuery] = useState('')
   const [spacesHighlights, setSpacesHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
   const [spacesLastNoteById, setSpacesLastNoteById] = useState<Record<string, string | null>>({})
+  const [spacesLastNoteLoaded, setSpacesLastNoteLoaded] = useState(false)
+  const [feedRowUnreadBySpaceId, setFeedRowUnreadBySpaceId] = useState<Record<string, number>>({})
+  const [feedRowSubscribedSpaceIds, setFeedRowSubscribedSpaceIds] = useState<Set<string>>(new Set())
+  const feedRowUnreadFetchKeyRef = useRef<string>('')
 
   const getSpaceName = (p: SpacesApiPortfolio): string => {
     const basic = (p.metadata as any)?.basic || {}
@@ -908,11 +1043,14 @@ export function PortfolioView({
 
   useEffect(() => {
     if (!shouldShowSpacesTab) return
-    if (activeTab !== 'spaces' && activeTab !== 'overview') return
+    // Also fetch on Feed tab so the top row can load in parallel with the notes feed.
+    if (activeTab !== 'spaces' && activeTab !== 'overview' && activeTab !== 'feed') return
 
     let cancelled = false
     setSpacesLoading(true)
     setSpacesError(null)
+    // Reset so the feed row skeleton stays visible until ordering data is ready.
+    setSpacesLastNoteLoaded(false)
     fetch(spacesApiPath)
       .then((res) => res.json())
       .then((data) => {
@@ -959,6 +1097,7 @@ export function PortfolioView({
   useEffect(() => {
     if (!spacesList || spacesList.length === 0) {
       setSpacesLastNoteById({})
+      setSpacesLastNoteLoaded(false)
       return
     }
 
@@ -972,8 +1111,12 @@ export function PortfolioView({
         if (cancelled) return
         const next = (data?.lastNoteByPortfolioId as Record<string, string | null> | undefined) || {}
         setSpacesLastNoteById(next)
+        setSpacesLastNoteLoaded(true)
       } catch {
-        if (!cancelled) setSpacesLastNoteById({})
+        if (!cancelled) {
+          setSpacesLastNoteById({})
+          setSpacesLastNoteLoaded(true)
+        }
       }
     }
 
@@ -982,6 +1125,179 @@ export function PortfolioView({
       cancelled = true
     }
   }, [spacesList])
+
+  // Feed tab row: unread counts + subscription status for indicators (load in parallel with feed below).
+  useEffect(() => {
+    // Also load for Overview tab so the spaces row uses the same tiles as Feed.
+    if (activeTab !== 'feed' && activeTab !== 'overview') return
+    if (!currentUserId) return
+    if (!spacesList || spacesList.length === 0) {
+      setFeedRowUnreadBySpaceId({})
+      setFeedRowSubscribedSpaceIds(new Set())
+      return
+    }
+
+    let cancelled = false
+    const run = async () => {
+      try {
+        const eligibleIds = spacesList
+          .filter((p) => isSpaceLive(p) || isSpaceUpcoming(p))
+          .map((p) => String(p.id))
+          .filter(Boolean)
+
+        // Fetch only once per (user + eligibleIds) set to prevent request spam.
+        const fetchKey = `${currentUserId}:${eligibleIds.join(',')}`
+        if (feedRowUnreadFetchKeyRef.current === fetchKey) {
+          return
+        }
+        feedRowUnreadFetchKeyRef.current = fetchKey
+
+        if (eligibleIds.length === 0) {
+          if (!cancelled) {
+            setFeedRowUnreadBySpaceId({})
+            setFeedRowSubscribedSpaceIds(new Set())
+          }
+          return
+        }
+
+        // Only query subscriptions for spaces the user is NOT already a member of.
+        const nonJoinedEligibleIds = eligibleIds.filter((id) => {
+          const p = spacesList.find((x) => String(x.id) === id)
+          if (!p) return true
+          if (p.user_id === currentUserId) return false
+          const meta = (p.metadata as any) || {}
+          const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+          const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
+          return !managersArr.includes(currentUserId) && !membersArr.includes(currentUserId)
+        })
+
+        const [unreadRes, subsRes] = await Promise.all([
+          fetch(
+            `/api/unread-counts?${new URLSearchParams({
+              space_ids: eligibleIds.join(','),
+            }).toString()}`
+          ).then((r) => r.json().catch(() => ({}))),
+          nonJoinedEligibleIds.length > 0
+            ? supabase
+                .from('subscriptions')
+                .select('portfolio_id')
+                .eq('user_id', currentUserId)
+                .in('portfolio_id', nonJoinedEligibleIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ])
+
+        const unread = (unreadRes?.spaces as Record<string, number> | undefined) || {}
+        const subscribedIds = new Set<string>(
+          ((subsRes as any)?.data || []).map((r: any) => String(r.portfolio_id)).filter(Boolean)
+        )
+
+        if (!cancelled) {
+          setFeedRowUnreadBySpaceId(unread)
+          setFeedRowSubscribedSpaceIds(subscribedIds)
+        }
+      } catch {
+        if (!cancelled) {
+          setFeedRowUnreadBySpaceId({})
+          setFeedRowSubscribedSpaceIds(new Set())
+          feedRowUnreadFetchKeyRef.current = ''
+        }
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, currentUserId, spacesList, supabase])
+
+  const userIsInSpace = (space: SpacesApiPortfolio, userId: string): boolean => {
+    if (!userId) return false
+    if (space.user_id === userId) return true
+    const meta = (space.metadata as any) || {}
+    const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+    const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
+    return managersArr.includes(userId) || membersArr.includes(userId)
+  }
+
+  const renderSpaceFeedRowTile = (p: SpacesApiPortfolio): React.ReactNode => {
+    const basic = (p.metadata as any)?.basic || {}
+    const name = (basic.name as string) || 'Space'
+    const avatar = basic.avatar as string | undefined
+    const emoji = basic.emoji as string | undefined
+    const joinable = isSpaceJoinable(p)
+    const pill = renderSpaceLiveOrUpcomingPill(p)
+    const role = isHumanPortfolio(portfolio) ? getHumanRoleForSpace(p, portfolio.user_id) : null
+    const unread = feedRowUnreadBySpaceId[String(p.id)] || 0
+    const joined = currentUserId ? userIsInSpace(p, currentUserId) : false
+    const subscribed = feedRowSubscribedSpaceIds.has(String(p.id))
+    const isJoinedOrSubscribed = joined || subscribed
+
+    return (
+      <div key={p.id} className="flex flex-col items-center flex-shrink-0 w-48 relative">
+        <div className="absolute top-2 right-3 z-10 flex flex-col items-end gap-1">
+          {(p.visibility || 'public') === 'private' && (
+            <Lock className="w-4 h-4 text-gray-500" aria-label="Private" />
+          )}
+          {unread > 0 ? (
+            isJoinedOrSubscribed ? (
+              <div className="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-red-500">
+                <UIText as="span" className="text-[11px] text-white leading-none">
+                  {unread}
+                </UIText>
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                <UIText as="span" className="text-[11px] text-gray-700 leading-none">
+                  New updates
+                </UIText>
+              </div>
+            )
+          ) : joinable ? (
+            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-orange-100">
+              <UIText as="span" className="text-[11px] text-orange-700 leading-none">
+                Joinable
+              </UIText>
+            </div>
+          ) : null}
+        </div>
+
+        <Link
+          href={getSpaceUrl(p.slug || p.id)}
+          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+          onClick={() => {
+            // Update last-checked on visit; joined/subscribed are handled by server-side table.
+            fetch('/api/last-checked', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ target_type: 'joined_space', target_id: p.id }),
+            }).catch(() => {})
+          }}
+        >
+          <div className="flex flex-col items-center gap-3">
+            <StickerAvatar
+              src={avatar}
+              alt={name}
+              type="space"
+              size={96}
+              emoji={emoji}
+              name={name}
+            />
+            <div className="flex flex-col items-center gap-1 w-full">
+              <Content className="text-center max-w-[140px] mx-auto line-clamp-2" title={name}>
+                {name}
+              </Content>
+              {role && (
+                <UIText as="span" className="text-[11px] text-gray-600 leading-none">
+                  {role}
+                </UIText>
+              )}
+              {pill}
+            </div>
+          </div>
+        </Link>
+      </div>
+    )
+  }
 
   const metadata = portfolio.metadata as any
   const members = metadata?.members || []
@@ -2092,8 +2408,9 @@ export function PortfolioView({
                       >
                         {spacesLoading ? (
                           <UIText className="text-gray-500">Loading spaces...</UIText>
-                        ) : top.length === 0 ? (
-                          canCreateSpaces ? (
+                        ) : (
+                          <>
+                            {canCreateSpaces && (
                             <div className="flex flex-col items-center flex-shrink-0 w-48">
                               <div className="w-full rounded-2xl px-3 pt-3 pb-4">
                                 <div className="flex flex-col items-center gap-3">
@@ -2121,99 +2438,8 @@ export function PortfolioView({
                                 </div>
                               </div>
                             </div>
-                          ) : null
-                        ) : (
-                          <>
-                            {/* Create Space first */}
-                            {canCreateSpaces && (
-                              <div className="flex flex-col items-center flex-shrink-0 w-48">
-                                <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                                  <div className="flex flex-col items-center gap-3">
-                                    <Link
-                                      href={getSpaceCreateUrl()}
-                                      className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                                    >
-                                      <svg
-                                        className="h-12 w-12 text-gray-600"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                      >
-                                        <path
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          strokeWidth={2}
-                                          d="M12 4v16m8-8H4"
-                                        />
-                                      </svg>
-                                    </Link>
-                                    <UIText className="text-center max-w-[140px] mx-auto truncate">
-                                      Create Space
-                                    </UIText>
-                                  </div>
-                                </div>
-                              </div>
                             )}
-
-                            {top.map((p) => {
-                              const basic = (p.metadata as any)?.basic || {}
-                              const name = (basic.name as string) || 'Space'
-                              const avatar = basic.avatar as string | undefined
-                              const emoji = basic.emoji as string | undefined
-                              const joinable = isSpaceJoinable(p)
-                              const pill = renderSpaceLiveOrUpcomingPill(p)
-                              return (
-                                <div
-                                  key={p.id}
-                                  className="flex flex-col items-center flex-shrink-0 w-48 relative"
-                                >
-                                  <div className="absolute top-2 right-3 z-10 flex flex-col items-end gap-1">
-                                    {(p.visibility || 'public') === 'private' && (
-                                      <Lock
-                                        className="w-4 h-4 text-gray-500"
-                                        aria-label="Private"
-                                      />
-                                    )}
-                                    {pill}
-                                  </div>
-                                  <Link
-                                    href={getSpaceUrl(p.slug || p.id)}
-                                    className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                                  >
-                                    <div className="flex flex-col items-center gap-3">
-                                      <StickerAvatar
-                                        src={avatar}
-                                        alt={name}
-                                        type="space"
-                                        size={96}
-                                        emoji={emoji}
-                                        name={name}
-                                      />
-                                      <div className="flex flex-col items-center gap-1 w-full">
-                                        <Content
-                                          className="text-center max-w-[140px] mx-auto line-clamp-2"
-                                          title={name}
-                                        >
-                                          {name}
-                                        </Content>
-                                        {joinable && (
-                                          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                                            <UIText as="span" className="text-gray-700">
-                                              Joinable
-                                            </UIText>
-                                          </div>
-                                        )}
-                                        {p.slug && (
-                                          <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
-                                            {p.slug}
-                                          </UIText>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </Link>
-                                </div>
-                              )
-                            })}
+                            {top.map((p) => renderSpaceFeedRowTile(p))}
                           </>
                         )}
                       </div>
@@ -2274,95 +2500,38 @@ export function PortfolioView({
                         <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 scroll-smooth">
                           {spacesLoading ? (
                             <UIText className="text-gray-500">Loading spaces...</UIText>
-                          ) : top.length === 0 ? (
-                            // Placeholder: show only when viewer can create a hosted space.
-                            canCreateHostedSpace ? (
-                              <div className="flex flex-col items-center flex-shrink-0 w-48">
-                                <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                                  <div className="flex flex-col items-center gap-3">
-                                    <Link
-                                      href={`${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`}
-                                      className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
-                                    >
-                                      <svg
-                                        className="h-12 w-12 text-gray-600"
-                                        fill="none"
-                                        viewBox="0 0 24 24"
-                                        stroke="currentColor"
-                                      >
-                                        <path
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          strokeWidth={2}
-                                          d="M12 4v16m8-8H4"
-                                        />
-                                      </svg>
-                                    </Link>
-                                    <UIText className="text-center max-w-[140px] mx-auto truncate">
-                                      Create Space
-                                    </UIText>
-                                  </div>
-                                </div>
-                              </div>
-                            ) : null
                           ) : (
                             <>
-                              {top.map((p) => {
-                                const basic = (p.metadata as any)?.basic || {}
-                                const name = (basic.name as string) || 'Space'
-                                const avatar = basic.avatar as string | undefined
-                                const emoji = basic.emoji as string | undefined
-                                const joinable = isSpaceJoinable(p)
-                                const pill = renderSpaceLiveOrUpcomingPill(p)
-                                return (
-                                  <div
-                                    key={p.id}
-                                    className="flex flex-col items-center flex-shrink-0 w-48 relative"
-                                  >
-                                    <div className="absolute top-2 right-3 z-10 flex flex-col items-end gap-1">
-                                      {(p.visibility || 'public') === 'private' && (
-                                        <Lock className="w-4 h-4 text-gray-500" aria-label="Private" />
-                                      )}
-                                      {pill}
+                              {canCreateHostedSpace && (
+                                <div className="flex flex-col items-center flex-shrink-0 w-48">
+                                  <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                                    <div className="flex flex-col items-center gap-3">
+                                      <Link
+                                        href={`${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`}
+                                        className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                                      >
+                                        <svg
+                                          className="h-12 w-12 text-gray-600"
+                                          fill="none"
+                                          viewBox="0 0 24 24"
+                                          stroke="currentColor"
+                                        >
+                                          <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={2}
+                                            d="M12 4v16m8-8H4"
+                                          />
+                                        </svg>
+                                      </Link>
+                                      <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                        Create Space
+                                      </UIText>
                                     </div>
-                                    <Link
-                                      href={getSpaceUrl(p.slug || p.id)}
-                                      className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                                    >
-                                      <div className="flex flex-col items-center gap-3">
-                                        <StickerAvatar
-                                          src={avatar}
-                                          alt={name}
-                                          type="space"
-                                          size={96}
-                                          emoji={emoji}
-                                          name={name}
-                                        />
-                                        <div className="flex flex-col items-center gap-1 w-full">
-                                          <Content
-                                            className="text-center max-w-[140px] mx-auto line-clamp-2"
-                                            title={name}
-                                          >
-                                            {name}
-                                          </Content>
-                                          {joinable && (
-                                            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                                              <UIText as="span" className="text-gray-700">
-                                                Joinable
-                                              </UIText>
-                                            </div>
-                                          )}
-                                          {p.slug && (
-                                            <UIText className="text-center max-w-[140px] mx-auto truncate text-gray-600">
-                                              {p.slug}
-                                            </UIText>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </Link>
                                   </div>
-                                )
-                              })}
+                                </div>
+                              )}
+                              {top.map((p) => renderSpaceFeedRowTile(p))}
                             </>
                           )}
                         </div>
@@ -2386,6 +2555,96 @@ export function PortfolioView({
           {/* Feed tab: show notes feed for all portfolio types */}
           {activeTab === 'feed' && (
             <div className="mt-6 -mx-6 md:mx-0">
+              {currentUserId &&
+                (spacesLoading || (!spacesLastNoteLoaded && spacesList.length > 0)) && (
+                <div className="mb-6 md:px-10">
+                  <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 px-6 md:px-0 scroll-smooth">
+                    {Array.from({ length: 3 }).map((_, idx) => (
+                      <div
+                        key={`portfolio-top-row-skeleton:${idx}`}
+                        className="flex flex-col items-center flex-shrink-0 w-48"
+                      >
+                        <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-24 h-24 rounded-full bg-gray-200 animate-pulse" />
+                            <div className="w-32 h-4 rounded bg-gray-200 animate-pulse" />
+                            <div className="w-20 h-4 rounded bg-gray-200 animate-pulse" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(() => {
+                // Avoid rendering the row until we have stable ordering (last-note timestamps loaded).
+                if (!spacesLastNoteLoaded) return null
+                if (spacesLoading) return null
+                const eligible = spacesList.filter((p) => isSpaceLive(p) || isSpaceUpcoming(p))
+                const sorted = [...eligible].sort((a, b) => {
+                  const aKey = spacesLastNoteById[a.id] || a.created_at || null
+                  const bKey = spacesLastNoteById[b.id] || b.created_at || null
+                  const ad = aKey ? new Date(aKey) : null
+                  const bd = bKey ? new Date(bKey) : null
+                  const at = ad && !Number.isNaN(ad.getTime()) ? ad.getTime() : 0
+                  const bt = bd && !Number.isNaN(bd.getTime()) ? bd.getTime() : 0
+                  return bt - at
+                })
+                const allTop = sorted.slice(0, 50)
+                const isSpace = !isHumanPortfolio(portfolio) && normalizePortfolioType(portfolio.type) === 'space'
+                const hostingPermission =
+                  ((portfolio.metadata as any)?.properties?.hosting_permission as string | undefined) || 'managers'
+                const canCreateFromThisSpace =
+                  authChecked &&
+                  isAuthenticated &&
+                  isSpace &&
+                  (isOwner || isManager || (hostingPermission === 'members' && isMember))
+                const canCreateAsHuman =
+                  authChecked && isAuthenticated && isHumanPortfolio(portfolio) && isOwner
+                const canCreateAnySpace = canCreateFromThisSpace || canCreateAsHuman
+                const createSpaceHref = canCreateFromThisSpace
+                  ? `${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`
+                  : getSpaceCreateUrl()
+
+                if (!currentUserId || (allTop.length === 0 && !canCreateAnySpace)) return null
+
+                return (
+                  <div className="mb-6 md:px-10">
+                    <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 px-6 md:px-0 scroll-smooth">
+                      {canCreateAnySpace && (
+                        <div className="flex flex-col items-center flex-shrink-0 w-48">
+                          <div className="w-full rounded-2xl px-3 pt-3 pb-4">
+                            <div className="flex flex-col items-center gap-3">
+                              <Link
+                                href={createSpaceHref}
+                                className="w-24 h-24 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors flex items-center justify-center border-2 border-gray-300 hover:border-gray-400 cursor-pointer"
+                              >
+                                <svg
+                                  className="h-12 w-12 text-gray-600"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M12 4v16m8-8H4"
+                                  />
+                                </svg>
+                              </Link>
+                              <UIText className="text-center max-w-[140px] mx-auto truncate">
+                                Create Space
+                              </UIText>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {allTop.map((p) => renderSpaceFeedRowTile(p))}
+                    </div>
+                  </div>
+                )
+              })()}
               <FeedView
                 currentUserId={currentUserId}
                 apiPath={`/api/portfolios/${portfolio.id}/member-feed`}

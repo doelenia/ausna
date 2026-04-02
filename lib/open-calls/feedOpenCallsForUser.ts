@@ -1,7 +1,6 @@
 import type { Note } from '@/types/note'
 import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { enrichNotesWithAuthorProfiles } from '@/app/main/actions'
-import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import type { NoteWithDigestPortfolio } from '@/lib/email/digestAssignedPortfolio'
 import { attachDigestPortfoliosToNotes } from '@/lib/email/digestAssignedPortfolio'
 
@@ -54,41 +53,6 @@ async function getMemberPortfolioIds(userId: string, supabase: any): Promise<str
     }
   })
   return Array.from(new Set([...ownedIds, ...memberIds]))
-}
-
-async function getUserCommunitiesMap(
-  userId: string,
-  supabase: any
-): Promise<Map<string, { id: string; name: string; members: string[] }>> {
-  const { data: allCommunities } = await supabase
-    .from('portfolios')
-    .select('id, user_id, metadata')
-    .in('type', [...DB_NON_HUMAN_TYPES])
-  const communitiesMap = new Map<string, { id: string; name: string; members: string[] }>()
-  allCommunities?.forEach((community: any) => {
-    const metadata = community.metadata as any
-    const members = metadata?.members || []
-    const isUserMember =
-      community.user_id === userId || (Array.isArray(members) && members.includes(userId))
-    if (isUserMember) {
-      const basic = getPortfolioBasic(community as any)
-      communitiesMap.set(community.id, {
-        id: community.id,
-        name: basic.name,
-        members: [community.user_id, ...(Array.isArray(members) ? members : [])],
-      })
-    }
-  })
-  return communitiesMap
-}
-
-async function getAllCommunityMemberIds(userId: string, supabase: any): Promise<string[]> {
-  const communitiesMap = await getUserCommunitiesMap(userId, supabase)
-  const allMemberIds: string[] = []
-  communitiesMap.forEach((community) => {
-    allMemberIds.push(...community.members)
-  })
-  return Array.from(new Set(allMemberIds))
 }
 
 function sortOpenCallsForFeed(
@@ -153,18 +117,16 @@ export async function getFeedOpenCallsForUserId(
 
   const now = new Date().toISOString()
 
-  const [friendIds, subscribedPortfolioIds, memberPortfolioIds, communityMemberIds] =
+  const [friendIds, subscribedPortfolioIds, memberPortfolioIds] =
     await Promise.all([
       getFriendIds(userId, supabase),
       getSubscribedPortfolioIds(userId, supabase),
       getMemberPortfolioIds(userId, supabase),
-      getAllCommunityMemberIds(userId, supabase),
     ])
 
-  const allUserIds = Array.from(new Set([...friendIds, ...communityMemberIds]))
-  const allPortfolioIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds]))
+  const eligibleSpaceIds = Array.from(new Set([...subscribedPortfolioIds, ...memberPortfolioIds].map(String)))
 
-  if (allUserIds.length === 0 && allPortfolioIds.length === 0) {
+  if (friendIds.length === 0 && eligibleSpaceIds.length === 0) {
     return { openCalls: [], totalMatching: 0, hasMore: false }
   }
 
@@ -191,11 +153,11 @@ export async function getFeedOpenCallsForUserId(
     const assignedPortfolios = note.assigned_portfolios || []
     const collaboratorIds = (note.collaborator_account_ids || []) as string[]
     const isCollaborator = collaboratorIds.includes(userId)
-    const isOwnerVisible = allUserIds.includes(noteOwnerId)
-    const isAssignedToVisiblePortfolio = assignedPortfolios.some((pid: string) =>
-      allPortfolioIds.includes(pid)
+    const isOwnerFriend = friendIds.includes(noteOwnerId)
+    const isAssignedToEligibleSpace = assignedPortfolios.some((pid: string) =>
+      eligibleSpaceIds.includes(String(pid))
     )
-    return isOwnerVisible || isAssignedToVisiblePortfolio || isCollaborator
+    return isOwnerFriend || isAssignedToEligibleSpace || isCollaborator
   })
 
   const nonExpired = candidateNotes.filter((note: any) => {
