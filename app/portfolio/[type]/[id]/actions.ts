@@ -496,10 +496,6 @@ export async function updatePortfolio(
     }
 
     // Persist time/location for any non-human portfolio.
-    // For activities, we also track changes for member notifications.
-    let activityTimeChanged = false
-    let activityLocationChanged = false
-
     if (portfolio.type !== 'human') {
       const properties = (currentMetadata.properties || {}) as Record<string, any>
       const hasAnyActivityField =
@@ -507,10 +503,6 @@ export async function updatePortfolio(
         (activityEndRaw && activityEndRaw.trim().length > 0) ||
         (activityInProgressRaw && activityInProgressRaw.trim().length > 0) ||
         (activityAllDayRaw && activityAllDayRaw.trim().length > 0)
-
-      const previousActivityDateTime = (properties.activity_datetime || null) as
-        | import('@/lib/datetime').ActivityDateTimeValue
-        | null
 
       if (hasAnyActivityField) {
         const normalized = normalizeActivityDateTime(
@@ -533,37 +525,16 @@ export async function updatePortfolio(
           // when activity end has passed or status is archived (evaluated at read/apply time).
           updatedMetadata.properties = nextProperties
 
-          const nextActivityDateTime = (nextProperties.activity_datetime ||
-            null) as import('@/lib/datetime').ActivityDateTimeValue | null
-          if (portfolio.type !== 'human') {
-            activityTimeChanged =
-              JSON.stringify(previousActivityDateTime || null) !==
-              JSON.stringify(nextActivityDateTime || null)
-          }
         } else {
           // If normalization failed, remove the property rather than saving invalid data
           const { activity_datetime, ...rest } = properties
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
 
-          const hadPrevious = previousActivityDateTime != null
-          const hasNext =
-            (updatedMetadata.properties as Record<string, any> | undefined)
-              ?.activity_datetime != null
-          if (portfolio.type !== 'human') {
-            activityTimeChanged = hadPrevious !== hasNext
-          }
         }
       } else if (properties && Object.prototype.hasOwnProperty.call(properties, 'activity_datetime')) {
         const { activity_datetime, ...rest } = properties
         updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
 
-        const hadPrevious = previousActivityDateTime != null
-        const hasNext =
-          (updatedMetadata.properties as Record<string, any> | undefined)
-            ?.activity_datetime != null
-        if (portfolio.type !== 'human') {
-          activityTimeChanged = hadPrevious !== hasNext
-        }
       }
 
       const locationLine1 = activityLocationLine1Raw?.trim() || ''
@@ -587,10 +558,6 @@ export async function updatePortfolio(
         (activityLocationStateCodeRaw !== null && activityLocationStateCodeRaw !== undefined) ||
         (activityLocationPrivateRaw !== null && activityLocationPrivateRaw !== undefined) ||
         (activityLocationOnlineRaw !== null && activityLocationOnlineRaw !== undefined)
-
-      const previousLocation = (properties.location || null) as
-        | import('@/lib/location').ActivityLocationValue
-        | null
 
       if (hasAnyLocationField) {
         const nextProperties = (updatedMetadata.properties || properties || {}) as Record<string, any>
@@ -625,24 +592,10 @@ export async function updatePortfolio(
           nextProperties.location = Object.keys(location).length > 0 ? location : undefined
           updatedMetadata.properties = nextProperties
 
-          const nextLocation = (nextProperties.location ||
-            null) as import('@/lib/location').ActivityLocationValue | null
-          if (portfolio.type !== 'human') {
-            activityLocationChanged =
-              JSON.stringify(previousLocation || null) !==
-              JSON.stringify(nextLocation || null)
-          }
         } else if (Object.prototype.hasOwnProperty.call(nextProperties, 'location')) {
           const { location, ...rest } = nextProperties
           updatedMetadata.properties = Object.keys(rest).length > 0 ? rest : undefined
 
-          const hadPrevious = previousLocation != null
-          const hasNext =
-            (updatedMetadata.properties as Record<string, any> | undefined)
-              ?.location != null
-          if (portfolio.type !== 'human') {
-            activityLocationChanged = hadPrevious !== hasNext
-          }
         } else {
           updatedMetadata.properties = Object.keys(nextProperties).length > 0 ? nextProperties : undefined
         }
@@ -882,8 +835,19 @@ export async function updatePortfolio(
 
     revalidatePortfolioPathsForIdAndSlug(portfolioId, (portfolio as { slug?: string }).slug)
 
-    // For non-human portfolios, notify members when time and/or location changes.
-    if (portfolio.type !== 'human' && (activityTimeChanged || activityLocationChanged)) {
+    // For spaces (non-human portfolios), notify members only when persisted schedule
+    // and/or venue values change — compare final metadata so other settings cannot
+    // spuriously trigger DMs.
+    const prevPropsForNotify = (currentMetadata.properties || {}) as Record<string, any>
+    const nextPropsForNotify = (updatedMetadata.properties || {}) as Record<string, any>
+    const encodeProp = (v: unknown) => JSON.stringify(v ?? null)
+    const timeActuallyChanged =
+      encodeProp(prevPropsForNotify.activity_datetime) !==
+      encodeProp(nextPropsForNotify.activity_datetime)
+    const locationActuallyChanged =
+      encodeProp(prevPropsForNotify.location) !== encodeProp(nextPropsForNotify.location)
+
+    if (portfolio.type !== 'human' && (timeActuallyChanged || locationActuallyChanged)) {
       try {
         const metadataAfter = updatedMetadata as any
         const members: string[] = metadataAfter?.members || []
@@ -899,20 +863,17 @@ export async function updatePortfolio(
 
         if (participantIds.size > 0) {
           const changes: string[] = []
-          if (activityTimeChanged) changes.push('time')
-          if (activityLocationChanged) changes.push('location')
+          if (timeActuallyChanged) changes.push('time')
+          if (locationActuallyChanged) changes.push('location')
 
           const changeLabel =
             changes.length === 2
               ? 'time and location'
               : changes[0]
 
-          const baseUrl =
-            process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
-          const activityPath = getSpaceUrl(portfolioId)
-          const activityUrl = `${baseUrl}${activityPath}`
+          const spacePath = getSpaceUrl(portfolioId)
 
-          const text = `updated the ${changeLabel} for ${activityName} (portfolio). View details: ${activityPath}`
+          const text = `updated the ${changeLabel} for ${activityName} (space). View details: ${spacePath}`
 
           const inserts = Array.from(participantIds).map((receiverId) => ({
             sender_id: user.id,

@@ -1276,22 +1276,29 @@ export function PortfolioView({
 
             {/* Description */}
             {(displayDescription.trim() || isOwner || isManager) && (
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => setShowDescriptionPopup(true)}
-                className="w-full text-left rounded-lg px-2 py-1 -mx-2 -my-1 hover:bg-gray-100 focus-visible:bg-gray-100 transition-colors"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setShowDescriptionPopup(true)
+                  }
+                }}
+                className="mb-4 w-full text-left rounded-lg px-2 py-1 -mx-2 -my-1 hover:bg-gray-100 focus-visible:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 transition-colors cursor-pointer"
                 aria-label={displayDescription.trim() ? 'Open full description' : 'Add or edit description'}
               >
                 {displayDescription.trim() ? (
-                  <Content className="mb-4 whitespace-pre-wrap line-clamp-5 cursor-pointer">
+                  <Content className="max-h-[7.5rem] whitespace-pre-wrap line-clamp-5 cursor-pointer">
                     {displayDescription}
                   </Content>
                 ) : (
-                  <Content className="mb-4 text-gray-500 cursor-pointer">
+                  <Content as="span" className="block text-gray-500 cursor-pointer">
                     Click to add or edit description
                   </Content>
                 )}
-              </button>
+              </div>
             )}
 
             {/* Date/time & location badges (non-human portfolios) */}
