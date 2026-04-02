@@ -34,6 +34,30 @@ interface FeedViewProps {
   initialOpenCallsPopup?: boolean
 }
 
+/** Main feed top row: humans (friends) + spaces (joined/subscribed), ordered like portfolio feed rows. */
+type MainFeedTopRowHuman = {
+  id: string
+  name: string
+  avatar: string | null
+  lastNoteCreatedAt: string | null
+}
+
+type MainFeedTopRowItem =
+  | { kind: 'human'; human: MainFeedTopRowHuman; unread: number }
+  | { kind: 'space'; portfolio: any; lastNoteCreatedAt: string | null; unread: number }
+
+function mainFeedTopRowRecencyMs(item: MainFeedTopRowItem): number {
+  if (item.kind === 'human') {
+    const k = item.human.lastNoteCreatedAt
+    const t = k ? new Date(k).getTime() : 0
+    return Number.isNaN(t) ? 0 : t
+  }
+  const p = item.portfolio
+  const k = item.lastNoteCreatedAt || p.created_at || null
+  const t = k ? new Date(k).getTime() : 0
+  return Number.isNaN(t) ? 0 : t
+}
+
 export function FeedView({
   currentUserId,
   apiPath = '/api/feed',
@@ -54,10 +78,7 @@ export function FeedView({
   const [error, setError] = useState<string | null>(null)
   const [activityHighlights, setActivityHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
   const [topRowLoading, setTopRowLoading] = useState(false)
-  const [topSpaces, setTopSpaces] = useState<any[]>([])
-  const [topHumans, setTopHumans] = useState<Array<{ id: string; name: string; avatar: string | null; lastNoteCreatedAt: string | null }>>([])
-  const [topUnreadSpaces, setTopUnreadSpaces] = useState<Record<string, number>>({})
-  const [topUnreadFriends, setTopUnreadFriends] = useState<Record<string, number>>({})
+  const [topRowItems, setTopRowItems] = useState<MainFeedTopRowItem[]>([])
   const observerTarget = useRef<HTMLDivElement>(null)
   const offsetRef = useRef(0)
   const loadedNoteIdsRef = useRef<Set<string>>(new Set())
@@ -465,25 +486,37 @@ export function FeedView({
         const unreadSpaces = (unreadData?.spaces as Record<string, number>) || {}
         const unreadFriends = (unreadData?.friends as Record<string, number>) || {}
 
-        // For main feed: only show items that have updates since last checked.
-        const filteredSpaces = sortedSpaces.filter((p: any) => (unreadSpaces[String(p.id)] || 0) > 0)
-        const filteredHumans = enrichedHumans.filter((h) => (unreadFriends[h.id] || 0) > 0)
-
-        setTopSpaces(
-          filteredSpaces.map((p: any) => ({
+        // Same idea as portfolio feed rows: unread first (by latest note/create time), then the rest.
+        const humanItems: MainFeedTopRowItem[] = enrichedHumans.map((u) => ({
+          kind: 'human',
+          unread: unreadFriends[u.id] || 0,
+          human: {
+            id: u.id,
+            name: u.name,
+            avatar: u.avatar,
+            lastNoteCreatedAt: u.lastNoteCreatedAt,
+          },
+        }))
+        const spaceItems: MainFeedTopRowItem[] = sortedSpaces.map((p: any) => ({
+          kind: 'space',
+          unread: unreadSpaces[String(p.id)] || 0,
+          lastNoteCreatedAt: spacesLastNoteById[String(p.id)] ?? null,
+          portfolio: {
             ...p,
             lastNoteCreatedAt: spacesLastNoteById[String(p.id)] ?? null,
-          }))
-        )
-        setTopHumans(filteredHumans)
-        setTopUnreadSpaces(unreadSpaces)
-        setTopUnreadFriends(unreadFriends)
+          },
+        }))
+        const combined = [...humanItems, ...spaceItems]
+        const withUnread = combined
+          .filter((x) => x.unread > 0)
+          .sort((a, b) => mainFeedTopRowRecencyMs(b) - mainFeedTopRowRecencyMs(a))
+        const withoutUnread = combined
+          .filter((x) => x.unread === 0)
+          .sort((a, b) => mainFeedTopRowRecencyMs(b) - mainFeedTopRowRecencyMs(a))
+        setTopRowItems([...withUnread, ...withoutUnread])
       } catch {
         if (!cancelled) {
-          setTopSpaces([])
-          setTopHumans([])
-          setTopUnreadSpaces({})
-          setTopUnreadFriends({})
+          setTopRowItems([])
         }
       } finally {
         if (!cancelled) setTopRowLoading(false)
@@ -520,62 +553,66 @@ export function FeedView({
               </div>
             </div>
           )}
-          {isMainFeed && currentUserId && (topHumans.length > 0 || topSpaces.length > 0) && (
+          {isMainFeed && currentUserId && topRowItems.length > 0 && (
             <div className="mt-4 mb-2">
               <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 px-3 md:px-0 scroll-smooth">
-                {topHumans.map((h) => {
-                  const unread = topUnreadFriends[h.id] || 0
-                  return (
-                    <div key={`human:${h.id}`} className="flex flex-col items-center flex-shrink-0 w-48 relative">
-                      {unread > 0 && (
-                        <div className="absolute top-2 right-3 z-10 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-red-500">
-                          <UIText as="span" className="text-[11px] text-white leading-none">
-                            {unread}
-                          </UIText>
-                        </div>
-                      )}
-                      <Link
-                        href={getHumanProfileUrl(h.id)}
-                        className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                        onClick={() => {
-                          fetch('/api/last-checked', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ target_type: 'friend', target_id: h.id }),
-                          }).catch(() => {})
-                        }}
-                      >
-                        <div className="flex flex-col items-center gap-3">
-                          <StickerAvatar
-                            src={h.avatar ?? undefined}
-                            alt={h.name}
-                            type="human"
-                            size={96}
-                            name={h.name}
-                          />
-                          <div className="flex flex-col items-center gap-1 w-full">
-                            <Content className="text-center max-w-[140px] mx-auto line-clamp-2" title={h.name}>
-                              {h.name}
-                            </Content>
-                            <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                              <UIText as="span" className="text-[11px] text-black leading-none">
-                                New posts
-                              </UIText>
+                {topRowItems.map((item) => {
+                  if (item.kind === 'human') {
+                    const h = item.human
+                    const unread = item.unread
+                    return (
+                      <div key={`human:${h.id}`} className="flex flex-col items-center flex-shrink-0 w-48 relative">
+                        {unread > 0 && (
+                          <div className="absolute top-2 right-3 z-10 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-red-500">
+                            <UIText as="span" className="text-[11px] text-white leading-none">
+                              {unread}
+                            </UIText>
+                          </div>
+                        )}
+                        <Link
+                          href={getHumanProfileUrl(h.id)}
+                          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                          onClick={() => {
+                            fetch('/api/last-checked', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ target_type: 'friend', target_id: h.id }),
+                            }).catch(() => {})
+                          }}
+                        >
+                          <div className="flex flex-col items-center gap-3">
+                            <StickerAvatar
+                              src={h.avatar ?? undefined}
+                              alt={h.name}
+                              type="human"
+                              size={96}
+                              name={h.name}
+                            />
+                            <div className="flex flex-col items-center gap-1 w-full">
+                              <Content className="text-center max-w-[140px] mx-auto line-clamp-2" title={h.name}>
+                                {h.name}
+                              </Content>
+                              {unread > 0 && (
+                                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
+                                  <UIText as="span" className="text-[11px] text-black leading-none">
+                                    New posts
+                                  </UIText>
+                                </div>
+                              )}
                             </div>
                           </div>
-                        </div>
-                      </Link>
-                    </div>
-                  )
-                })}
+                        </Link>
+                      </div>
+                    )
+                  }
 
-                {topSpaces.map((p: any) => {
+                  const p = item.portfolio
                   const basic = (p.metadata as any)?.basic || {}
                   const name = (basic.name as string) || 'Space'
                   const avatar = basic.avatar as string | undefined
                   const emoji = basic.emoji as string | undefined
                   const pill = renderSpaceLiveOrUpcomingPill(p)
-                  const unread = topUnreadSpaces[String(p.id)] || 0
+                  const unread = item.unread
                   const joinable = isSpaceJoinable(p)
                   return (
                     <div key={`space:${p.id}`} className="flex flex-col items-center flex-shrink-0 w-48 relative">
