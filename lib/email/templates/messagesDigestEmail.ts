@@ -13,18 +13,25 @@ export function renderMessagesDigestEmail(input: {
   conversations: MessagesDigestConversationInput[]
   messagesUrl: string
   unsubscribeUrl?: string
+  /** E.g. "Alice, Bob & 2 others" */
+  names?: string
 }): string {
   const safeConversations = Array.isArray(input.conversations)
     ? input.conversations.slice(0, 20)
     : []
 
-  const documentTitle = 'New messages from Ausna'
-  const heading =
-    safeConversations.length > 0
+  const documentTitle = input.names ? `New messages: ${escapeHtml(input.names)}` : 'New messages'
+  const heading = input.names
+    ? `New messages from ${escapeHtml(input.names)}`
+    : safeConversations.length > 0
       ? `New messages from ${escapeHtml(
           safeConversations[0].partnerName || 'your conversations'
         )}${safeConversations.length > 1 ? ' and others' : ''}`
       : 'New messages on Ausna'
+
+  const introText = input.names
+    ? `Featuring ${input.names}. You have new unread messages in your conversations on Ausna.`
+    : 'You have new unread messages in your conversations on Ausna.'
 
   const rowsHtml = safeConversations
     .map((conv) => {
@@ -90,7 +97,7 @@ export function renderMessagesDigestEmail(input: {
   return renderDigestEmailShell({
     documentTitle,
     headingHtml: heading,
-    introText: 'You have new unread messages in your conversations on Ausna.',
+    introText,
     rowsHtml,
     ctaHref: input.messagesUrl,
     ctaLabel: 'View on Ausna',

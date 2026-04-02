@@ -126,14 +126,17 @@ export function renderOpenCallDigestEmail(input: {
   totalNew: number
   mainFeedUrl: string
   unsubscribeUrl?: string
+  /** E.g. "Alice, Bob & 2 others" */
+  names?: string
 }): string {
-  const { siteUrl, displayNotes, totalNew, mainFeedUrl, unsubscribeUrl } = input
-  const documentTitle = 'New Open Calls on Ausna'
+  const { siteUrl, displayNotes, totalNew, mainFeedUrl, unsubscribeUrl, names } = input
+  const documentTitle = names ? `Open calls: ${names}` : 'Open calls on Ausna'
   const heading = 'Daily digest of new open calls on Ausna'
-  const intro =
+  const baseIntro =
     totalNew === 1
       ? 'There is 1 open call on your feed you haven’t opened yet.'
       : `There are ${totalNew} open calls on your feed you haven’t opened yet.`
+  const intro = names ? `Featuring ${names}. ${baseIntro}` : baseIntro
 
   const ctaLabel =
     totalNew === 1 ? 'View open call on Ausna' : `View ${totalNew} open calls on Ausna`

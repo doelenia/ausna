@@ -19,12 +19,23 @@ function isAuthorized(request: NextRequest): boolean {
 
 function computeSinceMs(lastUpdatedIso: string): number {
   const nowMs = Date.now()
-  const oneHourAgoMs = nowMs - 60 * 60 * 1000
+  const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000
   const lastUpdatedMs = new Date(lastUpdatedIso).getTime()
   if (Number.isNaN(lastUpdatedMs)) {
-    return oneHourAgoMs
+    return oneDayAgoMs
   }
-  return lastUpdatedMs < oneHourAgoMs ? oneHourAgoMs : lastUpdatedMs
+  return lastUpdatedMs < oneDayAgoMs ? oneDayAgoMs : lastUpdatedMs
+}
+
+function alreadySentFeedDigestTodayUtc(lastSentAtIso: string): boolean {
+  const sent = new Date(lastSentAtIso)
+  if (Number.isNaN(sent.getTime())) return false
+  const now = new Date()
+  return (
+    sent.getUTCFullYear() === now.getUTCFullYear() &&
+    sent.getUTCMonth() === now.getUTCMonth() &&
+    sent.getUTCDate() === now.getUTCDate()
+  )
 }
 
 export async function GET(request: NextRequest) {
@@ -79,12 +90,7 @@ export async function GET(request: NextRequest) {
         }
 
         const lastSentAt = feedDigest.last_sent_at as string | undefined
-        if (lastSentAt) {
-          const sentMs = new Date(lastSentAt).getTime()
-          if (!Number.isNaN(sentMs) && Date.now() - sentMs < 60 * 60 * 1000) {
-            continue
-          }
-        }
+        if (lastSentAt && alreadySentFeedDigestTodayUtc(lastSentAt)) continue
 
         const { data: ufs, error: ufsError } = await supabase
           .from('user_feed_state')
