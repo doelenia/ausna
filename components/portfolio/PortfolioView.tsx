@@ -834,6 +834,45 @@ export function PortfolioView({
     portfolio,
   ])
 
+  useEffect(() => {
+    if (activeTab !== 'feed') return
+    if (!currentUserId || !authChecked) return
+
+    const post = (target_type: 'friend' | 'joined_space' | 'subscribed_space', target_id: string) => {
+      fetch('/api/last-checked', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_type, target_id }),
+      }).catch(() => {})
+    }
+
+    if (isHumanPortfolio(portfolio)) {
+      if (portfolio.user_id !== currentUserId) {
+        post('friend', portfolio.user_id)
+      }
+      return
+    }
+
+    const inPortfolio = userIsInThisPortfolio(currentUserId, portfolio)
+    const isSpace = normalizePortfolioType(portfolio.type) === 'space'
+
+    if (inPortfolio) {
+      post('joined_space', portfolio.id)
+      return
+    }
+    if (isSpace && isCurrentPortfolioSubscribed) {
+      post('subscribed_space', portfolio.id)
+    }
+  }, [
+    activeTab,
+    authChecked,
+    currentUserId,
+    isCurrentPortfolioSubscribed,
+    portfolio.id,
+    portfolio.user_id,
+    portfolio.type,
+  ])
+
   type SpacesApiPortfolio = {
     id: string
     type: string
@@ -1266,14 +1305,6 @@ export function PortfolioView({
         <Link
           href={getSpaceUrl(p.slug || p.id)}
           className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-          onClick={() => {
-            // Update last-checked on visit; joined/subscribed are handled by server-side table.
-            fetch('/api/last-checked', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ target_type: 'joined_space', target_id: p.id }),
-            }).catch(() => {})
-          }}
         >
           <div className="flex flex-col items-center gap-3">
             <StickerAvatar
