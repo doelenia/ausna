@@ -356,17 +356,6 @@ export function FeedView({
     if (!currentUserId) return
     if (!isMainFeed) return
 
-    // Backfill checkpoints once per session (idempotent server-side).
-    try {
-      const key = `last-checked-backfill:${currentUserId}`
-      if (typeof window !== 'undefined' && !sessionStorage.getItem(key)) {
-        sessionStorage.setItem(key, '1')
-        fetch('/api/last-checked/backfill', { method: 'POST' }).catch(() => {})
-      }
-    } catch {
-      // ignore
-    }
-
     let cancelled = false
 
     const run = async () => {
@@ -572,13 +561,6 @@ export function FeedView({
                         <Link
                           href={getHumanProfileUrl(h.id)}
                           className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                          onClick={() => {
-                            fetch('/api/last-checked', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ target_type: 'friend', target_id: h.id }),
-                            }).catch(() => {})
-                          }}
                         >
                           <div className="flex flex-col items-center gap-3">
                             <StickerAvatar
@@ -638,16 +620,6 @@ export function FeedView({
                       <Link
                         href={getSpaceUrl(p.slug || p.id)}
                         className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
-                        onClick={() => {
-                          fetch('/api/last-checked', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              target_type: p.relation === 'subscribed' ? 'subscribed_space' : 'joined_space',
-                              target_id: String(p.id),
-                            }),
-                          }).catch(() => {})
-                        }}
                       >
                         <div className="flex flex-col items-center gap-3">
                           <StickerAvatar
