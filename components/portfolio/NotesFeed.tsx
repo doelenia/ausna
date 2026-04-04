@@ -88,10 +88,10 @@ export function NotesFeed({
     fetchPinnedNotes()
   }, [portfolioId])
 
-  // Fetch collections for project portfolios
+  // Fetch collections for project portfolios (auth required; skip for anonymous viewers)
   useEffect(() => {
     const fetchCollections = async () => {
-      if (!isProjectPortfolio(portfolio)) {
+      if (!isProjectPortfolio(portfolio) || !currentUserId) {
         setCollections([])
         return
       }
@@ -113,7 +113,7 @@ export function NotesFeed({
     }
 
     fetchCollections()
-  }, [portfolioId, portfolio])
+  }, [portfolioId, portfolio, currentUserId])
 
   const handleDeleteCollection = async (collectionId: string) => {
     if (deletingCollectionId) return

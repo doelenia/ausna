@@ -19,7 +19,9 @@ function parseIds(raw: string | null): string[] {
 
 /**
  * GET /api/users/by-ids?ids=id1,id2,...
- * Returns minimal human profile info for each user id.
+ * Returns minimal human profile info for each user id (public basic + avatar).
+ * Works for anonymous visitors; RLS only returns rows the caller may see (e.g. public profiles).
+ * When logged in, the current user is labeled "You" instead of their display name.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -27,10 +29,6 @@ export async function GET(request: NextRequest) {
     const {
       data: { user },
     } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
 
     const idsParam = request.nextUrl.searchParams.get('ids')
     const ids = parseIds(idsParam).slice(0, 25)
@@ -55,7 +53,7 @@ export async function GET(request: NextRequest) {
       const basic = getPortfolioBasic(p as Portfolio)
       return {
         id: uid,
-        name: uid === user.id ? 'You' : basic.name,
+        name: user && uid === user.id ? 'You' : basic.name,
         avatar: basic.avatar ?? null,
       }
     })
