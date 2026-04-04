@@ -6,9 +6,28 @@ import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { createClient } from '@/lib/supabase/client'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { getHumanProfileUrl } from '@/lib/portfolio/routes'
+import { putInboxListCache } from '@/lib/messages/inboxListCache'
 
 const EXPLORE_AFTER_MAIN_MS = 180
+const MESSAGES_WARM_AFTER_EXPLORE_MS = 400
 const IDLE_TIMEOUT_MS = 2500
+
+function warmMessagesInboxJson() {
+  void fetch('/api/messages?tab=active', { credentials: 'include' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data: { conversations?: unknown[] } | null) => {
+      if (data?.conversations) putInboxListCache('active', data.conversations)
+    })
+    .catch(() => {})
+  window.setTimeout(() => {
+    void fetch('/api/messages?tab=invitations', { credentials: 'include' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { conversations?: unknown[] } | null) => {
+        if (data?.conversations) putInboxListCache('invitations', data.conversations)
+      })
+      .catch(() => {})
+  }, 220)
+}
 
 function runWhenIdle(fn: () => void, timeoutMs: number) {
   if (typeof window === 'undefined') return
@@ -78,6 +97,10 @@ export function NavRouteWarmup() {
           } catch {
             /* noop */
           }
+          window.setTimeout(() => {
+            if (cancelled) return
+            warmMessagesInboxJson()
+          }, MESSAGES_WARM_AFTER_EXPLORE_MS)
         }, EXPLORE_AFTER_MAIN_MS)
       }, IDLE_TIMEOUT_MS)
     })
