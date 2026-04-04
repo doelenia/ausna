@@ -991,6 +991,9 @@ export function PortfolioView({
     if (managersArr.includes(currentUserId) || membersArr.includes(currentUserId)) return false
 
     const props = meta?.properties || {}
+    if (props.external === true) {
+      return true
+    }
     const callToJoin = props.call_to_join || null
     const dt = getSpaceActivityDateTime(p) ?? undefined
     const visibility = (p.visibility as 'public' | 'private' | undefined | null) ?? 'public'

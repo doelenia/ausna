@@ -21,6 +21,7 @@ import { DB_NON_HUMAN_TYPES, normalizePortfolioType } from '@/types/portfolio'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import { isActivityLive } from '@/lib/activityLive'
+import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import { formatDistanceToNowStrict } from 'date-fns'
 
@@ -352,8 +353,16 @@ export function FeedView({
     const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
     const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
     if (managersArr.includes(currentUserId) || membersArr.includes(currentUserId)) return false
-    // If the space has a start time in the future, it's still joinable (handled by join flow).
-    return true
+
+    const props = meta?.properties || {}
+    // External activities: publicly joinable without call_to_join (see portfolio join action).
+    if (props.external === true) {
+      return true
+    }
+    const callToJoin = props.call_to_join || null
+    const dt = getSpaceActivityDateTime(p) ?? undefined
+    const visibility = (p.visibility as 'public' | 'private' | undefined | null) ?? 'public'
+    return isCallToJoinWindowOpen(visibility, callToJoin, dt, status)
   }
 
   useEffect(() => {
