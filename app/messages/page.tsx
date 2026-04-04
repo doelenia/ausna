@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { Title, Content, UIText, UIButtonText, Dropdown } from '@/components/ui'
+import { MessagesInboxSkeleton } from '@/components/main/MessagesInboxSkeleton'
 import { Archive } from 'lucide-react'
 
 interface Conversation {
@@ -159,11 +160,7 @@ function MessagesPageContent() {
   }
 
   if (loading) {
-    return (
-      <div className="bg-white shadow rounded-lg p-6">
-        <div className="text-center"><Content>Loading conversations...</Content></div>
-      </div>
-    )
+    return <MessagesInboxSkeleton />
   }
 
   const handleCompleteConversation = async (partnerId: string, e: React.MouseEvent) => {

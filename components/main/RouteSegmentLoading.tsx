@@ -1,24 +1,13 @@
 'use client'
 
 import { Skeleton, SkeletonCard, SkeletonAvatar, SkeletonText } from '@/components/ui/Skeleton'
+import { MessagesInboxSkeleton } from '@/components/main/MessagesInboxSkeleton'
 
 type Variant = 'feed' | 'explore' | 'messages' | 'conversation' | 'portfolio' | 'members'
 
 export function RouteSegmentLoading({ variant = 'feed' }: { variant?: Variant }) {
   if (variant === 'messages') {
-    return (
-      <div className="px-4 py-6 max-w-2xl mx-auto space-y-3">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 py-3 border-b border-gray-100">
-            <SkeletonAvatar size={48} />
-            <div className="flex-1 min-w-0 space-y-2">
-              <SkeletonText lines={1} width="45%" lineHeight={16} />
-              <SkeletonText lines={1} width="75%" lineHeight={14} />
-            </div>
-          </div>
-        ))}
-      </div>
-    )
+    return <MessagesInboxSkeleton />
   }
 
   if (variant === 'conversation') {
@@ -42,22 +31,66 @@ export function RouteSegmentLoading({ variant = 'feed' }: { variant?: Variant })
   }
 
   if (variant === 'portfolio') {
+    // Mirrors PortfolioView header stack: avatar → name (+ pill) → description → badges → actions → open calls → tabs.
     return (
-      <div className="px-4 md:px-10 py-6 space-y-6">
-        <div className="flex flex-col md:flex-row gap-6 items-start">
-          <SkeletonAvatar size={96} />
-          <div className="flex-1 space-y-3 w-full">
-            <SkeletonText lines={1} width="40%" lineHeight={24} />
-            <SkeletonText lines={2} width="100%" lineHeight={16} gap={6} />
-            <div className="flex gap-2 pt-2">
-              <Skeleton height={36} width={96} className="rounded-lg" />
-              <Skeleton height={36} width={96} className="rounded-lg" />
-              <Skeleton height={36} width={96} className="rounded-lg" />
+      <div className="px-4 md:px-10 py-6">
+        <div className="bg-transparent rounded-lg p-6">
+          <div className="mb-6 mt-12">
+            <div className="mb-4 flex justify-start">
+              <Skeleton width={96} height={96} rounded="full" />
+            </div>
+
+            <div className="flex items-baseline gap-3 mb-2 flex-wrap">
+              <SkeletonText lines={1} width="55%" lineHeight={28} />
+              <Skeleton height={22} width={72} className="rounded-full flex-shrink-0" />
+            </div>
+
+            <div className="mb-4 w-full max-w-2xl space-y-2">
+              <SkeletonText lines={1} width="100%" lineHeight={16} />
+              <SkeletonText lines={1} width="100%" lineHeight={16} />
+              <SkeletonText lines={1} width="72%" lineHeight={16} />
+            </div>
+
+            <div className="mb-4 flex flex-wrap gap-2 max-w-xl">
+              <Skeleton height={26} width={112} className="rounded-full" />
+              <Skeleton height={26} width={96} className="rounded-full" />
+            </div>
+
+            <div className="mb-6 flex flex-wrap gap-2">
+              <Skeleton height={36} width={92} className="rounded-lg" />
+              <Skeleton height={36} width={88} className="rounded-lg" />
+              <Skeleton height={36} width={104} className="rounded-lg" />
+            </div>
+
+            <div className="mb-6">
+              <div className="flex gap-3 overflow-hidden pb-1">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="flex-shrink-0 w-[min(220px,72vw)] rounded-xl border border-gray-200 bg-white p-3 space-y-2 shadow-sm"
+                  >
+                    <Skeleton height={14} width="55%" />
+                    <SkeletonText lines={2} width="100%" lineHeight={13} gap={6} />
+                    <Skeleton height={28} width={72} className="rounded-md mt-1" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="rounded-xl bg-gray-50/80 backdrop-blur-xl p-1 flex gap-2 overflow-x-auto">
+                <Skeleton height={36} width={88} className="rounded-lg flex-shrink-0" />
+                <Skeleton height={36} width={64} className="rounded-lg flex-shrink-0" />
+                <Skeleton height={36} width={72} className="rounded-lg flex-shrink-0" />
+              </div>
             </div>
           </div>
         </div>
-        <SkeletonCard />
-        <SkeletonCard />
+
+        <div className="mt-8 space-y-4">
+          <SkeletonCard />
+          <SkeletonCard showAvatar={false} />
+        </div>
       </div>
     )
   }
