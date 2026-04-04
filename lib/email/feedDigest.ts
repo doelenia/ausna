@@ -8,6 +8,30 @@ import type { FeedItem } from '@/app/main/actions'
 import { renderFeedDigestEmail } from '@/lib/email/templates/feedDigestEmail'
 import { buildEmailUnsubscribeUrl } from '@/lib/email/buildUnsubscribeUrl'
 
+/** Lookback floor for “new” items and minimum spacing between feed digest sends (8 hours). */
+export const FEED_DIGEST_WINDOW_MS = 8 * 60 * 60 * 1000
+
+/**
+ * Waterline for digest “new” items: max(user_feed_state.last_updated, now − 8h).
+ * Items with created_at in (sinceMs, now] are eligible.
+ */
+export function computeFeedDigestSinceMs(lastUpdatedIso: string): number {
+  const nowMs = Date.now()
+  const floorMs = nowMs - FEED_DIGEST_WINDOW_MS
+  const lastUpdatedMs = new Date(lastUpdatedIso).getTime()
+  if (Number.isNaN(lastUpdatedMs)) {
+    return floorMs
+  }
+  return lastUpdatedMs < floorMs ? floorMs : lastUpdatedMs
+}
+
+/** True if a digest was sent recently enough that we should skip this cron run. */
+export function isWithinFeedDigestSendCooldown(lastSentAtIso: string): boolean {
+  const sent = new Date(lastSentAtIso)
+  if (Number.isNaN(sent.getTime())) return false
+  return Date.now() - sent.getTime() < FEED_DIGEST_WINDOW_MS
+}
+
 function formatNameList(names: string[], opts?: { maxNames?: number }): string {
   const maxNames = opts?.maxNames ?? 3
   const clean = names.map((n) => (n || '').trim()).filter(Boolean)

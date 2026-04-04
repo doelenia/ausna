@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getFeedItemsForUserId } from '@/app/main/actions'
 import { attachDigestPortfoliosToFeedItems } from '@/lib/email/digestAssignedPortfolio'
-import { sendFeedDigestEmail } from '@/lib/email/feedDigest'
+import {
+  computeFeedDigestSinceMs,
+  isWithinFeedDigestSendCooldown,
+  sendFeedDigestEmail,
+} from '@/lib/email/feedDigest'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,27 +19,6 @@ function isAuthorized(request: NextRequest): boolean {
   if (auth === `Bearer ${secret}`) return true
   const qs = request.nextUrl.searchParams.get('secret') || ''
   return qs === secret
-}
-
-function computeSinceMs(lastUpdatedIso: string): number {
-  const nowMs = Date.now()
-  const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000
-  const lastUpdatedMs = new Date(lastUpdatedIso).getTime()
-  if (Number.isNaN(lastUpdatedMs)) {
-    return oneDayAgoMs
-  }
-  return lastUpdatedMs < oneDayAgoMs ? oneDayAgoMs : lastUpdatedMs
-}
-
-function alreadySentFeedDigestTodayUtc(lastSentAtIso: string): boolean {
-  const sent = new Date(lastSentAtIso)
-  if (Number.isNaN(sent.getTime())) return false
-  const now = new Date()
-  return (
-    sent.getUTCFullYear() === now.getUTCFullYear() &&
-    sent.getUTCMonth() === now.getUTCMonth() &&
-    sent.getUTCDate() === now.getUTCDate()
-  )
 }
 
 export async function GET(request: NextRequest) {
@@ -90,7 +73,7 @@ export async function GET(request: NextRequest) {
         }
 
         const lastSentAt = feedDigest.last_sent_at as string | undefined
-        if (lastSentAt && alreadySentFeedDigestTodayUtc(lastSentAt)) continue
+        if (lastSentAt && isWithinFeedDigestSendCooldown(lastSentAt)) continue
 
         const { data: ufs, error: ufsError } = await supabase
           .from('user_feed_state')
@@ -108,7 +91,7 @@ export async function GET(request: NextRequest) {
           continue
         }
 
-        const sinceMs = computeSinceMs(ufs.last_updated as string)
+        const sinceMs = computeFeedDigestSinceMs(ufs.last_updated as string)
 
         const feedResult = await getFeedItemsForUserId(
           supabase,

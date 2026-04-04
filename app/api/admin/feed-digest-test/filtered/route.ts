@@ -3,24 +3,14 @@ import { createClient } from '@/lib/supabase/server'
 import { checkAdmin } from '@/lib/auth/requireAdmin'
 import { getFeedItemsForUserId } from '@/app/main/actions'
 import { attachDigestPortfoliosToFeedItems } from '@/lib/email/digestAssignedPortfolio'
-import { sendFeedDigestEmail } from '@/lib/email/feedDigest'
+import { computeFeedDigestSinceMs, sendFeedDigestEmail } from '@/lib/email/feedDigest'
 
 export const dynamic = 'force-dynamic'
 
 const FEED_DIGEST_POOL_LIMIT = 200
 
-function computeSinceMs(lastUpdatedIso: string): number {
-  const nowMs = Date.now()
-  const oneHourAgoMs = nowMs - 60 * 60 * 1000
-  const lastUpdatedMs = new Date(lastUpdatedIso).getTime()
-  if (Number.isNaN(lastUpdatedMs)) {
-    return oneHourAgoMs
-  }
-  return lastUpdatedMs < oneHourAgoMs ? oneHourAgoMs : lastUpdatedMs
-}
-
 /**
- * Admin-only: send feed digest using production waterline logic (user_feed_state.last_updated vs 1h window).
+ * Admin-only: send feed digest using production waterline logic (user_feed_state.last_updated vs 8h window).
  */
 export async function GET() {
   const admin = await checkAdmin()
@@ -54,7 +44,7 @@ export async function GET() {
       )
     }
 
-    const sinceMs = computeSinceMs(ufs.last_updated as string)
+    const sinceMs = computeFeedDigestSinceMs(ufs.last_updated as string)
 
     const feedResult = await getFeedItemsForUserId(
       supabase,
