@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { requireAuth } from '@/lib/auth/requireAuth'
+import { requireAuthApi } from '@/lib/auth/requireAuth'
 import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 
 export const dynamic = 'force-dynamic'
@@ -15,7 +14,9 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
-    const { user, supabase } = await requireAuth()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { user, supabase } = auth
     const { searchParams } = new URL(request.url)
     
     const ownerIdsParam = searchParams.get('owner_ids')

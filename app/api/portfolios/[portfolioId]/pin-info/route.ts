@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { requireAuth } from '@/lib/auth/requireAuth'
+import { requireAuthApi } from '@/lib/auth/requireAuth'
 import { getPinnedItemsCount, isPortfolioOwner } from '@/lib/portfolio/helpers'
 import { Portfolio } from '@/types/portfolio'
 
@@ -13,8 +12,9 @@ export async function GET(
   { params }: { params: { portfolioId: string } }
 ) {
   try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { user, supabase } = auth
     const portfolioId = params.portfolioId
 
     if (!portfolioId) {

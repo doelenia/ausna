@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { requireAuth } from '@/lib/auth/requireAuth'
+import { requireAuthApi } from '@/lib/auth/requireAuth'
 
 /**
  * GET /api/notes/[noteId]/collections
@@ -11,8 +10,9 @@ export async function GET(
   { params }: { params: { noteId: string } }
 ) {
   try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { supabase } = auth
     const { noteId } = params
 
     const { data: noteCollections, error } = await supabase
@@ -53,8 +53,9 @@ export async function POST(
   { params }: { params: { noteId: string } }
 ) {
   try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { user, supabase } = auth
     const { noteId } = params
     const body = await request.json()
     const { collection_ids } = body

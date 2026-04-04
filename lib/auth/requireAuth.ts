@@ -1,10 +1,51 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { cookies, headers } from 'next/headers'
+import { NextResponse } from 'next/server'
+import type { User } from '@supabase/supabase-js'
 import { buildLoginHref, getReturnToFromReferer } from '@/lib/auth/login-redirect'
 
+type ServerSupabaseClient = Awaited<ReturnType<typeof createClient>>
+
+export type RequireAuthApiSuccess = {
+  authorized: true
+  user: User
+  supabase: ServerSupabaseClient
+}
+
+export type RequireAuthApiFailure = {
+  authorized: false
+  response: NextResponse
+}
+
+export type RequireAuthApiResult = RequireAuthApiSuccess | RequireAuthApiFailure
+
+/**
+ * For Route Handlers: return 401 JSON instead of redirect().
+ * `redirect()` throws NEXT_REDIRECT; catching it in try/catch turns auth failure into a 500.
+ */
+export async function requireAuthApi(): Promise<RequireAuthApiResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+
+  if (userError || !user) {
+    return {
+      authorized: false,
+      response: NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      ),
+    }
+  }
+
+  return { authorized: true, user, supabase }
+}
+
 export async function requireAuth(returnTo?: string | null) {
-  // Debug: Check what cookies are available
+  const isDev = process.env.NODE_ENV === 'development'
   const cookieStore = await cookies()
   const allCookies = cookieStore.getAll()
   const authCookies = allCookies.filter(cookie => 
@@ -13,12 +54,12 @@ export async function requireAuth(returnTo?: string | null) {
     cookie.name.startsWith('sb-')
   )
   
-  // Log all cookies for debugging
-  console.log('All cookies in requireAuth:', allCookies.map(c => `${c.name}=${c.value.substring(0, 20)}...`).join(', ') || 'NONE')
-  
-  if (authCookies.length === 0) {
-    console.error('No auth cookies found in requireAuth. Available cookies:', 
-      allCookies.map(c => c.name).join(', ') || 'NONE')
+  if (isDev) {
+    console.log('All cookies in requireAuth:', allCookies.map(c => `${c.name}=${c.value.substring(0, 20)}...`).join(', ') || 'NONE')
+    if (authCookies.length === 0) {
+      console.error('No auth cookies found in requireAuth. Available cookies:', 
+        allCookies.map(c => c.name).join(', ') || 'NONE')
+    }
   }
   
   const supabase = await createClient()
@@ -32,15 +73,16 @@ export async function requireAuth(returnTo?: string | null) {
 
   // If there's an error or no user, redirect to login
   if (userError || !user) {
-    // Log for debugging (remove in production if needed)
-    console.error('Authentication failed in requireAuth:', {
-      userError: userError?.message,
-      errorCode: userError?.status,
-      hasUser: !!user,
-      authCookieCount: authCookies.length,
-      authCookieNames: authCookies.map(c => c.name).join(', '),
-      allCookieNames: allCookies.map(c => c.name).join(', ') || 'NONE',
-    })
+    if (isDev) {
+      console.error('Authentication failed in requireAuth:', {
+        userError: userError?.message,
+        errorCode: userError?.status,
+        hasUser: !!user,
+        authCookieCount: authCookies.length,
+        authCookieNames: authCookies.map(c => c.name).join(', '),
+        allCookieNames: allCookies.map(c => c.name).join(', ') || 'NONE',
+      })
+    }
     const referer = (await headers()).get('referer')
     const effectiveReturnTo = returnTo ?? getReturnToFromReferer(referer)
     redirect(buildLoginHref({ returnTo: effectiveReturnTo }))

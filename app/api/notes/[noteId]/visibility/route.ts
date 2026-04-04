@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireAuth } from '@/lib/auth/requireAuth'
-import { createClient } from '@/lib/supabase/server'
+import { requireAuthApi } from '@/lib/auth/requireAuth'
 import type { NoteVisibility } from '@/types/note'
 
 export async function POST(
@@ -8,8 +7,9 @@ export async function POST(
   { params }: { params: { noteId: string } }
 ) {
   try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { user, supabase } = auth
     const noteId = params.noteId
 
     if (!noteId) {

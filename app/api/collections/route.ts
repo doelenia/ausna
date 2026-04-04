@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { requireAuth } from '@/lib/auth/requireAuth'
+import { requireAuthApi } from '@/lib/auth/requireAuth'
 
 /**
  * GET /api/collections?portfolio_id=xxx
@@ -8,8 +7,9 @@ import { requireAuth } from '@/lib/auth/requireAuth'
  */
 export async function GET(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { supabase } = auth
     const searchParams = request.nextUrl.searchParams
     const portfolioId = searchParams.get('portfolio_id')
 
@@ -53,8 +53,9 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
+    const auth = await requireAuthApi()
+    if (!auth.authorized) return auth.response
+    const { user, supabase } = auth
     const body = await request.json()
     const { portfolio_id, name } = body
 
