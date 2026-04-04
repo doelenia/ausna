@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server'
-import { getHumanPortfolio } from '@/lib/portfolio/human'
 
 export type MessagesTab = 'active' | 'invitations'
 
@@ -223,39 +222,57 @@ export async function getConversationsForUserWithClient(
     }
   }
 
-  const conversationsWithNames = await Promise.all(
-    filteredConversations.map(async (conv) => {
-      try {
-        const portfolio = await getHumanPortfolio(conv.partner_id)
-        if (portfolio) {
-          const metadata = portfolio.metadata as any
-          const basic = metadata?.basic || {}
-          const displayName = basic.name || metadata?.username || 'User'
-          const avatarUrl =
-            typeof basic.avatar === 'string' && basic.avatar.trim().length > 0
-              ? basic.avatar.trim()
-              : null
-          return {
-            ...conv,
-            partner_name: displayName,
-            partner_avatar_url: avatarUrl,
-          }
-        }
-      } catch (error) {
-        console.error(
-          `Error fetching partner name for ${conv.partner_id}:`,
-          error
-        )
+  const partnerIdsForLookup = [
+    ...new Set(filteredConversations.map((c) => c.partner_id)),
+  ].filter(Boolean) as string[]
+
+  const profileByUserId = new Map<
+    string,
+    { name: string; avatar_url: string | null }
+  >()
+
+  if (partnerIdsForLookup.length > 0) {
+    const { data: rows, error: profileError } = await supabase
+      .from('portfolios')
+      .select('user_id, metadata')
+      .eq('type', 'human')
+      .in('user_id', partnerIdsForLookup)
+
+    if (profileError) {
+      console.error('[getConversationsForUserWithClient] Partner profiles:', profileError.message)
+    }
+
+    for (const row of rows || []) {
+      const uid = String((row as { user_id: string }).user_id)
+      const metadata = ((row as { metadata: unknown }).metadata as Record<string, unknown>) || {}
+      const basic = (metadata.basic as Record<string, unknown>) || {}
+      const displayName =
+        (typeof basic.name === 'string' && basic.name.trim()) ||
+        (typeof metadata.username === 'string' && metadata.username.trim()) ||
+        'User'
+      let avatarUrl: string | null =
+        typeof basic.avatar === 'string' && basic.avatar.trim().length > 0
+          ? basic.avatar.trim()
+          : null
+      if (!avatarUrl && typeof metadata.avatar_url === 'string' && metadata.avatar_url.trim()) {
+        avatarUrl = metadata.avatar_url.trim()
       }
+      profileByUserId.set(uid, { name: displayName, avatar_url: avatarUrl })
+    }
+  }
+
+  const conversationsWithNames: ConversationSummary[] = filteredConversations.map(
+    (conv) => {
+      const p = profileByUserId.get(conv.partner_id)
       return {
         ...conv,
-        partner_name: 'User',
-        partner_avatar_url: null,
+        partner_name: p?.name ?? 'User',
+        partner_avatar_url: p?.avatar_url ?? null,
       }
-    })
+    }
   )
 
-  return conversationsWithNames as ConversationSummary[]
+  return conversationsWithNames
 }
 
 export async function getConversationsForUser(userId: string, tab: MessagesTab) {

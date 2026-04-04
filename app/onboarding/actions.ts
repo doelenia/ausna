@@ -110,9 +110,9 @@ export async function generateOnboardingOpenCallDraft(): Promise<GenerateOnboard
     const profileDescription = (metadata.basic?.description as string | undefined)?.trim() ?? ''
     const profileName = (metadata.basic?.name as string | undefined)?.trim() || 'this person'
 
-    if (!profileDescription) {
-      return { success: false, error: 'Please add your profile description first.' }
-    }
+    const userPrompt = profileDescription
+      ? `Create a personalized open call title and description for ${profileName} based on this profile description:\n\n${profileDescription}`
+      : `Create a friendly, generic open call title and description for ${profileName} who is new on the platform and has not written a profile description yet. Keep it welcoming and open-ended.`
 
     const { openai } = await import('@/lib/openai/client')
     const completion = await openai.chat.completions.create({
@@ -126,7 +126,7 @@ export async function generateOnboardingOpenCallDraft(): Promise<GenerateOnboard
         },
         {
           role: 'user',
-          content: `Create a personalized open call title and description for ${profileName} based on this profile description:\n\n${profileDescription}`,
+          content: userPrompt,
         },
       ],
     })
@@ -211,7 +211,7 @@ export interface AgreeToLegalResult {
 }
 
 /** Record agreement to current Terms and Privacy for the current user. */
-/** Get current user's human portfolio for onboarding forms (profile, availability). */
+/** Get current user's human portfolio for onboarding forms (profile). */
 export async function getMyHumanPortfolioForOnboarding(): Promise<{
   success: boolean
   portfolio?: { id: string; user_id: string; metadata: HumanPortfolioMetadata }
@@ -277,7 +277,6 @@ export async function saveOnboardingProfile(formData: FormData): Promise<SaveOnb
     const avatarFile = (formData.get('avatar') as File | null) ?? null
 
     if (!name) return { success: false, error: 'Name is required' }
-    if (!description) return { success: false, error: 'Description is required' }
 
     const portfolio = await ensureHumanPortfolio(user.id)
     const meta = (portfolio.metadata ?? {}) as HumanPortfolioMetadata

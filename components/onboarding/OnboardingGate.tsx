@@ -9,13 +9,10 @@ import {
   setJoinCommunitySeen,
   getMyHumanPortfolioForOnboarding,
   saveOnboardingProfile,
-  saveOnboardingAvailabilitySchedule,
   completeOpenCallsOnboarding,
   generateOnboardingOpenCallDraft,
 } from '@/app/onboarding/actions'
 import { applyToActivityCallToJoin } from '@/app/portfolio/[idOrSlug]/actions'
-import type { HumanAvailabilitySchedule } from '@/types/portfolio'
-import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { Title, Content, UIText, Button, Card, UIButtonText, UserAvatar } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { DoorOpen } from 'lucide-react'
@@ -35,92 +32,11 @@ import {
   startOfDay,
 } from 'date-fns'
 
-const HUMAN_AVAILABILITY_DAYS: Array<keyof HumanAvailabilitySchedule> = [
-  'monday',
-  'tuesday',
-  'wednesday',
-  'thursday',
-  'friday',
-  'saturday',
-  'sunday',
-]
-
-const HUMAN_AVAILABILITY_DAY_LABELS: Record<keyof HumanAvailabilitySchedule, string> = {
-  monday: 'Mon',
-  tuesday: 'Tue',
-  wednesday: 'Wed',
-  thursday: 'Thu',
-  friday: 'Fri',
-  saturday: 'Sat',
-  sunday: 'Sun',
-}
-
 const OPEN_CALL_NEVER_ENDS_WARNING = 'Setting never ends might lower the priority for broadcasting.'
 const HUMAN_DESCRIPTION_HELP_TEXT =
   'Tell us a bit about what you’re working on, what you care about, and what kinds of opportunities you’d like to find. You can also add links to projects, portfolios, websites, or other work that represents you (please do not put LinkedIn links here).\n\nThis helps us recommend more relevant opportunities to you.'
 const HUMAN_DESCRIPTION_PLACEHOLDER =
   'Student into climate tech, design, and community projects. Also love cafes, creative ideas, and meeting people. Currently working on hackathons and startup-related projects in Tokyo. Looking for collaborators!'
-
-function createDefaultAvailabilitySchedule(): HumanAvailabilitySchedule {
-  const schedule: HumanAvailabilitySchedule = {}
-  for (const day of HUMAN_AVAILABILITY_DAYS) {
-    schedule[day] = { enabled: false }
-  }
-  return schedule
-}
-
-function createSuggestedAvailabilitySchedule(): HumanAvailabilitySchedule {
-  const schedule = createDefaultAvailabilitySchedule()
-  for (const day of ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as Array<
-    keyof HumanAvailabilitySchedule
-  >) {
-    schedule[day] = { enabled: true, startTime: '18:00', endTime: '21:00' }
-  }
-  for (const day of ['saturday', 'sunday'] as Array<keyof HumanAvailabilitySchedule>) {
-    schedule[day] = { enabled: true, startTime: '10:00', endTime: '21:00' }
-  }
-  return schedule
-}
-
-function cloneAvailabilitySchedule(
-  schedule: HumanAvailabilitySchedule | null | undefined
-): HumanAvailabilitySchedule {
-  if (!schedule) return createDefaultAvailabilitySchedule()
-  const next: HumanAvailabilitySchedule = {}
-  for (const day of HUMAN_AVAILABILITY_DAYS) {
-    const value = schedule[day]
-    if (value) {
-      next[day] = {
-        enabled: Boolean(value.enabled),
-        ...(value.startTime ? { startTime: value.startTime } : {}),
-        ...(value.endTime ? { endTime: value.endTime } : {}),
-      }
-    } else {
-      next[day] = { enabled: false }
-    }
-  }
-  return next
-}
-
-function hasAnyAvailabilityEnabled(schedule: HumanAvailabilitySchedule | null | undefined): boolean {
-  if (!schedule) return false
-  return HUMAN_AVAILABILITY_DAYS.some((day) => schedule[day]?.enabled === true)
-}
-
-function getAvailabilityValidationError(
-  schedule: HumanAvailabilitySchedule | null | undefined
-): string | null {
-  if (!schedule) return null
-  for (const day of HUMAN_AVAILABILITY_DAYS) {
-    const value = schedule[day]
-    if (!value) continue
-    const { startTime, endTime } = value
-    if (startTime && endTime && endTime <= startTime) {
-      return `End time must be after start time (${HUMAN_AVAILABILITY_DAY_LABELS[day]})`
-    }
-  }
-  return null
-}
 
 interface OnboardingGateProps {
   initialStatus: OnboardingStatus
@@ -154,16 +70,7 @@ export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
     }
   }, [status.incompleteStepIds.length])
 
-  const allSteps = status.steps
-  const totalSteps = allSteps.length
   const currentStepId = incompleteStepIds[0] ?? null
-  const currentStepIndexInAll = currentStepId
-    ? allSteps.findIndex((s) => s.id === currentStepId)
-    : totalSteps - 1
-  const currentStepNumber = currentStepIndexInAll >= 0 ? currentStepIndexInAll + 1 : totalSteps
-  const completedCount = allSteps.filter((s) => s.complete).length
-  const progress =
-    totalSteps > 0 ? Math.min(1, Math.max(0, completedCount / totalSteps)) : 1
 
   const isComplete = incompleteStepIds.length === 0
   const shouldShowCompletion = isComplete && sawIncompleteOnce && !dismissed
@@ -175,22 +82,6 @@ export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
       <div className="flex-1 overflow-auto p-4 md:p-6">
         {shouldShowCompletion ? (
           <div className="max-w-xl mx-auto">
-            <div className="mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <UIText className="text-gray-700">
-                  Step {totalSteps} of {totalSteps}
-                </UIText>
-                <UIText className="text-gray-500">
-                  {totalSteps} of {totalSteps} completed
-                </UIText>
-              </div>
-              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all"
-                  style={{ width: '100%' }}
-                />
-              </div>
-            </div>
             <div className="pt-8 mb-6 text-center">
               <Title as="h1">Welcome to Ausna!</Title>
             </div>
@@ -210,30 +101,11 @@ export function OnboardingGate({ initialStatus }: OnboardingGateProps) {
           </div>
         ) : (
           <>
-            <div className="max-w-xl mx-auto mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <UIText className="text-gray-700">
-                  Step {currentStepNumber} of {totalSteps}
-                </UIText>
-                <UIText className="text-gray-500">
-                  {completedCount} of {totalSteps} completed
-                </UIText>
-              </div>
-              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 rounded-full transition-all"
-                  style={{ width: `${progress * 100}%` }}
-                />
-              </div>
-            </div>
             {currentStepId === 'legal' && (
               <OnboardingLegalStep onComplete={refetch} />
             )}
             {currentStepId === 'profile' && (
               <OnboardingProfileStep onComplete={refetch} />
-            )}
-            {currentStepId === 'availabilities' && (
-              <OnboardingAvailabilitiesStep onComplete={refetch} />
             )}
             {currentStepId === 'join_community' && (
               <OnboardingJoinCommunityStep onComplete={refetch} />
@@ -681,13 +553,13 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
     e.preventDefault()
     const trimmedName = name.trim()
     const trimmedDesc = description.trim()
-    if (!trimmedName || !trimmedDesc) {
-      setError('Name and description are required.')
+    if (!trimmedName) {
+      setError('Name is required.')
       return
     }
     const hasAvatar = !!(avatarFile || avatarPreview || initialAvatarUrl)
     if (!hasAvatar) {
-      setError('Please add a profile photo (avatar).')
+      setError('Please add a profile photo.')
       return
     }
     setLoading(true)
@@ -725,40 +597,16 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
         Complete your profile
       </Title>
       <Content className="mb-4">
-        Add your name, a short description, and a profile photo.
+        Add your name and profile photo to continue. Fields marked with{' '}
+        <span className="text-danger-600" aria-hidden="true">
+          *
+        </span>{' '}
+        are required; everything else is optional.
       </Content>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <UIText as="label" className="block mb-1">
-            Name
-          </UIText>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-            required
-          />
-        </div>
-        <div>
-          <UIText as="label" className="block mb-1">
-            Description
-          </UIText>
-          <UIText as="p" className="text-xs text-gray-500 mb-1">
-            {HUMAN_DESCRIPTION_HELP_TEXT}
-          </UIText>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            placeholder={HUMAN_DESCRIPTION_PLACEHOLDER}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-            required
-          />
-        </div>
-        <div>
-          <UIText as="label" className="block mb-1">
-            Profile photo
+            Profile photo <span className="text-danger-600" aria-hidden="true">*</span>
           </UIText>
           <input
             type="file"
@@ -774,169 +622,37 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
             />
           )}
         </div>
-        {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-            <UIText className="text-red-700">{error}</UIText>
-          </div>
-        )}
-        <Button type="submit" variant="primary" disabled={loading}>
-          <UIText>{loading ? 'Saving...' : 'Save'}</UIText>
-        </Button>
-      </form>
-    </Card>
-  )
-}
-
-function OnboardingAvailabilitiesStep({ onComplete }: { onComplete: () => void }) {
-  const [schedule, setSchedule] = useState<HumanAvailabilitySchedule>(createSuggestedAvailabilitySchedule())
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
-  const [profileUserId, setProfileUserId] = useState<string | null>(null)
-  const availabilityValidationError = getAvailabilityValidationError(schedule)
-
-  useEffect(() => {
-    let cancelled = false
-    getMyHumanPortfolioForOnboarding().then((res) => {
-      if (cancelled || !res.success || !res.portfolio) return
-      const props = res.portfolio.metadata?.properties
-      const existing = props?.availability_schedule
-      if (existing && typeof existing === 'object' && hasAnyAvailabilityEnabled(existing as any)) {
-        setSchedule(cloneAvailabilitySchedule(existing as HumanAvailabilitySchedule))
-      } else {
-        setSchedule(createSuggestedAvailabilitySchedule())
-      }
-      setProfileUserId(res.portfolio.user_id ?? null)
-      setLoaded(true)
-    })
-    return () => { cancelled = true }
-  }, [])
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (availabilityValidationError) {
-      setError(availabilityValidationError)
-      return
-    }
-    if (!hasAnyAvailabilityEnabled(schedule)) {
-      setError('Please enable at least one day.')
-      return
-    }
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await saveOnboardingAvailabilitySchedule(JSON.stringify(schedule))
-      if (!result.success) {
-        setError(result.error ?? 'Failed to save.')
-        setLoading(false)
-        return
-      }
-      onComplete()
-    } catch (err) {
-      setError('An unexpected error occurred.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (!loaded) {
-    return (
-      <Card variant="spacious" className="max-w-xl mx-auto">
-        <UIText>Loading...</UIText>
-      </Card>
-    )
-  }
-
-  return (
-    <Card variant="spacious" className="max-w-xl mx-auto">
-      <Title as="h1" className="mb-2">
-        Set your availability
-      </Title>
-      <Content className="mb-4">
-        Your availability helps us recommend better activity opportunities. Start with our suggested
-        schedule and adjust it as needed. You can edit this later in{' '}
-        {profileUserId ? (
-          <Link
-            href={getHumanProfileUrl(profileUserId)}
-            className="text-blue-600 hover:underline"
-          >
-            Edit Profile
-          </Link>
-        ) : (
-          'Edit Profile'
-        )}
-        .
-      </Content>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {HUMAN_AVAILABILITY_DAYS.map((dayKey) => {
-          const value = schedule[dayKey] || { enabled: false }
-          const label = HUMAN_AVAILABILITY_DAY_LABELS[dayKey]
-          return (
-            <div key={dayKey} className="flex flex-col gap-1 border-b border-gray-100 pb-3 last:border-b-0">
-              <div className="flex items-center gap-2">
-                <input
-                  id={`avail-${dayKey}`}
-                  type="checkbox"
-                  checked={value.enabled}
-                  onChange={(e) => {
-                    const next = cloneAvailabilitySchedule(schedule)
-                    next[dayKey] = {
-                      ...(next[dayKey] || { enabled: false }),
-                      enabled: e.target.checked,
-                    }
-                    setSchedule(next)
-                  }}
-                  className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <UIText as="label" htmlFor={`avail-${dayKey}`}>
-                  {label}
-                </UIText>
-              </div>
-              {value.enabled && (
-                <div className="mt-1 flex flex-col md:flex-row md:items-center gap-2 md:gap-3">
-                  <div className="flex items-center gap-2">
-                    <UIText as="span" className="text-xs text-gray-500">
-                      From
-                    </UIText>
-                    <input
-                      type="time"
-                      value={value.startTime || ''}
-                      onChange={(e) => {
-                        const next = cloneAvailabilitySchedule(schedule)
-                        const current = next[dayKey] || { enabled: true }
-                        next[dayKey] = {
-                          ...current,
-                          startTime: e.target.value || undefined,
-                        }
-                        setSchedule(next)
-                      }}
-                      className="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <UIText as="span" className="text-xs text-gray-500">
-                      To
-                    </UIText>
-                    <input
-                      type="time"
-                      value={value.endTime || ''}
-                      onChange={(e) => {
-                        const next = cloneAvailabilitySchedule(schedule)
-                        const current = next[dayKey] || { enabled: true }
-                        next[dayKey] = {
-                          ...current,
-                          endTime: e.target.value || undefined,
-                        }
-                        setSchedule(next)
-                      }}
-                      className="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
+        <div>
+          <UIText as="label" className="block mb-1">
+            Name <span className="text-danger-600" aria-hidden="true">*</span>
+          </UIText>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+            required
+            aria-required="true"
+          />
+        </div>
+        <div>
+          <UIText as="label" className="block mb-1">
+            Description{' '}
+            <UIText as="span" className="text-gray-500">
+              (optional)
+            </UIText>
+          </UIText>
+          <UIText as="p" className="text-xs text-gray-500 mb-1">
+            {HUMAN_DESCRIPTION_HELP_TEXT}
+          </UIText>
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={3}
+            placeholder={HUMAN_DESCRIPTION_PLACEHOLDER}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+          />
+        </div>
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-md">
             <UIText className="text-red-700">{error}</UIText>

@@ -1,17 +1,16 @@
 'use client'
 
 import { useEffect, useState, Suspense } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
-import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { Title, Content, UIText, UIButtonText, Dropdown } from '@/components/ui'
 import { MessagesInboxSkeleton } from '@/components/main/MessagesInboxSkeleton'
+import { getInboxListCache, putInboxListCache } from '@/lib/messages/inboxListCache'
 import { Archive } from 'lucide-react'
 
 interface Conversation {
   partner_id: string
   partner_name?: string
+  partner_avatar_url?: string | null
   last_message: {
     id: string
     sender_id: string
@@ -27,92 +26,44 @@ interface Conversation {
   status_message?: string | null
 }
 
-interface PartnerInfo {
-  id: string
-  name: string
-  avatar: string
-}
-
 function MessagesPageContent() {
-  const router = useRouter()
   const [conversations, setConversations] = useState<Conversation[]>([])
-  const [partnerInfos, setPartnerInfos] = useState<Map<string, PartnerInfo>>(
-    new Map()
-  )
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'invitations' | 'active'>('active')
   const [inviteUnreadCount, setInviteUnreadCount] = useState(0)
   const [activeUnreadCount, setActiveUnreadCount] = useState(0)
-  const supabase = createClient()
-  const portfolioHelpers = createHumanPortfolioHelpers(supabase)
 
-  const loadPartnerInfo = async (userId: string) => {
-    try {
-      const portfolio = await portfolioHelpers.getHumanPortfolio(userId)
-      if (portfolio) {
-        const metadata = portfolio.metadata as any
-        const basic = metadata?.basic || {}
-        // Prioritize basic.name from human portfolio, fallback to username
-        const displayName = basic.name || metadata?.username || 'User'
-        const avatarUrl = basic?.avatar || metadata?.avatar_url
-        const finalAvatarUrl =
-          avatarUrl ||
-          `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
-
-        setPartnerInfos((prev) => {
-          const newMap = new Map(prev)
-          newMap.set(userId, {
-            id: userId,
-            name: displayName,
-            avatar: finalAvatarUrl,
-          })
-          return newMap
-        })
-      }
-    } catch (error) {
-      console.error('Error loading partner info:', error)
+  const applyConversationsPayload = (
+    tab: 'invitations' | 'active',
+    list: Conversation[]
+  ) => {
+    setConversations(list)
+    const total = list.reduce((sum, c) => sum + (c.unread_count || 0), 0)
+    if (tab === 'invitations') {
+      setInviteUnreadCount(total)
+    } else {
+      setActiveUnreadCount(total)
     }
   }
 
   const loadConversations = async (tab: 'invitations' | 'active' = activeTab) => {
+    const warm = getInboxListCache(tab) as Conversation[] | null
+    if (warm != null) {
+      applyConversationsPayload(tab, warm)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+
     try {
       const response = await fetch(`/api/messages?tab=${tab}`)
       if (!response.ok) {
         throw new Error('Failed to load conversations')
       }
       const data = await response.json()
-      setConversations(data.conversations || [])
-
-      if (tab === 'invitations') {
-        const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
-        setInviteUnreadCount(total)
-      } else {
-        const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
-        setActiveUnreadCount(total)
-      }
-
-      // Load partner info for each conversation
-      const infos = new Map<string, PartnerInfo>(partnerInfos)
-      for (const conv of data.conversations || []) {
-        if (!infos.has(conv.partner_id)) {
-          try {
-            const portfolio = await portfolioHelpers.getHumanPortfolio(conv.partner_id)
-            if (portfolio) {
-              const metadata = portfolio.metadata as any
-              const basic = metadata?.basic || {}
-              const displayName = basic.name || metadata?.username || 'User'
-              const avatarUrl = basic?.avatar || metadata?.avatar_url
-              const finalAvatarUrl =
-                avatarUrl ||
-                `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
-              infos.set(conv.partner_id, { id: conv.partner_id, name: displayName, avatar: finalAvatarUrl })
-            }
-          } catch (error) {
-            console.error('Error loading partner info:', error)
-          }
-        }
-      }
-      setPartnerInfos(infos)
+      const list = (data.conversations || []) as Conversation[]
+      applyConversationsPayload(tab, list)
+      putInboxListCache(tab, list)
     } catch (error) {
       console.error('Error loading conversations:', error)
     } finally {
@@ -122,12 +73,19 @@ function MessagesPageContent() {
 
   // Fetch invite unread count on mount so Invite tab can show red dot without switching tabs
   const loadInviteUnreadCount = async () => {
+    const warm = getInboxListCache('invitations') as Conversation[] | null
+    if (warm != null) {
+      const total = warm.reduce((sum, c) => sum + (c.unread_count || 0), 0)
+      setInviteUnreadCount(total)
+    }
     try {
       const response = await fetch('/api/messages?tab=invitations')
       if (response.ok) {
         const data = await response.json()
-        const total = (data.conversations || []).reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
+        const list = (data.conversations || []) as Conversation[]
+        const total = list.reduce((sum: number, c: any) => sum + (c.unread_count || 0), 0)
         setInviteUnreadCount(total)
+        putInboxListCache('invitations', list)
       }
     } catch {
       // ignore
@@ -232,10 +190,10 @@ function MessagesPageContent() {
           ) : (
             <div className="space-y-2">
               {conversations.map((conv: any) => {
-                const partnerInfo = partnerInfos.get(conv.partner_id)
-                const displayName = partnerInfo?.name || 'User'
+                const displayName =
+                  (typeof conv.partner_name === 'string' && conv.partner_name.trim()) || 'User'
                 const avatarUrl =
-                  partnerInfo?.avatar ||
+                  (typeof conv.partner_avatar_url === 'string' && conv.partner_avatar_url.trim()) ||
                   `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`
 
                 const last = conv.last_message
@@ -364,11 +322,7 @@ function MessagesPageContent() {
 
 export default function MessagesPage() {
   return (
-    <Suspense fallback={
-      <div className="bg-white shadow rounded-lg p-6">
-        <div className="text-center"><Content>Loading...</Content></div>
-      </div>
-    }>
+    <Suspense fallback={<MessagesInboxSkeleton />}>
       <MessagesPageContent />
     </Suspense>
   )
