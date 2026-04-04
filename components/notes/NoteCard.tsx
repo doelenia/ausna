@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import ReactDOM from 'react-dom'
 import { Note, NoteReference, ImageReference, UrlReference, NoteSource, type NoteVisibility } from '@/types/note'
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Portfolio, isHumanPortfolio } from '@/types/portfolio'
@@ -543,6 +543,29 @@ export function NoteCard({
       }
     }
   }, [isOpenCall, isResource, showComments, commentsLoaded, isViewMode, note.id])
+
+  // Prefetch note route when the card nears the viewport (complements router.push on click).
+  useLayoutEffect(() => {
+    if (disableNavigation || isViewMode || isOpenCallPreview) return
+    const el = cardRef.current
+    if (!el) return
+    let done = false
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting || done) return
+        done = true
+        try {
+          router.prefetch(`/notes/${note.id}`)
+        } catch {
+          /* noop */
+        }
+        observer.disconnect()
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [disableNavigation, isViewMode, isOpenCallPreview, note.id, router])
 
   // Load like reactions (top 5) when note changes (skip for open call)
   useEffect(() => {

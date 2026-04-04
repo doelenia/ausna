@@ -1,16 +1,24 @@
 'use client'
 
+import { useState } from 'react'
 import { TopNav } from '@/components/main/TopNav'
 import { MobileFeedTopBar } from '@/components/main/MobileFeedTopBar'
 import { ScrollDirectionProvider } from './ScrollDirectionContext'
+import { useAppScrollPersistence } from './useAppScrollPersistence'
 
 export function ContentColumnWithScroll({ children }: { children: React.ReactNode }) {
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null)
+  useAppScrollPersistence(scrollContainerEl)
+
   return (
     <ScrollDirectionProvider>
       {(scrollProps) => (
         <div className="flex-1 min-w-0 flex flex-col h-full relative md:pl-0">
           <div
-            ref={scrollProps.ref}
+            ref={(el) => {
+              setScrollContainerEl(el)
+              scrollProps.ref(el)
+            }}
             onScroll={scrollProps.onScroll}
             className="h-full overflow-auto w-full app-scroll flex-1"
           >

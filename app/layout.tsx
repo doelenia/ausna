@@ -4,8 +4,8 @@ import { TopNav } from '@/components/main/TopNav'
 import { ContentColumnWithScroll } from '@/components/main/ContentColumnWithScroll'
 import { InviteHandler } from '@/components/auth/InviteHandler'
 import { DataCacheProvider } from '@/lib/cache/DataCacheContext'
-import { createClient } from '@/lib/supabase/server'
-import { getOnboardingStatus } from '@/lib/onboarding/status'
+import { getServerSessionUser } from '@/lib/auth/getServerSessionUser'
+import { getCachedOnboardingStatus } from '@/lib/onboarding/status-cached'
 import { OnboardingGate } from '@/components/onboarding/OnboardingGate'
 import { EmailVerificationBanner } from '@/components/auth/EmailVerificationBanner'
 
@@ -19,14 +19,11 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  let initialOnboardingStatus: Awaited<ReturnType<typeof getOnboardingStatus>> | null = null
+  const user = await getServerSessionUser()
+  let initialOnboardingStatus: Awaited<ReturnType<typeof getCachedOnboardingStatus>> | null = null
   if (user) {
     try {
-      initialOnboardingStatus = await getOnboardingStatus(user.id)
+      initialOnboardingStatus = await getCachedOnboardingStatus(user.id)
     } catch (e: any) {
       if (process.env.NODE_ENV === 'development') {
         console.error('Failed to load onboarding status:', e)

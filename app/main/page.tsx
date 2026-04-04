@@ -1,7 +1,4 @@
-// Force dynamic rendering to ensure fresh auth state
-export const dynamic = 'force-dynamic'
-
-import { createClient } from '@/lib/supabase/server'
+import { getServerSessionUser } from '@/lib/auth/getServerSessionUser'
 import { FeedView } from '@/components/main/FeedView'
 
 export default async function MainPage({
@@ -9,10 +6,7 @@ export default async function MainPage({
 }: {
   searchParams?: { showOpenCalls?: string | string[] }
 }) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getServerSessionUser()
 
   const raw = searchParams?.showOpenCalls
   const showOpenCalls =

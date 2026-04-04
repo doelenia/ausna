@@ -110,6 +110,7 @@ export function Button({
   className: customClassName = '',
   children,
   disabled,
+  onClick,
   ...props
 }: ButtonProps) {
   const classes = [
@@ -130,14 +131,18 @@ export function Button({
     // Remove disabled-related classes for links
     const linkClasses = classes.replace('disabled:opacity-50 disabled:cursor-not-allowed', '')
     return (
-      <Link href={href} className={linkClasses}>
+      <Link
+        href={href}
+        className={linkClasses}
+        onClick={onClick as React.MouseEventHandler<HTMLAnchorElement> | undefined}
+      >
         {processedChildren}
       </Link>
     )
   }
 
   return (
-    <button className={classes} disabled={disabled} {...props}>
+    <button className={classes} disabled={disabled} onClick={onClick} {...props}>
       {processedChildren}
     </button>
   )
