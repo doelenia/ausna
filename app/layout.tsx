@@ -8,6 +8,7 @@ import { getServerSessionUser } from '@/lib/auth/getServerSessionUser'
 import { getCachedOnboardingStatus } from '@/lib/onboarding/status-cached'
 import { OnboardingGate } from '@/components/onboarding/OnboardingGate'
 import { EmailVerificationBanner } from '@/components/auth/EmailVerificationBanner'
+import { NavRouteWarmup } from '@/components/main/NavRouteWarmup'
 
 export const metadata: Metadata = {
   title: 'Ausna - Creative Community',
@@ -39,6 +40,7 @@ export default async function RootLayout({
       <body className="light bg-white text-gray-900">
         <DataCacheProvider>
           <InviteHandler />
+          <NavRouteWarmup />
           <EmailVerificationBanner />
           {user && initialOnboardingStatus && (
             <OnboardingGate initialStatus={initialOnboardingStatus} />
