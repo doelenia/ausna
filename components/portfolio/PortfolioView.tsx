@@ -1080,10 +1080,10 @@ export function PortfolioView({
     return `${monthDay} ${weekday}`
   }
 
+  // Spaces list for overview / feed / spaces tabs: depend only on API path, not activeTab,
+  // so switching tabs does not refetch the same list.
   useEffect(() => {
     if (!shouldShowSpacesTab) return
-    // Also fetch on Feed tab so the top row can load in parallel with the notes feed.
-    if (activeTab !== 'spaces' && activeTab !== 'overview' && activeTab !== 'feed') return
 
     let cancelled = false
     setSpacesLoading(true)
@@ -1110,7 +1110,7 @@ export function PortfolioView({
     return () => {
       cancelled = true
     }
-  }, [activeTab, shouldShowSpacesTab, spacesApiPath])
+  }, [shouldShowSpacesTab, spacesApiPath])
 
   useEffect(() => {
     if (!currentUserId) return
@@ -1167,10 +1167,14 @@ export function PortfolioView({
     }
   }, [spacesList])
 
+  const needsPortfolioFeedRowData = activeTab === 'overview' || activeTab === 'feed'
+
   // Feed tab row: unread counts + subscription status for indicators (load in parallel with feed below).
   useEffect(() => {
-    // Also load for Overview tab so the spaces row uses the same tiles as Feed.
-    if (activeTab !== 'feed' && activeTab !== 'overview') return
+    if (!needsPortfolioFeedRowData) {
+      feedRowUnreadFetchKeyRef.current = ''
+      return
+    }
     if (!currentUserId) return
     if (!spacesList || spacesList.length === 0) {
       setFeedRowUnreadBySpaceId({})
@@ -1249,7 +1253,7 @@ export function PortfolioView({
     return () => {
       cancelled = true
     }
-  }, [activeTab, currentUserId, spacesList, supabase])
+  }, [needsPortfolioFeedRowData, currentUserId, spacesList, supabase])
 
   const userIsInSpace = (space: SpacesApiPortfolio, userId: string): boolean => {
     if (!userId) return false

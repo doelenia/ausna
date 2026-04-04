@@ -58,6 +58,13 @@ function mainFeedTopRowRecencyMs(item: MainFeedTopRowItem): number {
   return Number.isNaN(t) ? 0 : t
 }
 
+const MAIN_FEED_TOP_ROW_CACHE_TTL_MS = 90_000
+let mainFeedTopRowCacheEntry: {
+  userId: string
+  savedAt: number
+  items: MainFeedTopRowItem[]
+} | null = null
+
 export function FeedView({
   currentUserId,
   apiPath = '/api/feed',
@@ -168,22 +175,19 @@ export function FeedView({
           }
         }
 
-        // Mark notes as seen (only for logged-in users)
+        // Mark notes as seen (only for logged-in users) — non-blocking so UI is not delayed.
         if (currentUserId) {
           const noteIds = newItems.filter((i) => i.kind === 'note').map((i: any) => i.note.id)
-          try {
-            if (noteIds.length > 0) {
-              await fetch('/api/feed/seen', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ noteIds }),
-              })
-            }
-          } catch (err) {
-            // Don't fail if marking as seen fails
-            console.error('Failed to mark notes as seen:', err)
+          if (noteIds.length > 0) {
+            void fetch('/api/feed/seen', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ noteIds }),
+            }).catch((err) => {
+              console.error('Failed to mark notes as seen:', err)
+            })
           }
         }
 
@@ -359,6 +363,19 @@ export function FeedView({
     let cancelled = false
 
     const run = async () => {
+      const now = Date.now()
+      const hit =
+        mainFeedTopRowCacheEntry &&
+        mainFeedTopRowCacheEntry.userId === currentUserId &&
+        now - mainFeedTopRowCacheEntry.savedAt < MAIN_FEED_TOP_ROW_CACHE_TTL_MS
+      if (hit && mainFeedTopRowCacheEntry) {
+        if (!cancelled) {
+          setTopRowItems(mainFeedTopRowCacheEntry.items)
+          setTopRowLoading(false)
+        }
+        return
+      }
+
       try {
         if (!cancelled) setTopRowLoading(true)
         // Kick off the base queries in parallel.
@@ -502,7 +519,15 @@ export function FeedView({
         const withoutUnread = combined
           .filter((x) => x.unread === 0)
           .sort((a, b) => mainFeedTopRowRecencyMs(b) - mainFeedTopRowRecencyMs(a))
-        setTopRowItems([...withUnread, ...withoutUnread])
+        const nextTop = [...withUnread, ...withoutUnread]
+        if (!cancelled) {
+          setTopRowItems(nextTop)
+          mainFeedTopRowCacheEntry = {
+            userId: currentUserId,
+            savedAt: Date.now(),
+            items: nextTop,
+          }
+        }
       } catch {
         if (!cancelled) {
           setTopRowItems([])

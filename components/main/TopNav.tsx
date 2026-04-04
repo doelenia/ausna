@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-auth'
 import Link from 'next/link'
@@ -16,7 +15,6 @@ import { buildLoginHref } from '@/lib/auth/login-redirect'
 type TopNavVariant = 'sidebar' | 'bottom'
 
 export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
-  const router = useRouter()
   const [user, setUser] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [sessionExpiredMessage, setSessionExpiredMessage] = useState(false)
@@ -461,19 +459,17 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
               <div className="flex flex-col gap-3 mb-4">
                 <Button
                   variant="primary"
-                  onClick={() => {
-                    setShowCreateMenu(false)
-                    router.push('/notes/create/open-call')
-                  }}
+                  asLink
+                  href="/notes/create/open-call"
+                  onClick={() => setShowCreateMenu(false)}
                 >
                   <UIText>Open call</UIText>
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={() => {
-                    setShowCreateMenu(false)
-                    router.push('/notes/create')
-                  }}
+                  asLink
+                  href="/notes/create"
+                  onClick={() => setShowCreateMenu(false)}
                 >
                   <UIText>New note</UIText>
                 </Button>
