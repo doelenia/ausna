@@ -24,8 +24,9 @@ export function MobileFeedTopBar({ children }: { children: React.ReactNode }) {
           transform: topBarVisible ? 'translateY(0)' : 'translateY(-100%)',
         }}
       >
-        <div className="w-full pointer-events-auto" style={{ maxWidth: 'var(--max-content-width)' }}>
-          <div className="bg-gray-50 relative flex items-center justify-end h-16 px-4">
+        <div className="w-full" style={{ maxWidth: 'var(--max-content-width)' }}>
+          {/* pointer-events only on the bar — not the fade strip — so content under the gradient stays tappable */}
+          <div className="pointer-events-auto bg-gray-50 relative flex items-center justify-end h-16 px-4">
             <div className="absolute left-0 right-0 flex justify-center pointer-events-none">
               <UIText>
                 {pathname === '/main' ? 'Feeds' : 'Explore'}
