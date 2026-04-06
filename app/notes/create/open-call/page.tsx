@@ -35,14 +35,14 @@ export default async function CreateOpenCallPage({ searchParams }: CreateOpenCal
   }
 
   if (searchParams.portfolio && !sourcePortfolio) {
-    redirect('/space')
+    redirect('/spaces')
   }
 
   if (sourcePortfolio) {
     const { isPortfolioMember } = await import('@/lib/notes/helpers')
     const isMember = await isPortfolioMember(sourcePortfolio.id, user.id)
     if (!isMember) {
-      redirect('/space')
+      redirect('/spaces')
     }
   }
 

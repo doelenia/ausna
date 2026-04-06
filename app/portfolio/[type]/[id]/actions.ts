@@ -631,6 +631,7 @@ export async function updatePortfolio(
               .in('type', [...DB_NON_HUMAN_TYPES])
               .in('id', ids)
             if (projects?.length) {
+              const allowedIds = new Set<string>()
               for (const proj of projects) {
                 const hostMeta = (proj.metadata as any) || {}
                 const managers: string[] = hostMeta?.managers || []
@@ -641,10 +642,18 @@ export async function updatePortfolio(
                 const isMember = Array.isArray(members) && members.includes(user.id)
                 const allowed = isOwner || isManager || (permission === 'members' && isMember)
                 if (allowed) {
-                  resolvedHostProjectIds.push(proj.id)
+                  allowedIds.add(String(proj.id))
                 }
               }
-              resolvedHostProjectIds = [...new Set(resolvedHostProjectIds)]
+              // Preserve client order (first host = primary). DB `.in()` row order is undefined.
+              const seen = new Set<string>()
+              for (const rawId of ids) {
+                const id = String(rawId)
+                if (allowedIds.has(id) && !seen.has(id)) {
+                  seen.add(id)
+                  resolvedHostProjectIds.push(id)
+                }
+              }
             }
           }
         } catch {
@@ -670,16 +679,24 @@ export async function updatePortfolio(
               .in('type', [...DB_NON_HUMAN_TYPES])
               .in('id', ids)
             if (communities?.length) {
+              const allowedIds = new Set<string>()
               for (const comm of communities) {
                 const hostMeta = (comm.metadata as any) || {}
                 const managers: string[] = hostMeta?.managers || []
                 const isOwner = comm.user_id === user.id
                 const isManager = Array.isArray(managers) && managers.includes(user.id)
                 if (isOwner || isManager) {
-                  resolvedHostCommunityIds.push(comm.id)
+                  allowedIds.add(String(comm.id))
                 }
               }
-              resolvedHostCommunityIds = [...new Set(resolvedHostCommunityIds)]
+              const seen = new Set<string>()
+              for (const rawId of ids) {
+                const id = String(rawId)
+                if (allowedIds.has(id) && !seen.has(id)) {
+                  seen.add(id)
+                  resolvedHostCommunityIds.push(id)
+                }
+              }
             }
           }
         } catch {

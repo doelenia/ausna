@@ -444,6 +444,7 @@ export async function createPortfolio(
         }
       }
 
+      const allowedIds = new Set<string>()
       for (const proj of projects) {
         const hostMeta = (proj.metadata as any) || {}
         const managers: string[] = hostMeta?.managers || []
@@ -459,10 +460,16 @@ export async function createPortfolio(
             error: 'You must be allowed to host from each selected host space',
           }
         }
-        resolvedHostProjectIds.push(proj.id)
+        allowedIds.add(String(proj.id))
       }
-      // Dedupe and preserve order
-      resolvedHostProjectIds = [...new Set(resolvedHostProjectIds)]
+      const seen = new Set<string>()
+      for (const rawId of hostProjectIds) {
+        const id = String(rawId)
+        if (allowedIds.has(id) && !seen.has(id)) {
+          seen.add(id)
+          resolvedHostProjectIds.push(id)
+        }
+      }
       const activityProps = (metadata.properties || {}) as Record<string, any>
       metadata.properties = { ...activityProps, host_project_ids: resolvedHostProjectIds }
     }
@@ -483,6 +490,7 @@ export async function createPortfolio(
         }
       }
 
+      const allowedCommIds = new Set<string>()
       for (const comm of communities) {
         const hostMeta = (comm.metadata as any) || {}
         const managers: string[] = hostMeta?.managers || []
@@ -494,9 +502,16 @@ export async function createPortfolio(
             error: 'You must be owner or manager of each host community',
           }
         }
-        resolvedHostCommunityIds.push(comm.id)
+        allowedCommIds.add(String(comm.id))
       }
-      resolvedHostCommunityIds = [...new Set(resolvedHostCommunityIds)]
+      const seenComm = new Set<string>()
+      for (const rawId of hostCommunityIds) {
+        const id = String(rawId)
+        if (allowedCommIds.has(id) && !seenComm.has(id)) {
+          seenComm.add(id)
+          resolvedHostCommunityIds.push(id)
+        }
+      }
       const activityProps = (metadata.properties || {}) as Record<string, any>
       metadata.properties = { ...activityProps, host_community_ids: resolvedHostCommunityIds }
     }

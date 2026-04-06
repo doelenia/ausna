@@ -45,7 +45,7 @@ export default async function HumanIndexPage({ searchParams }: HumanIndexPagePro
         <Button asLink href="/human" variant="primary">
           <UIText>Humans</UIText>
         </Button>
-        <Button asLink href="/space" variant="secondary">
+        <Button asLink href="/spaces" variant="secondary">
           <UIText>Spaces</UIText>
         </Button>
       </div>

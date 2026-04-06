@@ -1679,14 +1679,14 @@ export function CreateNoteForm({
           onClick={() => setShowAssignPanel(false)}
         >
           <div
-            className="bg-white rounded-xl w-auto mx-4 max-h-[80vh] overflow-hidden flex flex-col"
+            className="mx-4 flex max-h-[min(80vh,100dvh-2rem)] w-[min(100vw-2rem,42rem)] min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
-            <Card variant="default" padding="sm" className="flex flex-col flex-1 min-h-0">
-              <div className="mb-3">
+            <Card variant="default" padding="sm" className="flex min-h-0 flex-1 flex-col">
+              <div className="mb-3 shrink-0">
                 <UIText>Select a space to add</UIText>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
                 {assignableLoading ? (
                   <div className="py-8 text-center">
                     <UIText className="text-gray-500">Loading...</UIText>

@@ -23,7 +23,7 @@ export interface OnboardingStatus {
 const STEP_LABELS: Record<OnboardingStepId, string> = {
   legal: 'Terms & Privacy',
   profile: 'Profile',
-  join_community: 'Join a space',
+  join_community: 'Join spaces',
   open_calls: 'Open calls',
 }
 
@@ -33,7 +33,8 @@ function isProfileFilled(meta: HumanPortfolioMetadata | null): boolean {
   if (!basic || typeof basic !== 'object') return false
   const name = (basic.name ?? '').toString().trim()
   const avatar = (basic.avatar ?? '').toString().trim()
-  return name.length > 0 && avatar.length > 0
+  const description = (basic.description ?? '').toString().trim()
+  return name.length > 0 && avatar.length > 0 && description.length > 0
 }
 
 /**
@@ -59,8 +60,7 @@ export async function getOnboardingStatus(userId: string): Promise<OnboardingSta
   // - open_calls_setup_complete is false or missing/undefined => incomplete
   const openCallsSetupComplete = onboardingFlagOpenCallsComplete
 
-  const profileComplete =
-    onboarding?.profile_complete === true || isProfileFilled(meta)
+  const profileComplete = isProfileFilled(meta)
   const joinCommunitySeen = onboarding?.join_community_seen === true
   const steps: OnboardingStep[] = [
     { id: 'legal', label: STEP_LABELS.legal, complete: legalComplete },

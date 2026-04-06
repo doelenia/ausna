@@ -3,7 +3,7 @@
 import { Skeleton, SkeletonCard, SkeletonAvatar, SkeletonText } from '@/components/ui/Skeleton'
 import { MessagesInboxSkeleton } from '@/components/main/MessagesInboxSkeleton'
 
-type Variant = 'feed' | 'explore' | 'messages' | 'conversation' | 'portfolio' | 'members'
+type Variant = 'feed' | 'explore' | 'spaces' | 'messages' | 'conversation' | 'portfolio' | 'members'
 
 export function RouteSegmentLoading({ variant = 'feed' }: { variant?: Variant }) {
   if (variant === 'messages') {
@@ -124,20 +124,43 @@ export function RouteSegmentLoading({ variant = 'feed' }: { variant?: Variant })
     )
   }
 
-  // feed (default)
+  if (variant === 'spaces') {
+    return (
+      <div className="px-4 py-6 space-y-4">
+        <SkeletonText lines={1} width="28%" lineHeight={24} />
+        <Skeleton height={40} width="100%" className="rounded-md max-w-xl" />
+        <div className="flex gap-2">
+          <Skeleton height={32} width={64} className="rounded-lg" />
+          <Skeleton height={32} width={88} className="rounded-lg" />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="flex w-[100px] flex-col items-center gap-2">
+              <Skeleton width={80} height={80} rounded="full" />
+              <Skeleton height={10} width={72} />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // feed (default) — match FeedView story row + feed list skeletons (avoid large→compact layout shift)
   return (
     <div className="md:px-10 py-4 space-y-4">
-      <div className="flex items-start gap-4 overflow-hidden px-3 md:px-0">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex flex-col items-center flex-shrink-0 w-48">
-            <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-              <div className="flex flex-col items-center gap-3">
-                <Skeleton width={96} height={96} rounded="full" />
-                <SkeletonText lines={1} width="70%" lineHeight={14} />
-              </div>
+      <div className="mt-3 mb-1 flex items-start gap-2 overflow-x-auto px-3 py-1 md:px-0">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="flex w-[100px] flex-shrink-0 flex-col items-center">
+            <div className="flex w-full flex-col items-center gap-1.5 px-1 py-1.5">
+              <Skeleton width={80} height={80} rounded="full" className="flex-shrink-0" />
+              <Skeleton height={12} width={48} className="rounded" />
             </div>
           </div>
         ))}
+      </div>
+      <div className="mt-6 mb-4 flex items-center gap-2 px-3 md:px-0">
+        <Skeleton width={20} height={20} className="rounded" />
+        <Skeleton height={14} width={72} className="rounded" />
       </div>
       <div className="space-y-4 px-3 md:px-0">
         <SkeletonCard />

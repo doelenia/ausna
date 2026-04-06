@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { DB_NON_HUMAN_TYPES } from '@/types/portfolio'
 import { isJoinablePublicSpaceRow } from '@/lib/portfolio/spaceCapabilities'
+import {
+  fetchViewerPendingSpaceIds,
+  viewerJoinStatusForSpaceRow,
+} from '@/lib/portfolio/viewerJoinStatus'
 
 export const dynamic = 'force-dynamic'
 
@@ -210,6 +214,15 @@ export async function GET(request: NextRequest) {
         ? portfolios.filter((p: any) => (p.type as string)?.toLowerCase() === typeFilter)
         : portfolios
 
+    let pendingRequestIds = new Set<string>()
+    let pendingInviteIds = new Set<string>()
+    if (user && joinableOnly && filteredPortfolios.length > 0) {
+      const ids = filteredPortfolios.map((p: any) => p.id as string)
+      const pending = await fetchViewerPendingSpaceIds(supabase, user.id, ids)
+      pendingRequestIds = pending.pendingRequestIds
+      pendingInviteIds = pending.pendingInviteIds
+    }
+
     // Format results
     const results = filteredPortfolios.map((p: any) => {
       const metadata = p.metadata as any
@@ -226,6 +239,16 @@ export async function GET(request: NextRequest) {
         isPseudo === true ? false :
         isApprovedFromMeta
       
+      const userJoinStatus =
+        user && joinableOnly
+          ? viewerJoinStatusForSpaceRow(
+              { id: p.id, user_id: p.user_id, metadata: p.metadata },
+              user.id,
+              pendingRequestIds,
+              pendingInviteIds
+            )
+          : ('none' as const)
+
       return {
         id: p.id,
         type: p.type,
@@ -239,6 +262,7 @@ export async function GET(request: NextRequest) {
         created_at: p.created_at,
         // Kept name is_approved for backwards compatibility, but it's now is_pseudo-derived
         is_approved: isApproved,
+        userJoinStatus,
       }
     })
     

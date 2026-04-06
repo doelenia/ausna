@@ -277,6 +277,7 @@ export async function saveOnboardingProfile(formData: FormData): Promise<SaveOnb
     const avatarFile = (formData.get('avatar') as File | null) ?? null
 
     if (!name) return { success: false, error: 'Name is required' }
+    if (!description) return { success: false, error: 'Description is required' }
 
     const portfolio = await ensureHumanPortfolio(user.id)
     const meta = (portfolio.metadata ?? {}) as HumanPortfolioMetadata

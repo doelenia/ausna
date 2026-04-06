@@ -383,7 +383,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         /* Desktop: vertical left sidebar, same order top to bottom; centered vertically; more space between buttons */
         <div className="flex flex-1 flex-col items-center justify-center gap-6 py-4 px-2">
           <IconButton icon={Home} href="/main" title="Home" aria-label="Home" />
-          <IconButton icon={Balloon} href="/explore" title="Explore" aria-label="Explore" />
+          <IconButton icon={Balloon} href="/spaces" title="Spaces" aria-label="Spaces" />
           <IconButton icon={Search} href="/search" title="Search" aria-label="Search" />
           {loading ? (
             <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full" />
@@ -414,7 +414,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         <div className="w-full px-4">
           <div className="flex justify-between items-center h-16 w-full">
             <IconButton icon={Home} href="/main" title="Home" aria-label="Home" />
-            <IconButton icon={Balloon} href="/explore" title="Explore" aria-label="Explore" />
+            <IconButton icon={Balloon} href="/spaces" title="Spaces" aria-label="Spaces" />
             {loading ? (
               <div className="h-8 w-8 bg-gray-200 animate-pulse rounded-full" />
             ) : user ? (

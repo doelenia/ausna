@@ -189,7 +189,8 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith('/account') ||
     request.nextUrl.pathname.startsWith('/notes/create') ||
     request.nextUrl.pathname.startsWith('/portfolio/create') ||
-    request.nextUrl.pathname.startsWith('/space/create')
+    request.nextUrl.pathname.startsWith('/space/create') ||
+    request.nextUrl.pathname.startsWith('/spaces')
 
   // Public routes: viewing pages that don't require authentication
   // These include login, signup, main, auth callback, and viewing pages
@@ -299,6 +300,7 @@ async function maybeUpdateHumanCityLocation(
     pathname.startsWith('/portfolio') ||
     pathname.startsWith('/human') ||
     pathname.startsWith('/space') ||
+    pathname.startsWith('/spaces') ||
     pathname.startsWith('/notes')
   if (!isPrimaryPage) return
 
