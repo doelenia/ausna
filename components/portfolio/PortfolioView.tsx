@@ -1279,7 +1279,11 @@ export function PortfolioView({
     return managersArr.includes(userId) || membersArr.includes(userId)
   }
 
-  const renderSpaceFeedRowTile = (p: SpacesApiPortfolio, withJoinBelow = false): React.ReactNode => {
+  const renderSpaceFeedRowTile = (
+    p: SpacesApiPortfolio,
+    withJoinBelow = false,
+    fillGridCell = false
+  ): React.ReactNode => {
     const basic = (p.metadata as any)?.basic || {}
     const name = (basic.name as string) || 'Space'
     const avatar = basic.avatar as string | undefined
@@ -1295,10 +1299,14 @@ export function PortfolioView({
       isSpaceJoinable(p) &&
       !userIsInSpace(p, currentUserId)
 
+    const tileWidthClass = fillGridCell
+      ? 'flex min-w-0 w-full flex-col items-center'
+      : 'flex w-[100px] flex-shrink-0 flex-col items-center'
+
     return (
       <div
         key={p.id}
-        className={`flex w-[100px] flex-shrink-0 flex-col items-center${showJoinBelow ? ' gap-1' : ''}`}
+        className={`${tileWidthClass}${showJoinBelow ? ' gap-1' : ''}`}
       >
         <Link
           href={getSpaceUrl(p.slug || p.id)}
@@ -3043,8 +3051,8 @@ export function PortfolioView({
                       )
                     }
                     return (
-                      <div className="flex flex-wrap items-start gap-2">
-                        {gridSorted.map((p) => renderSpaceFeedRowTile(p, true))}
+                      <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2 items-start">
+                        {gridSorted.map((p) => renderSpaceFeedRowTile(p, true, true))}
                       </div>
                     )
                   }
