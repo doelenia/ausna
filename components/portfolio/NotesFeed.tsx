@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Note } from '@/types/note'
 import { getPinnedItems } from '@/app/portfolio/[idOrSlug]/actions'
-import { getNotesByPortfolioPaginated } from '@/app/notes/actions'
 import { NotesMasonry } from '@/components/notes/NotesMasonry'
 import { isHumanPortfolio, isProjectPortfolio, Portfolio } from '@/types/portfolio'
 import { UIText } from '@/components/ui'
@@ -42,6 +41,9 @@ export function NotesFeed({
   const [renamingCollectionId, setRenamingCollectionId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState<string>('')
   const [isHoveringTabs, setIsHoveringTabs] = useState(false)
+
+  // Set identity changes on every pin fetch even when ids are unchanged; use a stable key for effect deps.
+  const pinnedNoteIdsKey = [...pinnedNoteIds].sort().join('|')
 
   // Fetch pinned notes (only notes, not portfolios)
   useEffect(() => {
@@ -204,6 +206,8 @@ export function NotesFeed({
   useEffect(() => {
     if (!pinnedNotesLoaded) return
 
+    const ac = new AbortController()
+
     const fetchInitialNotes = async () => {
       setLoading(true)
       setError(null)
@@ -213,7 +217,7 @@ export function NotesFeed({
         const url = selectedCollectionId
           ? `/api/portfolios/${portfolioId}/notes?offset=0&limit=20&collection_id=${selectedCollectionId}`
           : `/api/portfolios/${portfolioId}/notes?offset=0&limit=20`
-        const response = await fetch(url)
+        const response = await fetch(url, { signal: ac.signal })
         if (!response.ok) {
           const errorData = await response.json()
           throw new Error(errorData.error || 'Failed to load notes')
@@ -239,14 +243,18 @@ export function NotesFeed({
           setError(result.error || 'Failed to load notes')
         }
       } catch (err: any) {
+        if (err?.name === 'AbortError') return
         setError(err.message || 'An unexpected error occurred')
       } finally {
-        setLoading(false)
+        if (!ac.signal.aborted) {
+          setLoading(false)
+        }
       }
     }
 
     fetchInitialNotes()
-  }, [portfolioId, pinnedNotesLoaded, pinnedNoteIds, selectedCollectionId])
+    return () => ac.abort()
+  }, [portfolioId, pinnedNotesLoaded, pinnedNoteIdsKey, selectedCollectionId])
 
   // Load more notes
   const loadMore = useCallback(async () => {
@@ -296,7 +304,7 @@ export function NotesFeed({
     } finally {
       setLoadingMore(false)
     }
-  }, [portfolioId, loadingMore, hasMore, pinnedNoteIds, selectedCollectionId])
+  }, [portfolioId, loadingMore, hasMore, pinnedNoteIdsKey, selectedCollectionId])
 
   // Set up intersection observer for infinite scroll
   useEffect(() => {
@@ -615,8 +623,8 @@ export function NotesFeed({
             </div>
           )}
           
-          {/* Load more trigger */}
-          {hasMore && !selectedCollectionId && filteredNotes.length > 0 && !loading && (
+          {/* Load more trigger — show when there are more pages even if this page had only pins (filtered to 0) */}
+          {hasMore && !selectedCollectionId && !loading && (
             <div ref={loadMoreRef} className="py-4 text-center">
               {loadingMore ? (
                 <UIText>Loading more notes...</UIText>

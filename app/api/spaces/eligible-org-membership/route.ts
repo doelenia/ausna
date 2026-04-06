@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 import { isJoinablePublicSpaceRow } from '@/lib/portfolio/spaceCapabilities'
 import { isEmailEligibleForOrgMembership } from '@/lib/portfolio/orgMembership'
 import { ONBOARDING_JOIN_SPACES_PINNED_PORTFOLIO_ID } from '@/lib/onboarding/status'
+import {
+  fetchViewerPendingSpaceIds,
+  viewerJoinStatusForSpaceRow,
+} from '@/lib/portfolio/viewerJoinStatus'
 
 export async function GET() {
   try {
@@ -18,7 +22,7 @@ export async function GET() {
     // Keep this lightweight: fetch recent public spaces and filter in-process.
     const { data: rows, error } = await supabase
       .from('portfolios')
-      .select('id, type, slug, metadata, visibility, is_pseudo, created_at')
+      .select('id, user_id, type, slug, metadata, visibility, is_pseudo, created_at')
       .eq('type', 'space')
       .neq('visibility', 'private')
       .order('created_at', { ascending: false })
@@ -28,7 +32,11 @@ export async function GET() {
       return NextResponse.json({ results: [], error: error.message }, { status: 200 })
     }
 
-    function toFeaturedPayload(p: any, featuredSource: 'org' | 'pinned') {
+    function toFeaturedPayload(
+      p: any,
+      featuredSource: 'org' | 'pinned',
+      userJoinStatus: ReturnType<typeof viewerJoinStatusForSpaceRow>
+    ) {
       const basic = (p.metadata as any)?.basic || {}
       return {
         id: p.id,
@@ -38,10 +46,11 @@ export async function GET() {
         avatar: (basic.avatar as string) || null,
         emoji: (basic.emoji as string) || null,
         featuredSource,
+        userJoinStatus,
       }
     }
 
-    const orgEligible = (rows || [])
+    const orgEligibleRows = (rows || [])
       .filter((p: any) =>
         isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
       )
@@ -52,15 +61,14 @@ export async function GET() {
         return isEmailEligibleForOrgMembership((user as any).email ?? null, org.email_suffixes)
       })
       .slice(0, 3)
-      .map((p: any) => toFeaturedPayload(p, 'org'))
 
     const { data: pinnedRow } = await supabase
       .from('portfolios')
-      .select('id, type, slug, metadata, visibility, is_pseudo')
+      .select('id, user_id, type, slug, metadata, visibility, is_pseudo')
       .eq('id', ONBOARDING_JOIN_SPACES_PINNED_PORTFOLIO_ID)
       .maybeSingle()
 
-    let results = orgEligible
+    const featuredRows: Array<{ row: any; featuredSource: 'org' | 'pinned' }> = []
     if (
       pinnedRow &&
       isJoinablePublicSpaceRow(
@@ -70,9 +78,33 @@ export async function GET() {
         (pinnedRow as any).is_pseudo
       )
     ) {
-      const pinned = toFeaturedPayload(pinnedRow, 'pinned')
-      results = [pinned, ...orgEligible.filter((x) => x.id !== pinned.id)]
+      featuredRows.push({ row: pinnedRow, featuredSource: 'pinned' })
     }
+    for (const p of orgEligibleRows) {
+      if (pinnedRow && p.id === (pinnedRow as any).id) continue
+      featuredRows.push({ row: p, featuredSource: 'org' })
+    }
+
+    const featuredIds = featuredRows.map((x) => x.row.id as string)
+    const { pendingRequestIds, pendingInviteIds } = await fetchViewerPendingSpaceIds(
+      supabase,
+      user.id,
+      featuredIds
+    )
+
+    const results = featuredRows.map(({ row, featuredSource }) => {
+      const userJoinStatus = viewerJoinStatusForSpaceRow(
+        {
+          id: row.id,
+          user_id: row.user_id as string,
+          metadata: row.metadata,
+        },
+        user.id,
+        pendingRequestIds,
+        pendingInviteIds
+      )
+      return toFeaturedPayload(row, featuredSource, userJoinStatus)
+    })
 
     return NextResponse.json({ results }, { status: 200 })
   } catch (e: any) {

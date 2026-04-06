@@ -17,6 +17,7 @@ import {
   parseActivityUpdatePortfolioRefFromMessage,
   parseActivityUpdateMessageDetails,
 } from '@/lib/messages/activityUpdateMessage'
+import { parsePortfolioShareFromMessage } from '@/lib/messages/portfolioShareMessage'
 import { Content, UIText, UIButtonText, Button, Dropdown, Card } from '@/components/ui'
 import { Archive } from 'lucide-react'
 
@@ -982,9 +983,13 @@ function ConversationViewContent() {
               const isManagerAcceptMessage = messageText.includes('accepted your invitation to become a manager')
               const isPortfolioInvitationMessage = isInviteMessage || isAcceptMessage
               const isPortfolioShareMessage = message.message_type === 'portfolio_share'
-              const portfolioShareMatch = message.text?.match(/View details:\s*(\/portfolio\/([a-z-]+)\/([^\s]+))/i)
-              const sharedPortfolioType = (portfolioShareMatch?.[2] || null) as Portfolio['type'] | null
-              const sharedPortfolioIdentifier = portfolioShareMatch?.[3] || null
+              const portfolioShareParsed = isPortfolioShareMessage
+                ? parsePortfolioShareFromMessage(message.text)
+                : null
+              const sharedPortfolioType = portfolioShareParsed?.portfolioType ?? null
+              const sharedPortfolioIdentifier = portfolioShareParsed?.portfolioIdentifier ?? null
+              const portfolioShareRichCardShown =
+                isPortfolioShareMessage && !!sharedPortfolioType && !!sharedPortfolioIdentifier
 
               const activityUpdateRef = parseActivityUpdatePortfolioRefFromMessage(messageText)
               const isActivityUpdateMessage = activityUpdateRef !== null
@@ -1141,7 +1146,7 @@ function ConversationViewContent() {
                   {message.text &&
                     message.text.trim() &&
                     !isNoteCollaborationInviteMessage &&
-                    !isPortfolioShareMessage &&
+                    !portfolioShareRichCardShown &&
                     !(isActivityUpdateMessage && activityUpdatePortfolio) && (
                     <div
                       className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${

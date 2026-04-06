@@ -15,15 +15,12 @@ import { PortfolioCreatedCard } from '@/components/main/PortfolioCreatedCard'
 import type { DailyMatchHighlightMeta } from '@/app/explore/actions'
 import { getExploreActivityHighlights } from '@/app/explore/actions'
 import { buildLoginHref } from '@/lib/auth/login-redirect'
-import { Rss, Lock, Timer } from 'lucide-react'
+import { Rss, Lock, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { DB_NON_HUMAN_TYPES, normalizePortfolioType } from '@/types/portfolio'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
-import { isActivityLive } from '@/lib/activityLive'
-import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
-import type { ActivityDateTimeValue } from '@/lib/datetime'
-import { formatDistanceToNowStrict } from 'date-fns'
+import { renderFeedTopRowSpaceStatusOverlay } from '@/components/main/feedTopRowSpaceStatus'
+import { fetchViewerEligibleSpaceFeedItems } from '@/lib/spaces/viewerFeedSpaces'
 
 interface FeedViewProps {
   currentUserId?: string
@@ -66,6 +63,16 @@ let mainFeedTopRowCacheEntry: {
   items: MainFeedTopRowItem[]
 } | null = null
 
+const MAIN_FEED_TOP_ROW_INVALIDATE_EVENT = 'main-feed-top-row-invalidate'
+
+/** Call after friend/space "last checked" updates so unread badges and ordering stay accurate. */
+export function invalidateMainFeedTopRowCache() {
+  mainFeedTopRowCacheEntry = null
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(MAIN_FEED_TOP_ROW_INVALIDATE_EVENT))
+  }
+}
+
 export function FeedView({
   currentUserId,
   apiPath = '/api/feed',
@@ -87,6 +94,7 @@ export function FeedView({
   const [activityHighlights, setActivityHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
   const [topRowLoading, setTopRowLoading] = useState(false)
   const [topRowItems, setTopRowItems] = useState<MainFeedTopRowItem[]>([])
+  const [topRowCacheBust, setTopRowCacheBust] = useState(0)
   const observerTarget = useRef<HTMLDivElement>(null)
   const offsetRef = useRef(0)
   const loadedNoteIdsRef = useRef<Set<string>>(new Set())
@@ -259,111 +267,11 @@ export function FeedView({
           returnTo: `${window.location.pathname}${window.location.search}${window.location.hash}`,
         })
 
-  const getSpaceStatus = (p: any): string | null => {
-    const status = (p?.metadata as any)?.status
-    return typeof status === 'string' ? status : null
-  }
-
-  const getSpaceActivityDateTime = (p: any): ActivityDateTimeValue | null => {
-    const props = (p?.metadata as any)?.properties || {}
-    const dt = props.activity_datetime
-    return dt && typeof dt === 'object' ? (dt as ActivityDateTimeValue) : null
-  }
-
-  const isSpaceLive = (p: any): boolean => {
-    const status = getSpaceStatus(p)
-    const dt = getSpaceActivityDateTime(p)
-    if (dt?.start) return isActivityLive(dt, status)
-    return status === 'live'
-  }
-
-  const isSpaceUpcoming = (p: any): boolean => {
-    const status = getSpaceStatus(p)
-    if (status === 'archived') return false
-    const dt = getSpaceActivityDateTime(p)
-    const start = dt?.start ? new Date(dt.start) : null
-    if (!start || Number.isNaN(start.getTime())) return false
-    return start.getTime() > Date.now()
-  }
-
-  const renderSpaceLiveOrUpcomingPill = (p: any): React.ReactNode => {
-    const dt = getSpaceActivityDateTime(p)
-    const status = getSpaceStatus(p)
-    const hasActivity = !!dt?.start
-
-    if (!hasActivity) {
-      if (status === 'live') {
-        return (
-          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <UIText as="span" className="text-[11px] text-black leading-none">
-              LIVE
-            </UIText>
-          </div>
-        )
-      }
-      return null
-    }
-
-    const live = isActivityLive(dt as ActivityDateTimeValue, status)
-    if (live) {
-      return (
-        <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          <UIText as="span" className="text-[11px] text-black leading-none">
-            LIVE
-          </UIText>
-        </div>
-      )
-    }
-
-    const start = dt?.start ? new Date(dt.start) : null
-    const validStart = start && !Number.isNaN(start.getTime()) ? start : null
-    if (!validStart) return null
-    if (status === 'archived') return null
-    if (new Date() >= validStart) return null
-
-    const label = formatDistanceToNowStrict(validStart, { addSuffix: true })
-    return (
-      <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-        <Timer className="w-3 h-3 text-blue-600 flex-shrink-0" aria-hidden />
-        <UIText as="span" className="text-[11px] leading-none text-blue-600">
-          {label}
-        </UIText>
-      </div>
-    )
-  }
-
-  const userIsInPortfolio = (userId: string, portfolioRow: any): boolean => {
-    if (!userId) return false
-    if (portfolioRow?.user_id === userId) return true
-    const meta = (portfolioRow?.metadata as any) || {}
-    const members: string[] = Array.isArray(meta?.members) ? meta.members : []
-    const managers: string[] = Array.isArray(meta?.managers) ? meta.managers : []
-    return members.includes(userId) || managers.includes(userId)
-  }
-
-  const isSpaceJoinable = (p: any): boolean => {
-    if (!currentUserId) return false
-    if ((p.visibility || 'public') === 'private') return false
-    const status = getSpaceStatus(p)
-    if (status === 'archived') return false
-    if (p.user_id === currentUserId) return false
-    const meta = (p.metadata as any) || {}
-    const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
-    const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
-    if (managersArr.includes(currentUserId) || membersArr.includes(currentUserId)) return false
-
-    const props = meta?.properties || {}
-    // External activities: publicly joinable without call_to_join (see portfolio join action).
-    if (props.external === true) {
-      return true
-    }
-    const callToJoin = props.call_to_join || null
-    const dt = getSpaceActivityDateTime(p) ?? undefined
-    const visibility = (p.visibility as 'public' | 'private' | undefined | null) ?? 'public'
-    return isCallToJoinWindowOpen(visibility, callToJoin, dt, status)
-  }
+  useEffect(() => {
+    const onInvalidate = () => setTopRowCacheBust((n) => n + 1)
+    window.addEventListener(MAIN_FEED_TOP_ROW_INVALIDATE_EVENT, onInvalidate)
+    return () => window.removeEventListener(MAIN_FEED_TOP_ROW_INVALIDATE_EVENT, onInvalidate)
+  }, [])
 
   useEffect(() => {
     if (!currentUserId) return
@@ -387,21 +295,14 @@ export function FeedView({
 
       try {
         if (!cancelled) setTopRowLoading(true)
-        // Kick off the base queries in parallel.
-        const [{ data: friendsRows }, { data: allSpacesRows }, { data: subscriptionsRows }] =
-          await Promise.all([
-            supabase
-              .from('friends')
-              .select('user_id, friend_id, status')
-              .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
-              .eq('status', 'accepted'),
-            supabase
-              .from('portfolios')
-              .select('id, type, slug, user_id, visibility, created_at, metadata')
-              .in('type', [...DB_NON_HUMAN_TYPES])
-              .limit(2000),
-            supabase.from('subscriptions').select('portfolio_id').eq('user_id', currentUserId),
-          ])
+        const [{ data: friendsRows }, spaceFeedItems] = await Promise.all([
+          supabase
+            .from('friends')
+            .select('user_id, friend_id, status')
+            .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+            .eq('status', 'accepted'),
+          fetchViewerEligibleSpaceFeedItems(supabase, currentUserId),
+        ])
 
         const friendIds = Array.from(
           new Set(
@@ -414,43 +315,7 @@ export function FeedView({
         )
           .slice(0, 50)
 
-        const joinedSpaces = (allSpacesRows || []).filter((p: any) => userIsInPortfolio(currentUserId, p))
-
-        const subscribedIds = Array.from(
-          new Set((subscriptionsRows || []).map((r: any) => String(r.portfolio_id)).filter(Boolean))
-        )
-
-        const { data: subscribedSpacesRows } =
-          subscribedIds.length > 0
-            ? await supabase
-                .from('portfolios')
-                .select('id, type, slug, user_id, visibility, created_at, metadata')
-                .in('id', subscribedIds)
-            : ({ data: [] as any[] } as any)
-
-        const byId = new Map<string, any>()
-        ;(joinedSpaces || []).forEach((p: any) => byId.set(String(p.id), { ...p, relation: 'joined' as const }))
-        ;(subscribedSpacesRows || []).forEach((p: any) => {
-          const id = String(p.id)
-          const existing = byId.get(id)
-          byId.set(id, { ...p, relation: existing ? 'joined' : ('subscribed' as const) })
-        })
-        const mergedSpaces = Array.from(byId.values())
-
-        const eligibleSpaces = mergedSpaces.filter(
-          (p: any) => normalizePortfolioType(p.type) === 'space' && (isSpaceLive(p) || isSpaceUpcoming(p))
-        )
-
-        const spaceIds = eligibleSpaces.map((p: any) => String(p.id))
-        // Fetch derived data in parallel (independent HTTP requests).
-        const [spacesLastNoteById, humanPreviews, lastNoteByUserId, unreadData] = await Promise.all([
-          (async () => {
-            if (spaceIds.length === 0) return {} as Record<string, string | null>
-            const qs = new URLSearchParams({ portfolio_ids: spaceIds.join(',') })
-            const res = await fetch(`/api/portfolios/last-note-created-at?${qs.toString()}`)
-            const data = await res.json().catch(() => ({}))
-            return (data?.lastNoteByPortfolioId || {}) as Record<string, string | null>
-          })(),
+        const [humanPreviews, lastNoteByUserId, unreadFriendsData] = await Promise.all([
           (async () => {
             if (friendIds.length === 0) return [] as Array<{ id: string; name: string; avatar: string | null }>
             const qs = new URLSearchParams({ ids: friendIds.join(',') })
@@ -470,22 +335,14 @@ export function FeedView({
             return (data?.lastNoteByUserId || {}) as Record<string, string | null>
           })(),
           (async () => {
+            if (friendIds.length === 0) return {}
             const unreadQs = new URLSearchParams({
-              space_ids: spaceIds.join(','),
               friend_ids: friendIds.join(','),
             })
             const unreadRes = await fetch(`/api/unread-counts?${unreadQs.toString()}`)
             return await unreadRes.json().catch(() => ({}))
           })(),
         ])
-
-        const sortedSpaces = [...eligibleSpaces].sort((a: any, b: any) => {
-          const aKey = spacesLastNoteById[String(a.id)] || a.created_at || null
-          const bKey = spacesLastNoteById[String(b.id)] || b.created_at || null
-          const at = aKey ? new Date(aKey).getTime() : 0
-          const bt = bKey ? new Date(bKey).getTime() : 0
-          return bt - at
-        })
 
         const enrichedHumans = humanPreviews
           .map((u) => ({ ...u, lastNoteCreatedAt: lastNoteByUserId[u.id] ?? null }))
@@ -498,8 +355,7 @@ export function FeedView({
           })
 
         if (cancelled) return
-        const unreadSpaces = (unreadData?.spaces as Record<string, number>) || {}
-        const unreadFriends = (unreadData?.friends as Record<string, number>) || {}
+        const unreadFriends = (unreadFriendsData?.friends as Record<string, number>) || {}
 
         // Same idea as portfolio feed rows: unread first (by latest note/create time), then the rest.
         const humanItems: MainFeedTopRowItem[] = enrichedHumans.map((u) => ({
@@ -512,15 +368,17 @@ export function FeedView({
             lastNoteCreatedAt: u.lastNoteCreatedAt,
           },
         }))
-        const spaceItems: MainFeedTopRowItem[] = sortedSpaces.map((p: any) => ({
-          kind: 'space',
-          unread: unreadSpaces[String(p.id)] || 0,
-          lastNoteCreatedAt: spacesLastNoteById[String(p.id)] ?? null,
-          portfolio: {
-            ...p,
-            lastNoteCreatedAt: spacesLastNoteById[String(p.id)] ?? null,
-          },
-        }))
+        const spaceItems: MainFeedTopRowItem[] = spaceFeedItems.map(
+          ({ portfolio, lastNoteCreatedAt, unread }) => ({
+            kind: 'space' as const,
+            unread,
+            lastNoteCreatedAt,
+            portfolio: {
+              ...portfolio,
+              lastNoteCreatedAt,
+            },
+          })
+        )
         const combined = [...humanItems, ...spaceItems]
         const withUnread = combined
           .filter((x) => x.unread > 0)
@@ -551,25 +409,31 @@ export function FeedView({
     return () => {
       cancelled = true
     }
-  }, [currentUserId, isMainFeed, supabase])
+  }, [currentUserId, isMainFeed, supabase, topRowCacheBust])
 
   return (
     <>
       <div className="md:px-10">
           {isMainFeed && currentUserId && topRowLoading && (
-            <div className="mt-4 mb-2">
-              <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 px-3 md:px-0 scroll-smooth">
-                {Array.from({ length: 3 }).map((_, idx) => (
+            <div className="mt-3 mb-1">
+              <div className="mb-1 flex items-center justify-end gap-2 px-3 md:px-0">
+                <Link
+                  href="/spaces"
+                  className="inline-flex items-center gap-1 text-gray-600 transition-colors hover:text-gray-800"
+                >
+                  <UIText as="span">View all</UIText>
+                  <ChevronRight className="w-4 h-4" strokeWidth={1.5} aria-hidden />
+                </Link>
+              </div>
+              <div className="flex items-start gap-2 overflow-x-auto px-3 py-1 md:px-0 scroll-smooth">
+                {Array.from({ length: 8 }).map((_, idx) => (
                   <div
                     key={`top-row-skeleton:${idx}`}
-                    className="flex flex-col items-center flex-shrink-0 w-48"
+                    className="flex w-[100px] flex-shrink-0 flex-col items-center"
                   >
-                    <div className="w-full rounded-2xl px-3 pt-3 pb-4">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-24 h-24 rounded-full bg-gray-200 animate-pulse" />
-                        <div className="w-32 h-4 rounded bg-gray-200 animate-pulse" />
-                        <div className="w-20 h-4 rounded bg-gray-200 animate-pulse" />
-                      </div>
+                    <div className="flex w-full flex-col items-center gap-1.5 px-1 py-1.5">
+                      <div className="h-20 w-20 shrink-0 rounded-full bg-gray-200 animate-pulse" />
+                      <div className="h-3 w-12 rounded bg-gray-200 animate-pulse" />
                     </div>
                   </div>
                 ))}
@@ -577,46 +441,53 @@ export function FeedView({
             </div>
           )}
           {isMainFeed && currentUserId && topRowItems.length > 0 && (
-            <div className="mt-4 mb-2">
-              <div className="flex items-start gap-4 overflow-x-auto pt-2 pb-2 px-3 md:px-0 scroll-smooth">
+            <div className="mt-3 mb-1">
+              <div className="mb-1 flex items-center justify-end gap-2 px-3 md:px-0">
+                <Link
+                  href="/spaces"
+                  className="inline-flex items-center gap-1 text-gray-600 transition-colors hover:text-gray-800"
+                >
+                  <UIText as="span">View all</UIText>
+                  <ChevronRight className="w-4 h-4" strokeWidth={1.5} aria-hidden />
+                </Link>
+              </div>
+              <div className="flex items-start gap-2 overflow-x-auto px-3 py-1 md:px-0 scroll-smooth">
                 {topRowItems.map((item) => {
                   if (item.kind === 'human') {
                     const h = item.human
                     const unread = item.unread
                     return (
-                      <div key={`human:${h.id}`} className="flex flex-col items-center flex-shrink-0 w-48 relative">
-                        {unread > 0 && (
-                          <div className="absolute top-2 right-3 z-10 inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-red-500">
-                            <UIText as="span" className="text-[11px] text-white leading-none">
-                              {unread}
-                            </UIText>
-                          </div>
-                        )}
+                      <div key={`human:${h.id}`} className="flex w-[100px] flex-shrink-0 flex-col items-center">
                         <Link
                           href={getHumanProfileUrl(h.id)}
-                          className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                          className="flex w-full flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors hover:bg-gray-100"
                         >
-                          <div className="flex flex-col items-center gap-3">
+                          <div className="relative inline-flex shrink-0">
                             <StickerAvatar
                               src={h.avatar ?? undefined}
                               alt={h.name}
                               type="human"
-                              size={96}
+                              size={80}
+                              variant="mini"
                               name={h.name}
                             />
-                            <div className="flex flex-col items-center gap-1 w-full">
-                              <Content className="text-center max-w-[140px] mx-auto line-clamp-2" title={h.name}>
-                                {h.name}
-                              </Content>
-                              {unread > 0 && (
-                                <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100">
-                                  <UIText as="span" className="text-[11px] text-black leading-none">
-                                    New posts
-                                  </UIText>
-                                </div>
-                              )}
-                            </div>
+                            {unread > 0 && (
+                              <div
+                                className="absolute right-0 top-0 z-10 flex min-h-5 min-w-5 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-red-500 px-1 ring-2 ring-white"
+                                aria-label={`${unread} unread`}
+                              >
+                                <UIText as="span" className="text-[11px] text-white leading-none">
+                                  {unread > 99 ? '99+' : unread}
+                                </UIText>
+                              </div>
+                            )}
                           </div>
+                          <UIText
+                            className="block w-full min-w-0 text-center leading-tight truncate"
+                            title={h.name}
+                          >
+                            {h.name}
+                          </UIText>
                         </Link>
                       </div>
                     )
@@ -627,50 +498,50 @@ export function FeedView({
                   const name = (basic.name as string) || 'Space'
                   const avatar = basic.avatar as string | undefined
                   const emoji = basic.emoji as string | undefined
-                  const pill = renderSpaceLiveOrUpcomingPill(p)
                   const unread = item.unread
-                  const joinable = isSpaceJoinable(p)
+                  const statusOverlay =
+                    unread === 0 ? renderFeedTopRowSpaceStatusOverlay(p) : null
                   return (
-                    <div key={`space:${p.id}`} className="flex flex-col items-center flex-shrink-0 w-48 relative">
-                      <div className="absolute top-2 right-3 z-10 flex flex-col items-end gap-1">
-                        {(p.visibility || 'public') === 'private' && (
-                          <Lock className="w-4 h-4 text-gray-500" aria-label="Private" />
-                        )}
-                        {unread > 0 ? (
-                          <div className="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full bg-red-500">
-                            <UIText as="span" className="text-[11px] text-white leading-none">
-                              {unread}
-                            </UIText>
-                          </div>
-                        ) : joinable ? (
-                          <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-orange-100">
-                            <UIText as="span" className="text-[11px] text-orange-700 leading-none">
-                              Joinable
-                            </UIText>
-                          </div>
-                        ) : null}
-                      </div>
-
+                    <div key={`space:${p.id}`} className="flex w-[100px] flex-shrink-0 flex-col items-center">
                       <Link
                         href={getSpaceUrl(p.slug || p.id)}
-                        className="w-full rounded-2xl px-3 pt-3 pb-4 transition-colors hover:bg-gray-100 block"
+                        className="flex w-full flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors hover:bg-gray-100"
                       >
-                        <div className="flex flex-col items-center gap-3">
+                        <div className="relative inline-flex shrink-0">
+                          {(p.visibility || 'public') === 'private' && (
+                            <Lock
+                              className="absolute left-0 top-0 z-20 h-4 w-4 text-gray-600 drop-shadow-sm"
+                              aria-label="Private"
+                            />
+                          )}
                           <StickerAvatar
                             src={avatar}
                             alt={name}
                             type="space"
-                            size={96}
+                            size={80}
+                            variant="mini"
                             emoji={emoji}
                             name={name}
                           />
-                          <div className="flex flex-col items-center gap-1 w-full">
-                            <Content className="text-center max-w-[140px] mx-auto line-clamp-2" title={name}>
-                              {name}
-                            </Content>
-                            {pill}
-                          </div>
+                          {unread > 0 ? (
+                            <div
+                              className="absolute right-0 top-0 z-10 flex min-h-5 min-w-5 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-red-500 px-1 ring-2 ring-white"
+                              aria-label={`${unread} unread`}
+                            >
+                              <UIText as="span" className="text-[11px] text-white leading-none">
+                                {unread > 99 ? '99+' : unread}
+                              </UIText>
+                            </div>
+                          ) : (
+                            statusOverlay
+                          )}
                         </div>
+                        <UIText
+                          className="block w-full min-w-0 text-center leading-tight truncate"
+                          title={name}
+                        >
+                          {name}
+                        </UIText>
                       </Link>
                     </div>
                   )

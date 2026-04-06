@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { SearchResultItem } from './SearchResultItem'
 import { UIText, Content } from '@/components/ui'
@@ -26,6 +26,8 @@ export function SearchView() {
   const [loading, setLoading] = useState(false)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const supabase = createClient()
+  const searchRequestIdRef = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
 
   // Get current user (use getSession to avoid refresh token errors)
   useEffect(() => {
@@ -44,26 +46,35 @@ export function SearchView() {
     getUser()
   }, [supabase])
 
-  // Debounced search function
   const performSearch = useCallback(async (searchQuery: string) => {
+    searchAbortRef.current?.abort()
+    const controller = new AbortController()
+    searchAbortRef.current = controller
+
+    const requestId = ++searchRequestIdRef.current
     setLoading(true)
     try {
       const url = searchQuery
         ? `/api/portfolios/search?q=${encodeURIComponent(searchQuery)}`
         : '/api/portfolios/search'
-      
-      const response = await fetch(url)
+
+      const response = await fetch(url, { signal: controller.signal })
       if (!response.ok) {
         throw new Error('Search failed')
       }
-      
+
       const data = await response.json()
+      if (requestId !== searchRequestIdRef.current) return
       setResults(data.results || [])
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return
+      if (requestId !== searchRequestIdRef.current) return
       console.error('Search error:', error)
       setResults([])
     } finally {
-      setLoading(false)
+      if (requestId === searchRequestIdRef.current) {
+        setLoading(false)
+      }
     }
   }, [])
 
@@ -75,11 +86,6 @@ export function SearchView() {
 
     return () => clearTimeout(timer)
   }, [query, performSearch])
-
-  // Load initial results on mount
-  useEffect(() => {
-    performSearch('')
-  }, [performSearch])
 
   return (
     <div

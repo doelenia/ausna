@@ -399,6 +399,12 @@ export function ActivityCard({
   memberUserIds,
   memberUsers,
   avatarTypeOverride,
+  /** Spaces/timeline: viewer is a member (show badge). */
+  joined,
+  /** Red unread count on avatar when joined (timeline / directory). */
+  timelineUnreadCount,
+  /** If set, render Join button inside the card footer (e.g. `...?join=1`). */
+  joinHref,
 }: {
   activity: ExploreActivity
   score?: number
@@ -411,6 +417,9 @@ export function ActivityCard({
   memberUserIds?: string[]
   memberUsers?: Array<{ userId: string; name?: string | null; avatar?: string | null }>
   avatarTypeOverride?: string
+  joined?: boolean
+  timelineUnreadCount?: number
+  joinHref?: string
 }) {
   const dateStr = activity.activityDateTime?.start
     ? formatDateOnly(activity.activityDateTime.start)
@@ -423,21 +432,40 @@ export function ActivityCard({
 
   return (
     <div>
-      <Link href={href} className="block">
-        <Card variant="subtle" padding="sm" className="hover:border-gray-300 transition-colors">
+      <Card variant="subtle" padding="sm" className="hover:border-gray-300 transition-colors">
+        <Link href={href} className="block">
           <div className="flex items-start gap-4">
-            <StickerAvatar
-              src={activity.avatar}
-              alt={activity.name}
-              type={avatarType}
-              size={48}
-              emoji={activity.emoji}
-            />
+            <div className="relative inline-flex shrink-0">
+              <StickerAvatar
+                src={activity.avatar}
+                alt={activity.name}
+                type={avatarType}
+                size={48}
+                emoji={activity.emoji}
+              />
+              {joined &&
+                timelineUnreadCount != null &&
+                timelineUnreadCount > 0 && (
+                  <div
+                    className="absolute right-0 top-0 z-10 flex min-h-5 min-w-5 translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-red-500 px-1 ring-2 ring-white"
+                    aria-label={`${timelineUnreadCount} unread`}
+                  >
+                    <UIText as="span" className="text-[11px] text-white leading-none">
+                      {timelineUnreadCount > 99 ? '99+' : timelineUnreadCount}
+                    </UIText>
+                  </div>
+                )}
+            </div>
             <div className="min-w-0 flex-1">
               <div className="mb-1 flex items-center gap-2 flex-wrap">
                 <Title as="h2" className="text-lg">
                   {activity.name}
                 </Title>
+                {joined && (
+                  <div className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5">
+                    <UIText className="text-emerald-800 whitespace-nowrap">Joined</UIText>
+                  </div>
+                )}
               </div>
               {(hasDate || hasLocation) && !hideMetaRow && (
                 <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 mb-1.5 text-gray-700">
@@ -521,8 +549,15 @@ export function ActivityCard({
               )}
             </div>
           </div>
-        </Card>
-      </Link>
+        </Link>
+        {joinHref ? (
+          <div className="mt-3 border-t border-gray-200 pt-3">
+            <Button asLink href={joinHref} variant="primary" size="sm">
+              <UIText>Join</UIText>
+            </Button>
+          </div>
+        ) : null}
+      </Card>
     </div>
   )
 }

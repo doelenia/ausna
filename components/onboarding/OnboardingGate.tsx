@@ -653,6 +653,10 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
       setError('Name is required.')
       return
     }
+    if (!trimmedDesc) {
+      setError('Description is required.')
+      return
+    }
     const hasAvatar = !!(avatarFile || avatarPreview || initialAvatarUrl)
     if (!hasAvatar) {
       setError('Please add a profile photo.')
@@ -693,11 +697,11 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
         Complete your profile
       </Title>
       <Content className="mb-4">
-        Add your name and profile photo to continue. Fields marked with{' '}
+        Add your name, a short description, and profile photo to continue. Fields marked with{' '}
         <span className="text-danger-600" aria-hidden="true">
           *
         </span>{' '}
-        are required; everything else is optional.
+        are required.
       </Content>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -733,10 +737,7 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
         </div>
         <div>
           <UIText as="label" className="block mb-1">
-            Description{' '}
-            <UIText as="span" className="text-gray-500">
-              (optional)
-            </UIText>
+            Description <span className="text-danger-600" aria-hidden="true">*</span>
           </UIText>
           <UIText as="p" className="text-xs text-gray-500 mb-1">
             {HUMAN_DESCRIPTION_HELP_TEXT}
@@ -747,6 +748,8 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
             rows={3}
             placeholder={HUMAN_DESCRIPTION_PLACEHOLDER}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+            required
+            aria-required="true"
           />
         </div>
         {error && (
@@ -762,6 +765,8 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
   )
 }
 
+type ViewerJoinStatus = 'none' | 'member' | 'pending_request' | 'pending_invite'
+
 interface CommunitySearchResult {
   id: string
   type: string
@@ -771,6 +776,25 @@ interface CommunitySearchResult {
   emoji?: string | null
   username?: string | null
   user_id?: string
+  userJoinStatus?: ViewerJoinStatus
+}
+
+function joinActionForSpace(
+  spaceId: string,
+  serverStatus: ViewerJoinStatus | undefined,
+  sessionJoinedIds: string[]
+): 'join' | 'joined' | 'applied' | 'invited' {
+  if (sessionJoinedIds.includes(spaceId)) return 'joined'
+  switch (serverStatus) {
+    case 'member':
+      return 'joined'
+    case 'pending_request':
+      return 'applied'
+    case 'pending_invite':
+      return 'invited'
+    default:
+      return 'join'
+  }
 }
 
 function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void }) {
@@ -784,6 +808,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     avatar?: string | null
     emoji?: string | null
     featuredSource?: 'org' | 'pinned'
+    userJoinStatus?: ViewerJoinStatus
   }>>([])
   const [searching, setSearching] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -791,19 +816,25 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
   const [showJoinModal, setShowJoinModal] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [joinedSpaceIds, setJoinedSpaceIds] = useState<string[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    fetch('/api/spaces/eligible-org-membership')
-      .then((res) => res.json())
-      .then((data) => {
-        const list = Array.isArray(data?.results) ? data.results : []
-        setFeaturedSpaces(
-          list.filter((x: any) => x && typeof x.id === 'string' && typeof x.name === 'string')
-        )
-      })
-      .catch(() => setFeaturedSpaces([]))
+  const loadFeaturedSpaces = useCallback(async () => {
+    try {
+      const res = await fetch('/api/spaces/eligible-org-membership')
+      const data = await res.json()
+      const list = Array.isArray(data?.results) ? data.results : []
+      setFeaturedSpaces(
+        list.filter((x: any) => x && typeof x.id === 'string' && typeof x.name === 'string')
+      )
+    } catch {
+      setFeaturedSpaces([])
+    }
   }, [])
+
+  useEffect(() => {
+    void loadFeaturedSpaces()
+  }, [loadFeaturedSpaces])
 
   useEffect(() => {
     if (!query.trim()) {
@@ -825,6 +856,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
               emoji: p.emoji ?? null,
               username: p.username ?? null,
               user_id: p.user_id,
+              userJoinStatus: p.userJoinStatus,
             }))
           setResults(list)
         })
@@ -837,55 +869,56 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     }
   }, [query])
 
-  const handleJoin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!selectedId) {
-      setFeedback('Please select a space.')
-      return
-    }
+  const finishJoinStep = async () => {
     setSubmitting(true)
     setFeedback(null)
     try {
-      const result = await applyToActivityCallToJoin({
-        portfolioId: selectedId,
-        promptAnswer: promptAnswer.trim(),
-      })
-      if (!result?.success) {
-        setFeedback(result?.error ?? 'Failed to submit.')
-        setSubmitting(false)
+      const result = await setJoinCommunitySeen()
+      if (!result.success) {
+        setFeedback(result.error ?? 'Failed to update.')
         return
       }
-      const flagResult = await setJoinCommunitySeen()
-      if (!flagResult.success) {
-        setFeedback(flagResult.error ?? 'Failed to update.')
-        setSubmitting(false)
-        return
-      }
-      setShowJoinModal(false)
       onComplete()
-    } catch (err) {
+    } catch {
       setFeedback('An unexpected error occurred.')
     } finally {
       setSubmitting(false)
     }
   }
 
-  const handleSkip = async () => {
+  const joinOneSpace = async (portfolioId: string, prompt: string) => {
     setSubmitting(true)
     setFeedback(null)
     try {
-      const result = await setJoinCommunitySeen()
-      if (!result.success) {
-        setFeedback(result.error ?? 'Failed to skip.')
-        setSubmitting(false)
+      const result = await applyToActivityCallToJoin({
+        portfolioId,
+        promptAnswer: prompt.trim(),
+      })
+      if (!result?.success) {
+        setFeedback(result?.error ?? 'Failed to join.')
         return
       }
-      onComplete()
-    } catch (err) {
+      setJoinedSpaceIds((prev) =>
+        prev.includes(portfolioId) ? prev : [...prev, portfolioId]
+      )
+      setShowJoinModal(false)
+      setSelectedId(null)
+      setPromptAnswer('')
+      void loadFeaturedSpaces()
+    } catch {
       setFeedback('An unexpected error occurred.')
     } finally {
       setSubmitting(false)
     }
+  }
+
+  const handleJoin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedId) {
+      setFeedback('Please select a space.')
+      return
+    }
+    await joinOneSpace(selectedId, promptAnswer)
   }
 
   const selectedCommunity =
@@ -895,10 +928,10 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     <>
       <Card variant="spacious" className="max-w-xl mx-auto">
         <Title as="h1" className="mb-2">
-          Join a space
+          Join spaces
         </Title>
         <Content className="mb-4">
-          We always show a featured space you can join in one click when available. If your email is eligible for an organization space, we’ll show those here too. You can also search for any public space to join, or skip for now.
+          Join one or more spaces from recommendations or search, or go on without joining any. Tap Continue when you’re ready for the next step.
         </Content>
         <div className="space-y-4">
           {featuredSpaces.length > 0 && (
@@ -931,38 +964,37 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
                           </div>
                         </div>
                         <div className="flex-shrink-0 pt-0.5">
-                          <Button
-                            type="button"
-                            variant="primary"
-                            size="sm"
-                            onClick={async () => {
-                              setSubmitting(true)
-                              setFeedback(null)
-                              try {
-                                const result = await applyToActivityCallToJoin({
-                                  portfolioId: s.id,
-                                  promptAnswer: '',
-                                })
-                                if (!result?.success) {
-                                  setFeedback(result?.error ?? 'Failed to join.')
-                                  return
-                                }
-                                const flagResult = await setJoinCommunitySeen()
-                                if (!flagResult.success) {
-                                  setFeedback(flagResult.error ?? 'Failed to update.')
-                                  return
-                                }
-                                onComplete()
-                              } catch (_err) {
-                                setFeedback('An unexpected error occurred.')
-                              } finally {
-                                setSubmitting(false)
-                              }
-                            }}
-                            disabled={submitting}
-                          >
-                            <UIText>Join</UIText>
-                          </Button>
+                          {(() => {
+                            const action = joinActionForSpace(
+                              s.id,
+                              s.userJoinStatus,
+                              joinedSpaceIds
+                            )
+                            if (action === 'join') {
+                              return (
+                                <Button
+                                  type="button"
+                                  variant="primary"
+                                  size="sm"
+                                  onClick={() => joinOneSpace(s.id, '')}
+                                  disabled={submitting}
+                                >
+                                  <UIText>Join</UIText>
+                                </Button>
+                              )
+                            }
+                            const label =
+                              action === 'joined'
+                                ? 'Joined'
+                                : action === 'applied'
+                                  ? 'Applied'
+                                  : 'Invited'
+                            return (
+                              <Button type="button" variant="secondary" size="sm" disabled>
+                                <UIText>{label}</UIText>
+                              </Button>
+                            )
+                          })()}
                         </div>
                       </div>
                       <UIText className="text-green-700 w-full min-w-0 break-words whitespace-pre-wrap">
@@ -1031,19 +1063,41 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
                     </div>
                     {/* Right: Apply button */}
                     <div className="flex-shrink-0">
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedId(r.id)
-                          setShowJoinModal(true)
-                          setPromptAnswer('')
-                          setFeedback(null)
-                        }}
-                      >
-                        <UIText>Join</UIText>
-                      </Button>
+                      {(() => {
+                        const action = joinActionForSpace(
+                          r.id,
+                          r.userJoinStatus,
+                          joinedSpaceIds
+                        )
+                        if (action === 'join') {
+                          return (
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedId(r.id)
+                                setShowJoinModal(true)
+                                setPromptAnswer('')
+                                setFeedback(null)
+                              }}
+                            >
+                              <UIText>Join</UIText>
+                            </Button>
+                          )
+                        }
+                        const label =
+                          action === 'joined'
+                            ? 'Joined'
+                            : action === 'applied'
+                              ? 'Applied'
+                              : 'Invited'
+                        return (
+                          <Button type="button" variant="secondary" size="sm" disabled>
+                            <UIText>{label}</UIText>
+                          </Button>
+                        )
+                      })()}
                     </div>
                   </div>
                 </li>
@@ -1055,9 +1109,9 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
               <UIText className="text-red-700">{feedback}</UIText>
             </div>
           )}
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={handleSkip} disabled={submitting}>
-              <UIText>Skip for now</UIText>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button variant="primary" onClick={finishJoinStep} disabled={submitting}>
+              <UIText>{submitting ? 'Saving...' : 'Continue'}</UIText>
             </Button>
           </div>
         </div>

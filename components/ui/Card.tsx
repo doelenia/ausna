@@ -67,6 +67,9 @@ export function Card({
     : classes
 
   const contentPadding = header || footer ? paddingStyles[effectivePadding] : ''
+  // Without header/footer, padding lives on the outer div (`classes`). An extra empty
+  // wrapper breaks flex layouts (e.g. flex-1 + overflow-y-auto on grandchildren).
+  const wrapContent = Boolean(header || footer || contentPadding)
 
   return (
     <div className={cardClasses}>
@@ -75,9 +78,7 @@ export function Card({
           {header}
         </div>
       )}
-      <div className={contentPadding}>
-        {children}
-      </div>
+      {wrapContent ? <div className={contentPadding}>{children}</div> : children}
       {footer && (
         <div className="px-6 py-4 border-t border-gray-200">
           {footer}

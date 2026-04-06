@@ -43,7 +43,7 @@ function runWhenIdle(fn: () => void, timeoutMs: number) {
  * Option B: always warm light nav targets; defer heavy routes until the browser is idle.
  * - Immediate: /search, /messages
  * - After sign-in: human profile (id URL, then canonical slug/id from portfolio)
- * - Idle (signed-in only): /main, then /explore (staggered)
+ * - Idle (signed-in only): /main, then /spaces (staggered)
  */
 export function NavRouteWarmup() {
   const router = useRouter()
@@ -93,7 +93,7 @@ export function NavRouteWarmup() {
         window.setTimeout(() => {
           if (cancelled) return
           try {
-            router.prefetch('/explore')
+            router.prefetch('/spaces')
           } catch {
             /* noop */
           }

@@ -16,6 +16,7 @@ import { getSiteUrl } from '@/lib/utils/site-url'
 
 interface SpacePortfolioPageProps {
   params: { idOrSlug: string }
+  searchParams?: Promise<{ tab?: string; join?: string }> | { tab?: string; join?: string }
 }
 
 export async function generateMetadata({
@@ -68,9 +69,19 @@ export async function generateMetadata({
   }
 }
 
-export default async function SpacePortfolioPage({ params }: SpacePortfolioPageProps) {
+export default async function SpacePortfolioPage({ params, searchParams }: SpacePortfolioPageProps) {
   const idOrSlug = params.idOrSlug
   if (!idOrSlug || typeof idOrSlug !== 'string') notFound()
+
+  const resolvedSearch =
+    searchParams && typeof (searchParams as Promise<unknown>).then === 'function'
+      ? await (searchParams as Promise<{ tab?: string; join?: string }>)
+      : (searchParams as { tab?: string; join?: string } | undefined)
+  const tabParam = resolvedSearch?.tab
+  const initialTab =
+    tabParam === 'spaces' || tabParam === 'feed' || tabParam === 'overview' ? tabParam : null
+  const joinParam = resolvedSearch?.join
+  const openJoinFromUrl = joinParam === '1' || joinParam === 'true'
 
   const supabase = await createClient()
   const {
@@ -131,6 +142,8 @@ export default async function SpacePortfolioPage({ params }: SpacePortfolioPageP
       hasPendingCommunityApplication={hasPendingCommunityApplication}
       hasPendingPortfolioInvitation={hasPendingPortfolioInvitation}
       pendingPortfolioInvitationType={pendingPortfolioInvitationType}
+      initialTab={initialTab}
+      openJoinFromUrl={openJoinFromUrl}
     />
   )
 }
