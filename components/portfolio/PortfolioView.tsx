@@ -1493,6 +1493,10 @@ export function PortfolioView({
       return
     }
 
+    // Client auth resolves asynchronously; do not treat logged-out until verified,
+    // otherwise ?join=1 from Spaces (full navigation) shows login incorrectly and never retries.
+    if (!authChecked) return
+
     if (!isAuthenticated) {
       openJoinUrlHandledRef.current = true
       setIsLoginRequiredModalOpen(true)
@@ -1556,6 +1560,7 @@ export function PortfolioView({
     isManager,
     isMember,
     hasPendingPortfolioInvitation,
+    authChecked,
     isAuthenticated,
     orgJoinEligible,
     orgJoinEligibilityChecked,
