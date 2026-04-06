@@ -230,7 +230,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
     return (
       <div
         key={p.id}
-        className={`flex w-[100px] flex-shrink-0 flex-col items-center${showJoinBelow ? ' gap-1' : ''}`}
+        className={`flex min-w-0 w-full flex-col items-center${showJoinBelow ? ' gap-1' : ''}`}
       >
         <Link
           href={getSpaceUrl((p.slug as string) || p.id)}
@@ -364,7 +364,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
         )
       }
       return (
-        <div className="flex flex-wrap items-start gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2 items-start">
           {filteredPortfolios.map((row) => renderGridTile(row, true))}
         </div>
       )
