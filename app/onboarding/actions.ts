@@ -12,6 +12,34 @@ import { createNote } from '@/app/notes/actions'
 
 export type { OnboardingStatus, OnboardingStepId }
 
+type OnboardingStarterResourceRow = {
+  url: string
+  caption: string
+}
+
+function normalizeStarterResources(raw: unknown): OnboardingStarterResourceRow[] {
+  if (!raw) return []
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return normalizeStarterResources(parsed)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(raw)) return []
+  const out: OnboardingStarterResourceRow[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const rec = item as Record<string, unknown>
+    const url = typeof rec.url === 'string' ? rec.url.trim() : ''
+    const caption = typeof rec.caption === 'string' ? rec.caption.trim() : ''
+    if (!url && !caption) continue
+    out.push({ url, caption })
+  }
+  return out.slice(0, 12)
+}
+
 async function getCurrentUserAndClient(): Promise<{
   user: { id: string }
   supabase: any
@@ -275,6 +303,10 @@ export async function saveOnboardingProfile(formData: FormData): Promise<SaveOnb
     const name = (formData.get('name') as string | null)?.trim() || ''
     const description = (formData.get('description') as string | null)?.trim() || ''
     const avatarFile = (formData.get('avatar') as File | null) ?? null
+    const starterResourcesRaw = formData.get('starter_resources')
+    const starterResources = normalizeStarterResources(
+      typeof starterResourcesRaw === 'string' ? starterResourcesRaw : null
+    )
 
     if (!name) return { success: false, error: 'Name is required' }
     if (!description) return { success: false, error: 'Description is required' }
@@ -313,6 +345,28 @@ export async function saveOnboardingProfile(formData: FormData): Promise<SaveOnb
       .eq('id', portfolio.id)
 
     if (error) return { success: false, error: error.message }
+
+    // Create starter resources (best-effort; do not block onboarding completion).
+    if (starterResources.length > 0) {
+      await Promise.all(
+        starterResources.map(async (r) => {
+          const text = (r.caption || r.url).trim()
+          if (!text) return
+          const fd = new FormData()
+          fd.set('text', text)
+          fd.set('note_type', 'resource')
+          fd.set('assigned_portfolios', JSON.stringify([]))
+          fd.set('visibility', 'public')
+          if (r.url) fd.set('url', r.url)
+          try {
+            await createNote(fd)
+          } catch {
+            // ignore (best-effort)
+          }
+        })
+      )
+    }
+
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e?.message ?? 'Failed to save profile' }

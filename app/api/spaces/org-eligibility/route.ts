@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { isJoinablePublicSpaceRow } from '@/lib/portfolio/spaceCapabilities'
-import { isEmailEligibleForOrgMembership } from '@/lib/portfolio/orgMembership'
+import { isEmailEligibleForOrgMembershipRule } from '@/lib/portfolio/orgMembership'
+import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
 
 export async function GET(req: Request) {
   try {
@@ -25,23 +26,28 @@ export async function GET(req: Request) {
       .from('portfolios')
       .select('id, type, metadata, visibility, is_pseudo')
       .eq('id', portfolioId)
-      .single()
+      .maybeSingle()
 
-    if (error || !p) {
+    const resolved =
+      !error && p ? (p as any) : await loadPortfolioForPage(supabase as any, portfolioId)
+
+    if (error || !resolved) {
       return NextResponse.json({ eligible: false }, { status: 200 })
     }
 
-    if (!isJoinablePublicSpaceRow((p as any).type, (p as any).metadata, (p as any).visibility, (p as any).is_pseudo)) {
+    const rowAny = resolved as any
+    const joinable = isJoinablePublicSpaceRow(rowAny.type, rowAny.metadata, rowAny.visibility, rowAny.is_pseudo)
+    if (!joinable) {
       return NextResponse.json({ eligible: false }, { status: 200 })
     }
 
-    const props = ((p as any).metadata as any)?.properties || {}
+    const props = (rowAny.metadata as any)?.properties || {}
     const org = props.org_membership || null
     if (!org || org.enabled !== true) {
       return NextResponse.json({ eligible: false }, { status: 200 })
     }
 
-    const eligible = isEmailEligibleForOrgMembership((user as any).email ?? null, org.email_suffixes)
+    const eligible = isEmailEligibleForOrgMembershipRule((user as any).email ?? null, org)
     return NextResponse.json({ eligible }, { status: 200 })
   } catch (_e: any) {
     return NextResponse.json({ eligible: false }, { status: 200 })

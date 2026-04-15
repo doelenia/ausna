@@ -612,6 +612,9 @@ function OnboardingLegalStep({ onComplete }: { onComplete: () => void }) {
 function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [starterResources, setStarterResources] = useState<Array<{ url: string; caption: string }>>([
+    { url: '', caption: '' },
+  ])
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [initialAvatarUrl, setInitialAvatarUrl] = useState<string | null>(null)
@@ -668,6 +671,15 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
       const formData = new FormData()
       formData.set('name', trimmedName)
       formData.set('description', trimmedDesc)
+      formData.set(
+        'starter_resources',
+        JSON.stringify(
+          starterResources.map((r) => ({
+            url: r.url.trim(),
+            caption: r.caption.trim(),
+          }))
+        )
+      )
       if (avatarFile) formData.set('avatar', avatarFile)
       const result = await saveOnboardingProfile(formData)
       if (!result.success) {
@@ -752,6 +764,85 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
             aria-required="true"
           />
         </div>
+
+        <Card variant="subtle" padding="sm">
+          <div className="space-y-3">
+            <div>
+              <Subtitle as="h2" className="mb-1">
+                Links &amp; notes (optional)
+              </Subtitle>
+              <UIText className="text-gray-600 block">
+                Drop a few links with a short caption. We’ll turn them into Resources after you submit.
+              </UIText>
+            </div>
+
+            <div className="space-y-2">
+              {starterResources.map((row, idx) => (
+                <div key={idx} className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
+                  <div>
+                    <UIText as="label" className="block mb-1">
+                      Link
+                    </UIText>
+                    <input
+                      type="url"
+                      inputMode="url"
+                      value={row.url}
+                      onChange={(e) =>
+                        setStarterResources((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, url: e.target.value } : r))
+                        )
+                      }
+                      placeholder="https://..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <UIText as="label" className="block mb-1">
+                      Caption
+                    </UIText>
+                    <input
+                      type="text"
+                      value={row.caption}
+                      onChange={(e) =>
+                        setStarterResources((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, caption: e.target.value } : r))
+                        )
+                      }
+                      placeholder="What is this link about?"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    />
+                  </div>
+
+                  {starterResources.length > 1 && (
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        variant="text"
+                        size="sm"
+                        onClick={() => setStarterResources((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        <UIText>Remove</UIText>
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-start">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setStarterResources((prev) => [...prev, { url: '', caption: '' }])}
+              >
+                <UIText>Add another</UIText>
+              </Button>
+            </div>
+          </div>
+        </Card>
+
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-md">
             <UIText className="text-red-700">{error}</UIText>

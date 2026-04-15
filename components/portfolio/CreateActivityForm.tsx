@@ -65,7 +65,7 @@ export function CreateActivityForm({
   const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>('')
   const [projectTypeSpecific, setProjectTypeSpecific] = useState<string>('')
   const [creatorRole, setCreatorRole] = useState<string>('Creator')
-  const [visibility, setVisibility] = useState<'public' | 'private'>('public')
+  const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private'>('public')
   const [activityValue, setActivityValue] = useState<ActivityDateTimeValue | null>(null)
   const [activityLocation, setActivityLocation] = useState<ActivityLocationValue | null>(null)
   const [projectStatus, setProjectStatus] = useState<string>('live')
@@ -429,12 +429,12 @@ export function CreateActivityForm({
       formData.append('project_status', projectStatus || '')
 
       // Explicitly pass call-to-join enabled so the server doesn't default it on.
-      if (!isExternal && visibility !== 'private') {
+      if (!isExternal && visibility === 'public') {
         formData.append('activity_call_to_join_enabled', allowOthersToJoin ? 'true' : 'false')
       }
 
       // Call-to-join: only for non-external, when activity is public, and explicitly enabled.
-      if (!isExternal && visibility !== 'private' && allowOthersToJoin) {
+      if (!isExternal && visibility === 'public' && allowOthersToJoin) {
         if (callToJoinDescription.trim().length > 0) {
           formData.append('activity_call_to_join_description', callToJoinDescription.trim())
         }
@@ -794,7 +794,7 @@ export function CreateActivityForm({
         </div>
 
         {/* Call to join (outside Advanced) */}
-        {!isExternal && visibility !== 'private' && (
+        {!isExternal && visibility === 'public' && (
           <div className="mt-4">
             <div className="flex items-center justify-between gap-3">
               <UIText as="label" className="block" id="allow-others-to-join-label">
@@ -1020,7 +1020,7 @@ export function CreateActivityForm({
                       Visibility
                     </UIText>
                     <div className="flex flex-wrap gap-2">
-                      {(['public', 'private'] as const).map((v) => (
+                      {(['public', 'unlisted', 'private'] as const).map((v) => (
                         <button
                           key={v}
                           type="button"
@@ -1033,12 +1033,13 @@ export function CreateActivityForm({
                           disabled={loading}
                         >
                           {v === 'public' && 'Public'}
+                          {v === 'unlisted' && 'Unlisted'}
                           {v === 'private' && 'Private'}
                         </button>
                       ))}
                     </div>
                     <UIText as="p" className="text-xs text-gray-500 mt-1">
-                      Private activities are only visible to you and will not appear in search or feeds.
+                      Unlisted is accessible with a direct link, but won’t show up in search unless someone is a member. Private only shows up to members.
                     </UIText>
                   </div>
 

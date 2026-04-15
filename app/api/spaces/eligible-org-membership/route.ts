@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { isJoinablePublicSpaceRow } from '@/lib/portfolio/spaceCapabilities'
-import { isEmailEligibleForOrgMembership } from '@/lib/portfolio/orgMembership'
+import { isEmailEligibleForOrgMembershipRule } from '@/lib/portfolio/orgMembership'
 import { ONBOARDING_JOIN_SPACES_PINNED_PORTFOLIO_ID } from '@/lib/onboarding/status'
 import {
   fetchViewerPendingSpaceIds,
@@ -19,12 +19,12 @@ export async function GET() {
       return NextResponse.json({ results: [] }, { status: 200 })
     }
 
-    // Keep this lightweight: fetch recent public spaces and filter in-process.
+    // Keep this lightweight: fetch recent joinable spaces and filter in-process.
+    // Directory surfaces should use `portfolios_directory` so unlisted/private stay non-discoverable.
     const { data: rows, error } = await supabase
-      .from('portfolios')
+      .from('portfolios_directory')
       .select('id, user_id, type, slug, metadata, visibility, is_pseudo, created_at')
       .eq('type', 'space')
-      .neq('visibility', 'private')
       .order('created_at', { ascending: false })
       .limit(200)
 
@@ -50,15 +50,15 @@ export async function GET() {
       }
     }
 
-    const orgEligibleRows = (rows || [])
-      .filter((p: any) =>
-        isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
-      )
+    const joinableRows = (rows || []).filter((p: any) =>
+      isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
+    )
+    const orgEligibleRows = joinableRows
       .filter((p: any) => {
         const props = (p.metadata as any)?.properties || {}
         const org = props.org_membership || null
         if (!org || org.enabled !== true) return false
-        return isEmailEligibleForOrgMembership((user as any).email ?? null, org.email_suffixes)
+        return isEmailEligibleForOrgMembershipRule((user as any).email ?? null, org)
       })
       .slice(0, 3)
 

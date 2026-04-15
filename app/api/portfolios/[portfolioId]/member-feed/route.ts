@@ -3,16 +3,12 @@ import { createClient } from '@/lib/supabase/server'
 import { enrichNotesWithAuthorProfiles, type FeedItem } from '@/app/main/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { DB_NON_HUMAN_TYPES, type Portfolio } from '@/types/portfolio'
+import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
 
 export const dynamic = 'force-dynamic'
 
 function uniqStrings(list: string[]) {
   return Array.from(new Set(list.filter(Boolean)))
-}
-
-function isPublicPortfolio(p: any) {
-  const v = (p as any)?.visibility
-  return v === undefined || v === null || v === 'public'
 }
 
 function isActivityHostedByPortfolio(activityPortfolio: any, hostPortfolioId: string) {
@@ -51,13 +47,18 @@ export async function GET(
       .eq('id', portfolioId)
       .single()
 
-    if (portfolioError || !portfolio) {
+    const resolvedPortfolio =
+      portfolioError || !portfolio
+        ? await loadPortfolioForPage(supabase as any, portfolioId)
+        : (portfolio as any)
+
+    if (!resolvedPortfolio) {
       return NextResponse.json({ error: 'Portfolio not found' }, { status: 404 })
     }
 
-    const type = (portfolio as any).type as string
-    const ownerId = String((portfolio as any).user_id)
-    const meta = ((portfolio as any).metadata as any) || {}
+    const type = (resolvedPortfolio as any).type as string
+    const ownerId = String((resolvedPortfolio as any).user_id)
+    const meta = ((resolvedPortfolio as any).metadata as any) || {}
     const members = Array.isArray(meta?.members) ? (meta.members as string[]) : []
     const managers = Array.isArray(meta?.managers) ? (meta.managers as string[]) : []
     const isExternalActivity =
@@ -91,7 +92,7 @@ export async function GET(
         .order('created_at', { ascending: false })
         .limit(notesPoolLimit),
       supabase
-        .from('portfolios')
+        .from('portfolios_directory')
         .select('*')
         .in('type', [...DB_NON_HUMAN_TYPES])
         .in('user_id', memberUserIds)
@@ -147,7 +148,7 @@ export async function GET(
       })
     })
 
-    let rawPortfolios = (portfoliosRes.data || []).filter(isPublicPortfolio)
+    let rawPortfolios = portfoliosRes.data || []
     // For non-human portfolio feeds: only show created portfolios hosted by this portfolio.
     if (type !== 'human') {
       rawPortfolios = rawPortfolios.filter((p: any) =>

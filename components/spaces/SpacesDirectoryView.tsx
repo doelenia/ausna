@@ -7,7 +7,7 @@ import { Button, Card, Content, UIText, UIButtonText } from '@/components/ui'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { ActivityCard } from '@/components/explore/ExploreView'
 import { getSpaceUrl } from '@/lib/portfolio/routes'
-import { Lock, X } from 'lucide-react'
+import { Link2, Lock, X } from 'lucide-react'
 import { isActivityLive } from '@/lib/activityLive'
 import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
@@ -89,8 +89,9 @@ function isSpaceJoinable(p: ViewerFeedSpacePortfolio, currentUserId: string | un
   if (props.external === true) return true
   const callToJoin = (props.call_to_join as ActivityCallToJoinConfig | null | undefined) ?? null
   const dt = getSpaceActivityDateTime(p) ?? undefined
-  const visibility = (p.visibility as 'public' | 'private' | undefined | null) ?? 'public'
-  return isCallToJoinWindowOpen(visibility, callToJoin, dt, status)
+  const visibility = (p.visibility || 'public') === 'unlisted' ? 'unlisted' : 'public'
+  const result = isCallToJoinWindowOpen(visibility, callToJoin, dt, status)
+  return result
 }
 
 function toExploreActivity(p: ViewerFeedSpacePortfolio): TimelineActivity {
@@ -241,6 +242,12 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
               <Lock
                 className="absolute left-0 top-0 z-20 h-4 w-4 text-gray-600 drop-shadow-sm"
                 aria-label="Private"
+              />
+            )}
+            {(p.visibility || 'public') === 'unlisted' && (
+              <Link2
+                className="absolute left-0 top-0 z-20 h-4 w-4 text-gray-600 drop-shadow-sm"
+                aria-label="Unlisted"
               />
             )}
             <StickerAvatar

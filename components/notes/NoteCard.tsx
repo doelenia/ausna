@@ -792,7 +792,7 @@ export function NoteCard({
       return (
         <div 
           key={index} 
-          className="border border-gray-200 rounded-lg p-4 bg-gray-50"
+          className="border border-gray-200 rounded-lg p-4 bg-gray-50 text-left"
           onClick={(e) => e.stopPropagation()}
         >
           {urlRef.headerImage && (
@@ -814,22 +814,26 @@ export function NoteCard({
                 target.src = `https://www.google.com/s2/favicons?domain=${displayHostName}&sz=64`
               }}
             />
-            <div className="flex-1">
+            <div className="flex-1 text-left">
               {urlRef.title && (
-                <Title as="h4" className="mb-1">{urlRef.title}</Title>
+                <Title as="h4" className="mb-1 text-left">
+                  {urlRef.title}
+                </Title>
               )}
               {urlRef.description && (
-                <Content as="p" className="mb-2">{urlRef.description}</Content>
+                <Content as="p" className="mb-2 text-left">
+                  {urlRef.description}
+                </Content>
               )}
               {/* Always show host name */}
               <a
                 href={urlRef.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-blue-600 hover:underline"
+                className="text-blue-600 hover:underline text-left"
                 onClick={(e) => e.stopPropagation()}
               >
-                <UIText>{displayHostName}</UIText>
+                <UIText className="text-left">{displayHostName}</UIText>
               </a>
             </div>
           </div>
@@ -964,7 +968,7 @@ export function NoteCard({
                       className="w-full h-48 object-cover"
                     />
                   )}
-                  <div className="p-4">
+                  <div className="p-4 text-left">
                     <div className="flex items-start gap-3">
                       <img
                         src={displayHostIcon}
@@ -975,14 +979,18 @@ export function NoteCard({
                           target.src = `https://www.google.com/s2/favicons?domain=${displayHostName}&sz=64`
                         }}
                       />
-                      <div className="flex-1">
+                      <div className="flex-1 text-left">
                         {urlRef.title && (
-                          <Title as="h4" className="mb-1">{urlRef.title}</Title>
+                          <Title as="h4" className="mb-1 text-left">
+                            {urlRef.title}
+                          </Title>
                         )}
                         {urlRef.description && (
-                          <Content as="p" className="mb-2">{urlRef.description}</Content>
+                          <Content as="p" className="mb-2 text-left">
+                            {urlRef.description}
+                          </Content>
                         )}
-                        <UIText className="text-blue-600">{displayHostName}</UIText>
+                        <UIText className="text-blue-600 text-left">{displayHostName}</UIText>
                       </div>
                     </div>
                   </div>
@@ -1395,7 +1403,7 @@ export function NoteCard({
           )}
           
           {/* Content overlay */}
-          <div className="relative z-10 h-full flex flex-col p-4">
+          <div className="relative z-10 h-full flex flex-col p-4 text-left">
             {/* Top: Favicon and host name */}
             <div className="flex items-center gap-2 mb-3">
               <img
@@ -1414,7 +1422,7 @@ export function NoteCard({
             
             {/* Title */}
             {firstUrlRef!.title && (
-              <Subtitle as="h3" className="text-white">
+              <Subtitle as="h3" className="text-white text-left">
                 {firstUrlRef!.title}
               </Subtitle>
             )}
@@ -1423,8 +1431,8 @@ export function NoteCard({
           {/* Text label at bottom - positioned like image notes */}
           {note.text && (
             <div className="absolute bottom-0 left-0 right-0 p-2 z-10">
-              <div className="bg-white rounded-md px-2 py-1.5 w-fit max-w-full">
-                <UIText as="p" className="line-clamp-2 whitespace-pre-wrap">
+              <div className="bg-white rounded-md px-2 py-1.5 w-fit max-w-full text-left">
+                <UIText as="p" className="line-clamp-2 whitespace-pre-wrap text-left">
                   {note.text}
                 </UIText>
               </div>

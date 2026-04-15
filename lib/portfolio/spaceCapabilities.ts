@@ -58,7 +58,8 @@ export function deriveSpaceCapabilitiesFromJson(
 }
 
 /**
- * Onboarding / discovery: space is "joinable" when call-to-join is on, portfolio is public, not pseudo.
+ * Onboarding / discovery: space is "joinable" when call-to-join is on,
+ * portfolio is not private (public or unlisted), and not pseudo.
  */
 export function isJoinablePublicSpaceRow(
   type: string | null | undefined,

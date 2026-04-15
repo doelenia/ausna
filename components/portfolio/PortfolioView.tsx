@@ -42,7 +42,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
 import { Button, Title, Content, UIText, UserAvatar, Card, UIButtonText } from '@/components/ui'
-import { Apple, ChevronRight, Lock, Megaphone, History, X, Plus } from 'lucide-react'
+import { Apple, ChevronRight, Link2, Lock, Megaphone, History, X, Plus } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -139,7 +139,7 @@ export function PortfolioView({
       slug?: string
       role?: string
       projectType?: string | null
-      visibility?: 'public' | 'private'
+      visibility?: 'public' | 'private' | 'unlisted'
     }>
   >([])
   const [projectsLoading, setProjectsLoading] = useState(false)
@@ -300,7 +300,7 @@ export function PortfolioView({
             slug: string
             role: string
             projectType?: string | null
-            visibility: 'public' | 'private'
+            visibility: 'public' | 'private' | 'unlisted'
           }> = []
           for (const p of fromProjects) {
             if (seen.has(p.id)) continue
@@ -312,7 +312,12 @@ export function PortfolioView({
               slug: p.slug,
               role: p.role,
               projectType: p.projectType,
-              visibility: (p as { visibility?: string }).visibility === 'private' ? 'private' : 'public',
+              visibility:
+                (p as { visibility?: string }).visibility === 'private'
+                  ? 'private'
+                  : (p as { visibility?: string }).visibility === 'unlisted'
+                    ? 'unlisted'
+                    : 'public',
             })
           }
           for (const c of fromCommunities) {
@@ -478,9 +483,19 @@ export function PortfolioView({
       | { enabled?: boolean }
       | null
     const hasCallToJoin = !!callToJoin && callToJoin.enabled !== false
-    const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+    const visibility =
+      (portfolio as any).visibility === 'unlisted'
+        ? 'unlisted'
+        : (portfolio as any).visibility === 'public'
+          ? 'public'
+          : 'private'
 
-    if (portfolio.type === 'human' || visibility === 'private' || !hasCallToJoin || (!isOwner && !isManager)) {
+    if (
+      portfolio.type === 'human' ||
+      visibility === 'private' ||
+      !hasCallToJoin ||
+      (!isOwner && !isManager)
+    ) {
       setPendingJoinRequestsCount(null)
       return
     }
@@ -723,6 +738,7 @@ export function PortfolioView({
   const [isEditingCallToJoin, setIsEditingCallToJoin] = useState(false)
   const [editCallToJoinDraft, setEditCallToJoinDraft] = useState<ActivityCallToJoinConfig | null>(null)
   const [editOrgMembershipEmailSuffixes, setEditOrgMembershipEmailSuffixes] = useState<string>('')
+  const [editOrgMembershipApprovedEmails, setEditOrgMembershipApprovedEmails] = useState<string>('')
   const [isCommunityJoinModalOpen, setIsCommunityJoinModalOpen] = useState(false)
   const [communityJoinPromptAnswer, setCommunityJoinPromptAnswer] = useState('')
   const [isSubmittingCommunityJoin, setIsSubmittingCommunityJoin] = useState(false)
@@ -1008,7 +1024,7 @@ export function PortfolioView({
     }
     const callToJoin = props.call_to_join || null
     const dt = getSpaceActivityDateTime(p) ?? undefined
-    const visibility = (p.visibility as 'public' | 'private' | undefined | null) ?? 'public'
+    const visibility = (p.visibility || 'public') === 'unlisted' ? 'unlisted' : 'public'
     return isCallToJoinWindowOpen(visibility, callToJoin, dt, status)
   }
 
@@ -1106,7 +1122,10 @@ export function PortfolioView({
     // Reset so the feed row skeleton stays visible until ordering data is ready.
     setSpacesLastNoteLoaded(false)
     fetch(spacesApiPath)
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        return data
+      })
       .then((data) => {
         if (cancelled) return
         const list: SpacesApiPortfolio[] = Array.isArray(data?.portfolios) ? data.portfolios : []
@@ -1319,6 +1338,12 @@ export function PortfolioView({
                 aria-label="Private"
               />
             )}
+            {(p.visibility || 'public') === 'unlisted' && (
+              <Link2
+                className="absolute left-0 top-0 z-20 h-4 w-4 text-gray-600 drop-shadow-sm"
+                aria-label="Unlisted"
+              />
+            )}
             <StickerAvatar
               src={avatar}
               alt={name}
@@ -1389,22 +1414,20 @@ export function PortfolioView({
     activityProperties?.call_to_join || null
   const isExternalActivity = activityProperties?.external === true
   const externalLink = (activityProperties?.external_link as string) || ''
+  const orgMembership = (activityProperties as any)?.org_membership || null
 
   useEffect(() => {
     // Check if user is verified for one-click org join on this space.
     // Only relevant for visitors when call-to-join requires approval.
     const requiresApproval = activityCallToJoin?.require_approval ?? true
-    if (!isAuthenticated || isOwner || isManager || isMember) {
-      setOrgJoinEligible(false)
-      setOrgJoinEligibilityChecked(true)
-      return
-    }
-    if (!activityCallToJoin || !requiresApproval) {
-      setOrgJoinEligible(false)
-      setOrgJoinEligibilityChecked(true)
-      return
-    }
-    if ((portfolio as any).visibility === 'private') {
+    const visibilityRaw = (portfolio as any).visibility as string | null | undefined
+    const visibility = visibilityRaw === 'unlisted' ? 'unlisted' : visibilityRaw === 'private' ? 'private' : 'public'
+    let skipReason: string | null = null
+    if (!isAuthenticated) skipReason = 'not_authenticated'
+    else if (isOwner || isManager || isMember) skipReason = 'already_in_portfolio'
+    else if (!activityCallToJoin || !(requiresApproval)) skipReason = 'no_call_to_join_or_no_approval'
+    else if (visibility === 'private') skipReason = 'private_visibility'
+    if (skipReason) {
       setOrgJoinEligible(false)
       setOrgJoinEligibilityChecked(true)
       return
@@ -1413,7 +1436,10 @@ export function PortfolioView({
     let cancelled = false
     setOrgJoinEligibilityChecked(false)
     fetch(`/api/spaces/org-eligibility?portfolioId=${encodeURIComponent(portfolio.id)}`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        return data
+      })
       .then((data) => {
         if (cancelled) return
         setOrgJoinEligible(Boolean(data?.eligible))
@@ -1470,7 +1496,10 @@ export function PortfolioView({
       return
     }
 
-    const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+    const visibility =
+      (portfolio as any).visibility === 'unlisted'
+        ? 'unlisted'
+        : 'public'
     const activityDateTime =
       (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null
     const joinWindowOpen = isCallToJoinWindowOpen(
@@ -1798,8 +1827,11 @@ export function PortfolioView({
                   </div>
                 )
               })()}
-              {isProjectPortfolio(portfolio) && serverIsOwner && (portfolio as any).visibility === 'private' && (
+              {isProjectPortfolio(portfolio) && (portfolio as any).visibility === 'private' && (
                 <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
+              )}
+              {isProjectPortfolio(portfolio) && (portfolio as any).visibility === 'unlisted' && (
+                <Link2 className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Unlisted" />
               )}
             </div>
 
@@ -2065,7 +2097,10 @@ export function PortfolioView({
               (portfolio as any).visibility !== 'private' &&
               (() => {
               const config = activityCallToJoin
-              const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+              const visibility =
+                (portfolio as any).visibility === 'unlisted'
+                  ? 'unlisted'
+                  : 'public'
               const activityDateTime = (activityProperties?.activity_datetime as ActivityDateTimeValue | undefined) || null
               const joinWindowOpen = isCallToJoinWindowOpen(visibility, config, activityDateTime, projectStatus)
               const joinByDate = config.join_by ? new Date(config.join_by) : null
@@ -2146,7 +2181,7 @@ export function PortfolioView({
                   join_by_auto_managed: config.join_by_auto_managed ?? true,
                 })
                 const org = (activityProperties?.org_membership || null) as
-                  | { email_suffixes?: unknown }
+                  | { email_suffixes?: unknown; approved_emails?: unknown }
                   | null
                 const suffixes = Array.isArray(org?.email_suffixes)
                   ? (org!.email_suffixes as unknown[])
@@ -2154,6 +2189,12 @@ export function PortfolioView({
                       .join(', ')
                   : ''
                 setEditOrgMembershipEmailSuffixes(suffixes)
+                const approvedEmails = Array.isArray(org?.approved_emails)
+                  ? (org!.approved_emails as unknown[])
+                      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+                      .join(', ')
+                  : ''
+                setEditOrgMembershipApprovedEmails(approvedEmails)
                 setIsEditingCallToJoin(true)
               }
 
@@ -3451,6 +3492,7 @@ export function PortfolioView({
               formData.set('name', (basic.name as string) || '')
               formData.set('description', (basic.description as string) || '')
               formData.set('org_membership_email_suffixes', editOrgMembershipEmailSuffixes || '')
+              formData.set('org_membership_approved_emails', editOrgMembershipApprovedEmails || '')
               await updatePortfolio(formData)
 
               setIsEditingCallToJoin(false)
@@ -3544,6 +3586,23 @@ export function PortfolioView({
                       />
                       <UIText as="p" className="text-xs text-gray-500 mt-1">
                         People with matching email domains can join without approval.
+                      </UIText>
+                    </div>
+                  )}
+                  {draft.require_approval && (
+                    <div>
+                      <UIText as="label" className="block mb-1">
+                        Approved emails (optional)
+                      </UIText>
+                      <input
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                        value={editOrgMembershipApprovedEmails}
+                        onChange={(e) => setEditOrgMembershipApprovedEmails(e.target.value)}
+                        placeholder="e.g. alice@company.com, bob@school.edu"
+                        autoComplete="off"
+                      />
+                      <UIText as="p" className="text-xs text-gray-500 mt-1">
+                        Exact email matches can join without approval.
                       </UIText>
                     </div>
                   )}

@@ -33,6 +33,9 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
     }
 
     const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     const { data: human, error: humanError } = await supabase
       .from('portfolios')
@@ -51,12 +54,13 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
     }
 
     const { data: rows } = await supabase
-      .from('portfolios')
+      .from('portfolios_directory')
       .select('id, type, slug, user_id, visibility, created_at, metadata')
       .in('type', [...DB_NON_HUMAN_TYPES])
       .limit(1500)
 
-    const memberOf = ((rows || []) as PortfolioRow[]).filter((row) => humanInPortfolio(targetUserId, row))
+    const memberOf = ((rows || []) as PortfolioRow[])
+      .filter((row) => humanInPortfolio(targetUserId, row))
 
     const allMemberIds = new Set<string>()
     memberOf.forEach((row) => {
