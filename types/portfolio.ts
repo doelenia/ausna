@@ -1,7 +1,7 @@
 import { Json } from './supabase'
 import type { ActivityLocationValue } from '@/lib/location'
 
-export type PortfolioVisibility = 'public' | 'private'
+export type PortfolioVisibility = 'public' | 'private' | 'unlisted'
 
 /**
  * Canonical portfolio discriminator: person profile vs shared space.
@@ -256,6 +256,11 @@ export interface OrgMembershipConfig {
    * Matching is case-insensitive and normalized at runtime.
    */
   email_suffixes: string[]
+  /**
+   * Exact emails that are allowed to bypass approval (case-insensitive).
+   * Stored normalized to lowercase at write-time, but also normalized at runtime.
+   */
+  approved_emails?: string[]
 }
 
 /**

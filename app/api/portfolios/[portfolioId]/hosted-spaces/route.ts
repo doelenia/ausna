@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { DB_NON_HUMAN_TYPES, normalizePortfolioType } from '@/types/portfolio'
 import { getDeclaredHostSpaceIds } from '@/lib/portfolio/hostRefs'
+import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,6 +24,15 @@ function hostedBySpace(candidate: PortfolioRow, space: PortfolioRow): boolean {
   return getDeclaredHostSpaceIds(candidate).includes(space.id)
 }
 
+function viewerInPortfolio(viewerId: string, p: PortfolioRow): boolean {
+  if (!viewerId) return false
+  if (p.user_id === viewerId) return true
+  const meta = (p.metadata as any) || {}
+  const members: string[] = Array.isArray(meta?.members) ? meta.members : []
+  const managers: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+  return members.includes(viewerId) || managers.includes(viewerId)
+}
+
 export async function GET(_request: NextRequest, { params }: { params: { portfolioId: string } }) {
   try {
     const portfolioId = params.portfolioId
@@ -31,6 +41,9 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
     }
 
     const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     const { data: target, error: targetError } = await supabase
       .from('portfolios')
@@ -38,22 +51,25 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
       .eq('id', portfolioId)
       .single()
 
-    if (targetError || !target) {
+    const resolvedTarget =
+      targetError || !target ? await loadPortfolioForPage(supabase as any, portfolioId) : (target as any)
+
+    if (!resolvedTarget) {
       return NextResponse.json({ error: 'Portfolio not found' }, { status: 404 })
     }
 
-    if (normalizePortfolioType((target as any).type) !== 'space') {
+    if (normalizePortfolioType((resolvedTarget as any).type) !== 'space') {
       return NextResponse.json({ portfolios: [] })
     }
 
     const { data: rows } = await supabase
-      .from('portfolios')
+      .from('portfolios_directory')
       .select('id, type, slug, user_id, host_project_id, visibility, created_at, metadata')
       .in('type', [...DB_NON_HUMAN_TYPES])
       .limit(1000)
 
     const hosted = ((rows || []) as PortfolioRow[])
-      .filter((row) => hostedBySpace(row, target as PortfolioRow))
+      .filter((row) => hostedBySpace(row, resolvedTarget as PortfolioRow))
 
     const allMemberIds = new Set<string>()
     hosted.forEach((row) => {

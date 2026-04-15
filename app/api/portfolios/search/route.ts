@@ -9,6 +9,13 @@ import {
 
 export const dynamic = 'force-dynamic'
 
+// Directory/search surfaces should use the `portfolios_directory` view so
+// unlisted/private discoverability rules stay centralized at the DB layer.
+
+function isJoinableVisibility(visibility: string | null | undefined): boolean {
+  return visibility === 'public' || visibility === 'unlisted'
+}
+
 /**
  * Calculate similarity score between query and text
  * Simple string matching - higher score for exact matches and prefix matches
@@ -96,12 +103,11 @@ export async function GET(request: NextRequest) {
           })
         }
         
-        // Get human portfolios of friends
-        // Note: RLS automatically excludes pseudo portfolios for non-admin users
+        // Get human portfolios of friends (directory-filtered)
         let friendPortfolios: any[] = []
         if (friendIds.size > 0) {
           const { data } = await supabase
-            .from('portfolios')
+            .from('portfolios_directory')
             .select('*')
             .eq('type', 'human')
             .in('user_id', Array.from(friendIds))
@@ -110,7 +116,7 @@ export async function GET(request: NextRequest) {
         }
         
         const { data: allPortfolios } = await supabase
-          .from('portfolios')
+          .from('portfolios_directory')
           .select('*')
           .in('type', [...DB_NON_HUMAN_TYPES])
           .limit(100)
@@ -128,7 +134,11 @@ export async function GET(request: NextRequest) {
       } else {
         // For visitors: show recent portfolios (optionally filtered by type)
         // Note: RLS automatically excludes pseudo portfolios for non-admin users
-        let queryBuilder = supabase.from('portfolios').select('*').order('created_at', { ascending: false }).limit(limit)
+        let queryBuilder = supabase
+          .from('portfolios_directory')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(limit)
         if (joinableOnly) {
           queryBuilder = queryBuilder.in('type', [...DB_NON_HUMAN_TYPES])
         } else if (typeFilter) {
@@ -149,7 +159,7 @@ export async function GET(request: NextRequest) {
       // This is necessary because Supabase doesn't support ilike on JSONB paths directly
       // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users
       // Admin users will see all portfolios including pseudo ones
-      let fetchQuery = supabase.from('portfolios').select('*').limit(limit * 3)
+      let fetchQuery = supabase.from('portfolios_directory').select('*').limit(limit * 3)
       if (joinableOnly) {
         fetchQuery = fetchQuery.in('type', [...DB_NON_HUMAN_TYPES])
       } else if (typeFilter) {

@@ -5,8 +5,10 @@ import { isActivityLive } from './activityLive'
 /**
  * Call-to-join is available when the activity is not private (no separate enable/disable).
  */
-export function isCallToJoinAvailable(visibility: 'public' | 'private' | undefined | null): boolean {
-  return visibility !== 'private'
+export function isCallToJoinAvailable(
+  visibility: 'public' | 'private' | 'unlisted' | undefined | null
+): boolean {
+  return visibility === 'public' || visibility === 'unlisted'
 }
 
 /**
@@ -20,7 +22,7 @@ export function isCallToJoinAvailable(visibility: 'public' | 'private' | undefin
  *   - The activity is currently LIVE (per isActivityLive).
  */
 export function isCallToJoinWindowOpen(
-  visibility: 'public' | 'private' | undefined | null,
+  visibility: 'public' | 'private' | 'unlisted' | undefined | null,
   callToJoin: ActivityCallToJoinConfig | undefined | null,
   activityDateTime: ActivityDateTimeValue | undefined | null,
   status: string | undefined | null

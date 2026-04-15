@@ -83,7 +83,7 @@ export async function fetchViewerEligibleSpaceFeedItems(
 ): Promise<ViewerFeedSpaceItem[]> {
   const [{ data: allSpacesRows }, { data: subscriptionsRows }] = await Promise.all([
     supabase
-      .from('portfolios')
+      .from('portfolios_directory')
       .select('id, type, slug, user_id, visibility, created_at, metadata')
       .in('type', [...DB_NON_HUMAN_TYPES])
       .limit(2000),
@@ -101,7 +101,7 @@ export async function fetchViewerEligibleSpaceFeedItems(
   const { data: subscribedSpacesRows } =
     subscribedIds.length > 0
       ? await supabase
-          .from('portfolios')
+          .from('portfolios_directory')
           .select('id, type, slug, user_id, visibility, created_at, metadata')
           .in('id', subscribedIds)
       : { data: [] as Record<string, unknown>[] }

@@ -32,7 +32,7 @@ interface ActivityRow {
 }
 
 function isOpenToJoin(activity: ActivityRow): boolean {
-  const visibility = activity.visibility as 'public' | 'private' | undefined | null
+  const visibility = activity.visibility as 'public' | 'private' | 'unlisted' | undefined | null
   const props = activity.metadata?.properties
   const status = activity.metadata?.status ?? null
   const isExternal = props?.external === true
@@ -139,7 +139,7 @@ export async function GET(
     }
 
     const { data: activitiesRaw } = await supabase
-      .from('portfolios')
+      .from('portfolios_directory')
       .select('id, user_id, host_project_id, visibility, metadata')
       .in('type', [...DB_NON_HUMAN_TYPES])
       .limit(500)

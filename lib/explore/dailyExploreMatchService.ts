@@ -324,7 +324,7 @@ export async function getExploreActivitiesService(userId: string): Promise<Explo
 
   for (const row of activities) {
     if (filtered.length >= EXPLORE_ACTIVITIES_LIMIT) break
-    if (row.visibility === 'private') continue
+    if (row.visibility !== 'public') continue
     if (!isOpenToJoin(row)) continue
     if (!userNotJoinedOrUploaded(row, userId)) continue
     // Accessibility/location is the only initial relevance filter we keep for explore/match,

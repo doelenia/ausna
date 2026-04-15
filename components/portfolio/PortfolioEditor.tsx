@@ -230,7 +230,11 @@ export function PortfolioEditor({
   const [projectTypeGeneral, setProjectTypeGeneral] = useState<string>(metadata?.project_type_general || '')
   const [projectTypeSpecific, setProjectTypeSpecific] = useState<string>(metadata?.project_type_specific || '')
   const [visibility, setVisibility] = useState<PortfolioVisibility>(
-    (portfolio as any).visibility === 'private' ? 'private' : 'public'
+    (portfolio as any).visibility === 'private'
+      ? 'private'
+      : (portfolio as any).visibility === 'unlisted'
+        ? 'unlisted'
+        : 'public'
   )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -263,6 +267,15 @@ export function PortfolioEditor({
   })()
   const [orgMembershipEmailSuffixes, setOrgMembershipEmailSuffixes] = useState<string>(
     initialOrgMembershipSuffixes
+  )
+  const initialOrgMembershipApprovedEmails: string = (() => {
+    const raw = metadata?.properties?.org_membership?.approved_emails
+    if (!Array.isArray(raw)) return ''
+    const list = raw.filter((v: any) => typeof v === 'string' && v.trim().length > 0)
+    return list.join(', ')
+  })()
+  const [orgMembershipApprovedEmails, setOrgMembershipApprovedEmails] = useState<string>(
+    initialOrgMembershipApprovedEmails
   )
   const [showCallToJoinModal, setShowCallToJoinModal] = useState(false)
   const initialHostProjectIds: string[] =
@@ -617,6 +630,7 @@ export function PortfolioEditor({
         formData.append('host_project_ids', JSON.stringify(hostProjectIds))
         formData.append('host_community_ids', JSON.stringify(hostCommunityIds))
         formData.append('org_membership_email_suffixes', orgMembershipEmailSuffixes || '')
+        formData.append('org_membership_approved_emails', orgMembershipApprovedEmails || '')
         formData.append('hosting_permission', hostingPermission)
       }
       if (isSpacePortfolio(portfolio) && isExternalAct) {
@@ -633,8 +647,12 @@ export function PortfolioEditor({
 
       // Update call-to-join configuration from editor (skip for external)
       const currentVisibility: PortfolioVisibility =
-        (portfolio as any).visibility === 'private' ? 'private' : 'public'
-      if (portfolio.type !== 'human' && !isExternalAct && currentVisibility !== 'private') {
+        (portfolio as any).visibility === 'private'
+          ? 'private'
+          : (portfolio as any).visibility === 'unlisted'
+            ? 'unlisted'
+            : 'public'
+      if (portfolio.type !== 'human' && !isExternalAct && currentVisibility === 'public') {
         const cfg: ActivityCallToJoinConfig =
           callToJoinConfig ||
           initialCallToJoin || {
@@ -855,7 +873,7 @@ export function PortfolioEditor({
                     Visibility
                   </UIText>
                   <div className="flex flex-wrap gap-2">
-                    {(['public', 'private'] as PortfolioVisibility[]).map((v) => (
+                    {(['public', 'unlisted', 'private'] as PortfolioVisibility[]).map((v) => (
                       <button
                         key={v}
                         type="button"
@@ -868,12 +886,13 @@ export function PortfolioEditor({
                         disabled={loading}
                       >
                         {v === 'public' && 'Public'}
+                        {v === 'unlisted' && 'Unlisted'}
                         {v === 'private' && 'Private'}
                       </button>
                     ))}
                   </div>
                   <UIText as="p" className="text-xs text-gray-500 mt-1">
-                    Private spaces are only visible to you and will not appear in search or feeds.
+                    Unlisted spaces are accessible with a direct link, but won’t show up in search unless someone is a member. Private spaces only show up to members.
                   </UIText>
                 </div>
               </>
@@ -1560,7 +1579,7 @@ export function PortfolioEditor({
                   onChange={(e) =>
                     setCallToJoinConfig((prev) => ({
                       ...(prev || {
-                        enabled: (visibility !== 'private'),
+                        enabled: visibility !== 'private',
                         description: '',
                         join_by: null,
                         require_approval: true,
@@ -1595,7 +1614,7 @@ export function PortfolioEditor({
                     const value = e.target.value
                     setCallToJoinConfig((prev) => ({
                       ...(prev || {
-                        enabled: (visibility !== 'private'),
+                        enabled: visibility !== 'private',
                         description: 'Join us!',
                         join_by: null,
                         require_approval: true,
@@ -1626,7 +1645,7 @@ export function PortfolioEditor({
                   onChange={(e) =>
                     setCallToJoinConfig((prev) => ({
                       ...(prev || {
-                        enabled: (visibility !== 'private'),
+                        enabled: visibility !== 'private',
                         description: 'Join us!',
                         join_by: null,
                         require_approval: true,
@@ -1671,6 +1690,23 @@ export function PortfolioEditor({
               {(callToJoinConfig?.require_approval ?? true) && (
                 <div>
                   <UIText as="label" className="block mb-1">
+                    Approved emails (optional)
+                  </UIText>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                    value={orgMembershipApprovedEmails}
+                    onChange={(e) => setOrgMembershipApprovedEmails(e.target.value)}
+                    placeholder="e.g. alice@company.com, bob@school.edu"
+                    autoComplete="off"
+                  />
+                  <UIText as="p" className="text-xs text-gray-500 mt-1">
+                    Exact email matches can join without approval.
+                  </UIText>
+                </div>
+              )}
+              {(callToJoinConfig?.require_approval ?? true) && (
+                <div>
+                  <UIText as="label" className="block mb-1">
                     Prompt (optional)
                   </UIText>
                   <textarea
@@ -1680,7 +1716,7 @@ export function PortfolioEditor({
                     onChange={(e) =>
                       setCallToJoinConfig((prev) => ({
                         ...(prev || {
-                          enabled: (visibility !== 'private'),
+                          enabled: visibility !== 'private',
                           description: 'Join us!',
                           join_by: null,
                           require_approval: true,

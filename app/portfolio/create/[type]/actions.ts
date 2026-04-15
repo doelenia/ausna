@@ -57,6 +57,7 @@ export async function createPortfolio(
     const activityCallToJoinPromptRaw = formData.get('activity_call_to_join_prompt') as string | null
     const activityCallToJoinRolesRaw = formData.get('activity_call_to_join_roles') as string | null
     const orgMembershipEmailSuffixesRaw = formData.get('org_membership_email_suffixes') as string | null
+    const orgMembershipApprovedEmailsRaw = formData.get('org_membership_approved_emails') as string | null
     const isExternalRaw = formData.get('is_external') as string | null
     const isExternal = isExternalRaw === 'true'
     const externalLinkRaw = formData.get('external_link') as string | null
@@ -210,10 +211,16 @@ export async function createPortfolio(
       slugCounter++
     }
 
-    // Compute visibility for projects/activities (public/private). Communities remain public for now.
-    // External activities are always public.
-    const visibility: 'public' | 'private' =
-      isExternal ? 'public' : visibilityRaw === 'private' ? 'private' : 'public'
+    // Compute visibility for spaces/activities (public/private/unlisted).
+    // External activities/spaces are always public.
+    const visibility: 'public' | 'private' | 'unlisted' =
+      isExternal
+        ? 'public'
+        : visibilityRaw === 'private'
+          ? 'private'
+          : visibilityRaw === 'unlisted'
+            ? 'unlisted'
+            : 'public'
 
     // For external portfolios, creator is only in members if they chose "I'm going"
     const initialMembers = isExternal ? (iAmGoing ? [user.id] : []) : [user.id]
@@ -394,16 +401,19 @@ export async function createPortfolio(
       }
     }
 
-    // Optional: organizational membership rule to allow domain-based auto-join.
-    // Only persists when at least one suffix is provided.
+    // Optional: organizational membership rule to allow domain-based auto-join
+    // (suffix-based or explicit approved-email allowlist).
     if (!isExternal && visibility !== 'private') {
       const suffixes = normalizeEmailSuffixes(orgMembershipEmailSuffixesRaw || '')
-      if (suffixes.length > 0) {
+      const { normalizeApprovedEmails } = await import('@/lib/portfolio/orgMembership')
+      const approvedEmails = normalizeApprovedEmails(orgMembershipApprovedEmailsRaw || '')
+      if (suffixes.length > 0 || approvedEmails.length > 0) {
         metadata.properties = {
           ...(metadata.properties || {}),
           org_membership: {
             enabled: true,
             email_suffixes: suffixes,
+            ...(approvedEmails.length > 0 ? { approved_emails: approvedEmails } : {}),
           },
         }
       }

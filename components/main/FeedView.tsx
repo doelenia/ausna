@@ -15,7 +15,7 @@ import { PortfolioCreatedCard } from '@/components/main/PortfolioCreatedCard'
 import type { DailyMatchHighlightMeta } from '@/app/explore/actions'
 import { getExploreActivityHighlights } from '@/app/explore/actions'
 import { buildLoginHref } from '@/lib/auth/login-redirect'
-import { Rss, Lock, ChevronRight } from 'lucide-react'
+import { Rss, Link2, Lock, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
@@ -512,6 +512,12 @@ export function FeedView({
                             <Lock
                               className="absolute left-0 top-0 z-20 h-4 w-4 text-gray-600 drop-shadow-sm"
                               aria-label="Private"
+                            />
+                          )}
+                          {(p.visibility || 'public') === 'unlisted' && (
+                            <Link2
+                              className="absolute left-0 top-0 z-20 h-4 w-4 text-gray-600 drop-shadow-sm"
+                              aria-label="Unlisted"
                             />
                           )}
                           <StickerAvatar

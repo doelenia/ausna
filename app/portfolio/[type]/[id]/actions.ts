@@ -309,6 +309,8 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
         const userRole = memberRoles[userId] || (isOwner ? 'Creator' : isManager ? 'Manager' : 'Member')
         const projectTypeSpecific = metadata?.project_type_specific || null
         const basic = getPortfolioBasic(p as Portfolio)
+        const rawVis = (p as any).visibility as string | null | undefined
+        const vis = rawVis === 'private' ? 'private' : rawVis === 'unlisted' ? 'unlisted' : 'public'
         return {
           id: p.id,
           type: 'space' as const,
@@ -317,7 +319,7 @@ export async function getSubPortfolios(portfolioId: string): Promise<GetSubPortf
           slug: p.slug,
           role: userRole,
           projectType: projectTypeSpecific,
-          visibility: (p as any).visibility === 'private' ? 'private' : 'public',
+          visibility: vis,
         }
       })
 
@@ -412,6 +414,7 @@ export async function updatePortfolio(
     const hostProjectIdsRaw = formData.get('host_project_ids') as string | null
     const hostCommunityIdsRaw = formData.get('host_community_ids') as string | null
     const orgMembershipEmailSuffixesRaw = formData.get('org_membership_email_suffixes') as string | null
+    const orgMembershipApprovedEmailsRaw = formData.get('org_membership_approved_emails') as string | null
     const humanAutoCityLocationEnabledRaw = formData.get(
       'human_auto_city_location_enabled'
     ) as string | null
@@ -738,15 +741,21 @@ export async function updatePortfolio(
       }
 
       // Optional: organizational membership rule (domain-based auto-join).
-      // Accepts comma/space separated suffixes; empty clears the config.
-      if (orgMembershipEmailSuffixesRaw !== null) {
-        const { normalizeEmailSuffixes } = await import('@/lib/portfolio/orgMembership')
+      // Accepts comma/space separated suffixes/emails; empty clears the config.
+      // Note: this also supports an explicit approved email allowlist.
+      if (orgMembershipEmailSuffixesRaw !== null || orgMembershipApprovedEmailsRaw !== null) {
+        const { normalizeEmailSuffixes, normalizeApprovedEmails } = await import('@/lib/portfolio/orgMembership')
         const suffixes = normalizeEmailSuffixes(orgMembershipEmailSuffixesRaw || '')
+        const approvedEmails = normalizeApprovedEmails(orgMembershipApprovedEmailsRaw || '')
         const nextProps = (updatedMetadata.properties || properties || {}) as Record<string, any>
-        if (suffixes.length > 0) {
+        if (suffixes.length > 0 || approvedEmails.length > 0) {
           updatedMetadata.properties = {
             ...nextProps,
-            org_membership: { enabled: true, email_suffixes: suffixes },
+            org_membership: {
+              enabled: true,
+              email_suffixes: suffixes,
+              ...(approvedEmails.length > 0 ? { approved_emails: approvedEmails } : {}),
+            },
           }
         } else {
           // Clear
@@ -829,7 +838,7 @@ export async function updatePortfolio(
     // Allow owner to update visibility for non-human portfolios
     if (
       portfolio.type !== 'human' &&
-      (visibilityRaw === 'public' || visibilityRaw === 'private')
+      (visibilityRaw === 'public' || visibilityRaw === 'private' || visibilityRaw === 'unlisted')
     ) {
       updatePayload.visibility = visibilityRaw
     }
@@ -1649,7 +1658,8 @@ export async function applyToActivityCallToJoin(
       return { success: false, error: 'Call-to-join is not available for human portfolios' }
     }
 
-    const visibility = (portfolio as any).visibility === 'private' ? 'private' : 'public'
+    const rawVisibility = (portfolio as any).visibility as string | null | undefined
+    const visibility = rawVisibility === 'private' ? 'private' : rawVisibility === 'unlisted' ? 'unlisted' : 'public'
     if (visibility === 'private') {
       return { success: false, error: 'Call-to-join is not available for private portfolios' }
     }
@@ -1659,7 +1669,7 @@ export async function applyToActivityCallToJoin(
     const callToJoin: ActivityCallToJoinConfig | undefined = properties.call_to_join
     const isExternal = properties.external === true
     const orgMembership = (properties.org_membership || null) as
-      | { enabled?: boolean; email_suffixes?: unknown }
+      | { enabled?: boolean; email_suffixes?: unknown; approved_emails?: unknown }
       | null
 
     // External portfolios: always publicly joinable, no call-to-join config needed
@@ -1700,8 +1710,8 @@ export async function applyToActivityCallToJoin(
     let bypassApproval = false
     if (!isExternal && callToJoin?.require_approval) {
       if (orgMembership?.enabled === true) {
-        const { isEmailEligibleForOrgMembership } = await import('@/lib/portfolio/orgMembership')
-        bypassApproval = isEmailEligibleForOrgMembership((user as any)?.email ?? null, orgMembership.email_suffixes)
+        const { isEmailEligibleForOrgMembershipRule } = await import('@/lib/portfolio/orgMembership')
+        bypassApproval = isEmailEligibleForOrgMembershipRule((user as any)?.email ?? null, orgMembership)
       }
     }
 
