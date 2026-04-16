@@ -155,17 +155,34 @@ export async function GET(request: NextRequest) {
       // Search mode: search by name and username
       const searchTerm = query.toLowerCase()
       
-      // Fetch all portfolios and filter in JavaScript
-      // This is necessary because Supabase doesn't support ilike on JSONB paths directly
-      // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users
-      // Admin users will see all portfolios including pseudo ones
+      // First: do a DB-side slug match so handles don't get missed due to sampling.
+      // Then: fall back to the existing sampled fetch for name/description matches.
+      //
+      // Note: RLS policies automatically exclude pseudo portfolios (is_pseudo = true) for non-admin users.
+      let slugQuery = supabase
+        .from('portfolios_directory')
+        .select('*')
+        .ilike('slug', `%${searchTerm}%`)
+        .limit(limit)
+      if (joinableOnly) {
+        slugQuery = slugQuery.in('type', [...DB_NON_HUMAN_TYPES])
+      } else if (typeFilter) {
+        slugQuery = slugQuery.eq('type', typeFilter)
+      }
+
+      const { data: slugMatches, error: slugError } = await slugQuery
+
+      if (slugError) {
+        console.error('Error searching portfolios by slug:', slugError)
+      }
+
       let fetchQuery = supabase.from('portfolios_directory').select('*').limit(limit * 3)
       if (joinableOnly) {
         fetchQuery = fetchQuery.in('type', [...DB_NON_HUMAN_TYPES])
       } else if (typeFilter) {
         fetchQuery = fetchQuery.eq('type', typeFilter)
       }
-      const { data: allPortfolios, error } = await fetchQuery
+      const { data: sampledPortfolios, error } = await fetchQuery
       
       if (error) {
         console.error('Error searching portfolios:', error)
@@ -175,38 +192,138 @@ export async function GET(request: NextRequest) {
         )
       }
       
-      portfolios = (allPortfolios || [])
-        .filter((p: any) =>
-          joinableOnly
-            ? isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
-            : true
-        )
-        .filter((p: any) => {
-          const metadata = p.metadata as any
-          const basic = metadata?.basic || {}
-          const name = (basic.name || '').toLowerCase()
-          const description = (basic.description || '').toLowerCase()
-          const username = ((p.slug || '') as string).toLowerCase()
+      const merged = [
+        ...((slugMatches as any[]) || []),
+        ...((sampledPortfolios as any[]) || []),
+      ]
+      const seenPortfolioIds = new Set<string>()
+      const deduped = merged.filter((p: any) => {
+        const id = String(p?.id || '')
+        if (!id) return false
+        if (seenPortfolioIds.has(id)) return false
+        seenPortfolioIds.add(id)
+        return true
+      })
 
-          return (
-            name.includes(searchTerm) ||
-            description.includes(searchTerm) ||
-            username.includes(searchTerm)
-          )
-        })
+      // If sampling didn't find anything, page deterministically to avoid missing older rows.
+      // This is especially important for human search by name when the directory is large.
+      if (deduped.length === 0) {
+        const maxPages = 6
+        const pageSize = 300
+        for (let page = 0; page < maxPages; page++) {
+          const from = page * pageSize
+          const to = from + pageSize - 1
+          let pageQuery = supabase
+            .from('portfolios_directory')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .range(from, to)
+          if (joinableOnly) {
+            pageQuery = pageQuery.in('type', [...DB_NON_HUMAN_TYPES])
+          } else if (typeFilter) {
+            pageQuery = pageQuery.eq('type', typeFilter)
+          }
+          const { data: pageRows, error: pageError } = await pageQuery
+          if (pageError) break
+
+          for (const p of pageRows || []) {
+            const id = String((p as any)?.id || '')
+            if (!id || seenPortfolioIds.has(id)) continue
+            const meta = (p as any)?.metadata as any
+            const basic = meta?.basic || {}
+            const name = String(basic?.name || '').toLowerCase()
+            const description = String(basic?.description || '').toLowerCase()
+            const username = String((p as any)?.slug || '').toLowerCase()
+            if (name.includes(searchTerm) || description.includes(searchTerm) || username.includes(searchTerm)) {
+              seenPortfolioIds.add(id)
+              deduped.push(p)
+              if (deduped.length >= limit * 3) break
+            }
+          }
+
+          if ((pageRows || []).length < pageSize || deduped.length >= limit * 3) break
+        }
+      }
+
+      const initialCandidates = deduped.filter((p: any) =>
+        joinableOnly
+          ? isJoinablePublicSpaceRow(p.type, p.metadata, p.visibility, p.is_pseudo)
+          : true
+      )
+
+      const matchesSearchTerm = (p: any) => {
+        const metadata = p?.metadata as any
+        const basic = metadata?.basic || {}
+        const name = String(basic?.name || '').toLowerCase()
+        const description = String(basic?.description || '').toLowerCase()
+        const username = String(p?.slug || '').toLowerCase()
+        return (
+          name.includes(searchTerm) ||
+          description.includes(searchTerm) ||
+          username.includes(searchTerm)
+        )
+      }
+
+      let matchedCandidates = initialCandidates.filter(matchesSearchTerm)
+
+      // If our initial sample missed the match (common in large directories),
+      // page deterministically until we find at least some matches.
+      if (matchedCandidates.length === 0) {
+        const maxPages = 6
+        const pageSize = 300
+        const collected: any[] = []
+        const seenIds = new Set<string>(seenPortfolioIds)
+
+        for (let page = 0; page < maxPages; page++) {
+          const from = page * pageSize
+          const to = from + pageSize - 1
+          let pageQuery = supabase
+            .from('portfolios_directory')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .range(from, to)
+          if (joinableOnly) {
+            pageQuery = pageQuery.in('type', [...DB_NON_HUMAN_TYPES])
+          } else if (typeFilter) {
+            pageQuery = pageQuery.eq('type', typeFilter)
+          }
+
+          const { data: pageRows, error: pageError } = await pageQuery
+          if (pageError) break
+
+          for (const p of pageRows || []) {
+            const id = String((p as any)?.id || '')
+            if (!id || seenIds.has(id)) continue
+            seenIds.add(id)
+            const isAllowed = joinableOnly
+              ? isJoinablePublicSpaceRow((p as any)?.type, (p as any)?.metadata, (p as any)?.visibility, (p as any)?.is_pseudo)
+              : true
+            if (!isAllowed) continue
+            if (!matchesSearchTerm(p)) continue
+            collected.push(p)
+            if (collected.length >= limit * 3) break
+          }
+
+          if ((pageRows || []).length < pageSize || collected.length >= limit * 3) break
+        }
+
+        matchedCandidates = collected
+      }
+
+      portfolios = matchedCandidates
         .map((p: any) => {
           const metadata = p.metadata as any
           const basic = metadata?.basic || {}
           const name = basic.name || ''
           const username = (p.slug as string | null) || ''
-          
+
           // Calculate similarity scores
           const nameScore = calculateSimilarity(query, name)
           const usernameScore = calculateSimilarity(query, username)
-          
+
           // Use the higher score, with slight preference for name matches
           const score = Math.max(nameScore, usernameScore * 0.9)
-          
+
           return { ...p, _searchScore: score }
         })
         .filter((p: any) => p._searchScore > 0) // Only include results with some match

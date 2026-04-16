@@ -6,11 +6,12 @@ import { getSharedAuth, AUTH_SESSION_EXPIRED_EVENT } from '@/lib/auth/browser-au
 import Link from 'next/link'
 import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import { HumanPortfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
-import { getHumanProfileUrl, getSpaceCreateUrl } from '@/lib/portfolio/routes'
+import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { UIText, IconButton, UserAvatar, Button, Card, Title, Content } from '@/components/ui'
 import { Home, MessageCircle, Plus, Search, Balloon, LogIn } from 'lucide-react'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import { buildLoginHref } from '@/lib/auth/login-redirect'
+import { CreateSpaceModal } from '@/components/spaces/CreateSpaceModal'
 
 type TopNavVariant = 'sidebar' | 'bottom'
 
@@ -22,7 +23,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [inviteUnreadCount, setInviteUnreadCount] = useState(0)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
-  const [showCreateMenu, setShowCreateMenu] = useState(false)
+  const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false)
   const [userProjects, setUserProjects] = useState<
     Array<{ id: string; name: string; avatar?: string; emoji?: string; status?: string | null }>
   >([])
@@ -391,7 +392,13 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
             <>
               <IconButton
                 icon={Plus}
-                onClick={() => setShowCreateMenu(true)}
+                onClick={() => {
+                  if (!isApproved) {
+                    window.alert('You are not approved to create spaces yet.')
+                    return
+                  }
+                  setShowCreateSpaceModal(true)
+                }}
                 title="Create"
                 aria-label="Create"
                 iconClassName="w-6 h-6"
@@ -421,7 +428,13 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
               <>
                 <IconButton
                   icon={Plus}
-                  onClick={() => setShowCreateMenu(true)}
+                  onClick={() => {
+                    if (!isApproved) {
+                      window.alert('You are not approved to create spaces yet.')
+                      return
+                    }
+                    setShowCreateSpaceModal(true)
+                  }}
                   title="Create"
                   aria-label="Create"
                   iconClassName="w-6 h-6"
@@ -442,60 +455,10 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
         </div>
       )}
 
-      {/* Create menu */}
-      {showCreateMenu && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={() => setShowCreateMenu(false)}
-        >
-          <div
-            className="bg-white rounded-xl w-full max-w-sm mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Card variant="default" padding="md">
-              <Title as="h2" className="mb-4">
-                Create
-              </Title>
-              <div className="flex flex-col gap-3 mb-4">
-                <Button
-                  variant="primary"
-                  asLink
-                  href="/notes/create/open-call"
-                  onClick={() => setShowCreateMenu(false)}
-                >
-                  <UIText>Open call</UIText>
-                </Button>
-                <Button
-                  variant="secondary"
-                  asLink
-                  href="/notes/create"
-                  onClick={() => setShowCreateMenu(false)}
-                >
-                  <UIText>New note</UIText>
-                </Button>
-                {isApproved && (
-                  <>
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setShowCreateMenu(false)
-                        window.location.href = getSpaceCreateUrl()
-                      }}
-                    >
-                      <UIText>Create space</UIText>
-                    </Button>
-                  </>
-                )}
-              </div>
-              <div className="flex justify-end">
-                <Button variant="secondary" onClick={() => setShowCreateMenu(false)}>
-                  <UIText>Cancel</UIText>
-                </Button>
-              </div>
-            </Card>
-          </div>
-        </div>
-      )}
+      <CreateSpaceModal
+        isOpen={showCreateSpaceModal}
+        onClose={() => setShowCreateSpaceModal(false)}
+      />
 
       {/* Project & Activity Selector Popup */}
       {showProjectSelector && (
@@ -587,10 +550,13 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                   {/* Create Project Button - only for approved users */}
                   {isApproved && (
                     <div className="mt-2 flex justify-center">
-                      <Link
-                        href={getSpaceCreateUrl()}
+                      <button
+                        type="button"
                         className="flex flex-col items-center gap-2 py-2 px-4 hover:opacity-80 transition-opacity"
-                        onClick={() => setShowProjectSelector(false)}
+                        onClick={() => {
+                          setShowProjectSelector(false)
+                          setShowCreateSpaceModal(true)
+                        }}
                       >
                         <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center">
                           <svg
@@ -608,7 +574,7 @@ export function TopNav({ variant = 'bottom' }: { variant?: TopNavVariant }) {
                           </svg>
                         </div>
                         <UIText className="text-center max-w-[120px] truncate">Create Space</UIText>
-                      </Link>
+                      </button>
                     </div>
                   )}
                 </>

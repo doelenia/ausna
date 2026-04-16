@@ -35,6 +35,8 @@ interface PortfolioActionsProps {
   isDeleting: boolean
   /** When provided and portfolio is community, visitor can open the request-to-join modal */
   onOpenCommunityJoin?: () => void
+  /** Override the initial subscription state (e.g. set by parent after an invite accept) */
+  initialIsSubscribed?: boolean
 }
 
 export function PortfolioActions({
@@ -49,11 +51,12 @@ export function PortfolioActions({
   onDelete,
   isDeleting,
   onOpenCommunityJoin,
+  initialIsSubscribed = false,
 }: PortfolioActionsProps) {
   const router = useRouter()
   const supabase = createClient()
   const [showSendModal, setShowSendModal] = useState(false)
-  const [isSubscribed, setIsSubscribed] = useState(false)
+  const [isSubscribed, setIsSubscribed] = useState(initialIsSubscribed)
   const [isCheckingSubscription, setIsCheckingSubscription] = useState(true)
   const [showProjectSelector, setShowProjectSelector] = useState(false)
   const [showCreateTypePrompt, setShowCreateTypePrompt] = useState(false)
@@ -82,6 +85,14 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
   const friendStatus = useFriendStatus(
     isHumanPortfolio(portfolio) && currentUserId && !isOwner ? portfolio.user_id : ''
   )
+
+  // Sync with parent's authoritative subscription state when it changes.
+  useEffect(() => {
+    if (initialIsSubscribed) {
+      setIsSubscribed(true)
+      setIsCheckingSubscription(false)
+    }
+  }, [initialIsSubscribed])
 
   // Check subscription status for projects (only if authenticated)
   useEffect(() => {
@@ -719,7 +730,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
             <>
               <Button variant="secondary" onClick={handleUnsubscribe}>
                 <BellOff className="w-4 h-4" strokeWidth={1.5} />
-                <UIText>Unsubscribe</UIText>
+                <UIText>Unfollow</UIText>
               </Button>
               {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
             </>
@@ -727,7 +738,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
             <>
               <Button variant="secondary" onClick={handleSubscribe}>
                 <Bell className="w-4 h-4" strokeWidth={1.5} />
-                <UIText>Subscribe</UIText>
+                <UIText>Follow</UIText>
               </Button>
               {dropdownItems.length > 0 && <Dropdown items={dropdownItems} />}
             </>
@@ -735,7 +746,7 @@ const [userCommunitiesLoading, setUserCommunitiesLoading] = useState(false)
         ) : (
           <Button variant="secondary" onClick={() => router.push(loginHref)}>
             <Bell className="w-4 h-4" strokeWidth={1.5} />
-            <UIText>Subscribe</UIText>
+            <UIText>Follow</UIText>
           </Button>
         )}
 

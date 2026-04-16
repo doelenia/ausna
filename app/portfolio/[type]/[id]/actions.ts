@@ -25,6 +25,7 @@ import { Note } from '@/types/note'
 import { revalidatePortfolioPathsForIdAndSlug } from '@/lib/portfolio/revalidatePaths'
 import { getSpaceMembersUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import { deriveSpaceCapabilities } from '@/lib/portfolio/spaceCapabilities'
+import { createServiceClient } from '@/lib/supabase/service'
 
 interface UpdatePortfolioResult {
   success: boolean
@@ -1460,7 +1461,9 @@ export async function getCurrentUserPendingPortfolioInvitation(
 ): Promise<{
   success: boolean
   hasPending?: boolean
-  invitationType?: 'member' | 'manager'
+  invitationType?: 'follow' | 'member' | 'manager'
+  /** Inviter display name for invite UX (space flows). */
+  inviterDisplayName?: string | null
   error?: string
 }> {
   try {
@@ -1476,7 +1479,7 @@ export async function getCurrentUserPendingPortfolioInvitation(
     }
     const { data: inv, error } = await supabase
       .from('portfolio_invitations')
-      .select('id, invitation_type')
+      .select('id, invitation_type, inviter_id')
       .eq('portfolio_id', portfolioId)
       .eq('invitee_id', user.id)
       .eq('status', 'pending')
@@ -1485,8 +1488,29 @@ export async function getCurrentUserPendingPortfolioInvitation(
     if (!inv) {
       return { success: true, hasPending: false }
     }
-    const invitationType = inv.invitation_type === 'manager' ? 'manager' : 'member'
-    return { success: true, hasPending: true, invitationType }
+    const invitationType =
+      inv.invitation_type === 'manager'
+        ? 'manager'
+        : inv.invitation_type === 'follow'
+          ? 'follow'
+          : 'member'
+
+    let inviterDisplayName: string | null = null
+    const inviterId = inv.inviter_id as string | undefined
+    if (inviterId) {
+      try {
+        const serviceClient = createServiceClient()
+        const { data: inviterAuth } = await serviceClient.auth.admin.getUserById(inviterId)
+        const meta = (inviterAuth?.user?.user_metadata || {}) as Record<string, unknown>
+        const raw = meta.full_name ?? meta.name
+        inviterDisplayName =
+          typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+      } catch {
+        inviterDisplayName = null
+      }
+    }
+
+    return { success: true, hasPending: true, invitationType, inviterDisplayName }
   } catch (e: any) {
     return { success: false, error: e?.message || 'Failed to check invitation' }
   }

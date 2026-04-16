@@ -13,7 +13,6 @@ import {
   getPortfolioUrl,
   getHumanProfileUrl,
   getHumanFriendsUrl,
-  getSpaceCreateUrl,
   getSpaceUrl,
   getSpaceMembersUrl,
 } from '@/lib/portfolio/routes'
@@ -27,7 +26,7 @@ import { DescriptionSpacePopup } from './DescriptionPopups'
 import { ImageViewerPopup } from './ImageViewerPopup'
 import { OpenCallStack } from '@/components/notes/OpenCallStack'
 import { Topic } from '@/types/indexing'
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   deletePortfolio,
   getSubPortfolios,
@@ -38,11 +37,11 @@ import {
   updatePortfolioDescription,
   updatePortfolio,
 } from '@/app/portfolio/[idOrSlug]/actions'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { getSharedAuth } from '@/lib/auth/browser-auth'
-import { Button, Title, Content, UIText, UserAvatar, Card, UIButtonText } from '@/components/ui'
-import { Apple, ChevronRight, Link2, Lock, Megaphone, History, X, Plus } from 'lucide-react'
+import { Button, Title, Subtitle, Content, UIText, UserAvatar, Card, UIButtonText } from '@/components/ui'
+import { Apple, ChevronRight, Link2, Lock, Megaphone, History, X, Plus, Check, Bell } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import type { ActivityDateTimeValue } from '@/lib/datetime'
 import type { ActivityLocationValue } from '@/lib/location'
@@ -57,6 +56,7 @@ import { renderFeedTopRowSpaceStatusOverlay } from '@/components/main/feedTopRow
 import { normalizePortfolioType } from '@/types/portfolio'
 import { ActivityCard } from '@/components/explore/ExploreView'
 import { getExploreActivityHighlights, type DailyMatchHighlightMeta } from '@/app/explore/actions'
+import { CreateSpaceModal } from '@/components/spaces/CreateSpaceModal'
 
 interface PortfolioViewProps {
   portfolio: Portfolio
@@ -75,11 +75,15 @@ interface PortfolioViewProps {
   hasPendingCommunityApplication?: boolean
   /** Pending invite to join this space (member or manager) — visitor should see accept card, not call-to-join */
   hasPendingPortfolioInvitation?: boolean
-  pendingPortfolioInvitationType?: 'member' | 'manager' | null
+  pendingPortfolioInvitationType?: 'follow' | 'member' | 'manager' | null
+  /** Display name of who sent the pending space invitation (for pass / activate copy). */
+  pendingPortfolioInviterDisplayName?: string | null
   /** Deep link e.g. `?tab=spaces` from server */
   initialTab?: 'overview' | 'feed' | 'spaces' | null
   /** Deep link e.g. `?join=1` from server — opens join flow when eligible */
   openJoinFromUrl?: boolean
+  /** Pending `user_invites` token for Join Ausna (`/invite/:token`) after space magic-link flow */
+  pendingUserInviteToken?: string | null
 }
 
 export function PortfolioView({
@@ -93,12 +97,19 @@ export function PortfolioView({
   hasPendingCommunityApplication = false,
   hasPendingPortfolioInvitation = false,
   pendingPortfolioInvitationType = null,
+  pendingPortfolioInviterDisplayName = null,
   initialTab = null,
   openJoinFromUrl = false,
+  pendingUserInviteToken = null,
 }: PortfolioViewProps) {
   const router = useRouter()
   const pathname = usePathname()
   const openJoinUrlHandledRef = useRef(false)
+  const pendingInviterLabel =
+    typeof pendingPortfolioInviterDisplayName === 'string' &&
+    pendingPortfolioInviterDisplayName.trim().length > 0
+      ? pendingPortfolioInviterDisplayName.trim()
+      : 'the person who invited you'
 
   const membershipRoleFromServer = (() => {
     if (!currentUserId) {
@@ -154,11 +165,73 @@ export function PortfolioView({
   const [pendingJoinRequestsCount, setPendingJoinRequestsCount] = useState<number | null>(null)
   const [acceptingPortfolioInvitation, setAcceptingPortfolioInvitation] = useState(false)
   const [acceptPortfolioInvitationError, setAcceptPortfolioInvitationError] = useState<string | null>(null)
+  const [decliningPortfolioInvitation, setDecliningPortfolioInvitation] = useState(false)
+  const [showPassReason, setShowPassReason] = useState(false)
+  const [passReason, setPassReason] = useState('')
+  const [pendingInvitationDismissed, setPendingInvitationDismissed] = useState(false)
   const supabase = useMemo(() => createClient(), [])
+
+  // ---- spaceInviteAction popup state (from magic-link email CTAs) ----
+  type SpaceInvitePopupStage =
+    | 'pick_choice' // new-user email link: choose Join / Follow / Pass on the space first, then Join Ausna
+    | 'join_success'          // joined successfully; show activate prompt
+    | 'follow_success'        // followed successfully; show activate prompt
+    | 'pass_message'          // pass: ask for optional message to inviter
+    | 'pass_activate'         // pass: show activate-or-cancel prompt
+    | null
+  const searchParams = useSearchParams()
+  const authMagicLinkIssue = searchParams?.get('auth_magic_link')
+  const spaceInviteAction = searchParams?.get('spaceInviteAction') as 'join' | 'follow' | 'pass' | null
+  const spaceInviteHandledRef = useRef(false)
+  /** PKCE/hash often establishes the session after the first paint; bounded refreshes sync server props. */
+  const spaceInviteRefreshAttemptsRef = useRef(0)
+  const [invitePopupStage, setInvitePopupStage] = useState<SpaceInvitePopupStage>(null)
+  /** User closed the initial invite modal; fall back to the inline invitation card. */
+  const [spaceInvitePickDismissed, setSpaceInvitePickDismissed] = useState(false)
+  const [passMessageText, setPassMessageText] = useState('')
+  const [passSubmitting, setPassSubmitting] = useState(false)
+  const [activateLoading, setActivateLoading] = useState(false)
+
+  const handleActivateAccount = useCallback(async () => {
+    if (activateLoading) return
+    setActivateLoading(true)
+    try {
+      // Same as add-contact invite: Join Ausna (`/invite/:token`) with returnTo this space.
+      if (typeof window !== 'undefined' && pendingUserInviteToken) {
+        const returnTo = encodeURIComponent(`${window.location.pathname}${window.location.search}`)
+        window.location.href = `${window.location.origin}/invite/${pendingUserInviteToken}?returnTo=${returnTo}`
+        return
+      }
+      const spaceUrl = typeof window !== 'undefined' ? window.location.href : ''
+      const res = await fetch('/api/auth/recovery-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ returnTo: spaceUrl }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.actionLink) {
+        window.location.href = data.actionLink
+      } else {
+        console.error('Failed to generate recovery link:', data.error)
+      }
+    } catch (err) {
+      console.error('Error triggering activate:', err)
+    } finally {
+      setActivateLoading(false)
+    }
+  }, [activateLoading, pendingUserInviteToken])
 
   const effectivePendingApplication = hasPendingApplication && !hasPendingPortfolioInvitation
   const effectivePendingCommunityApplication =
     hasPendingCommunityApplication && !hasPendingPortfolioInvitation
+
+  useEffect(() => {
+    // When server indicates a pending invite exists, make sure it's visible again.
+    // This ensures navigation between spaces (or a new invite) shows the card.
+    if (hasPendingPortfolioInvitation) {
+      setPendingInvitationDismissed(false)
+    }
+  }, [hasPendingPortfolioInvitation, portfolio.id])
 
   const handleAcceptPortfolioInvitation = async () => {
     if (!currentUserId) return
@@ -175,6 +248,10 @@ export function PortfolioView({
         )
         return
       }
+      setPendingInvitationDismissed(true)
+      if (pendingPortfolioInvitationType === 'follow') {
+        setIsCurrentPortfolioSubscribed(true)
+      }
       router.refresh()
     } catch {
       setAcceptPortfolioInvitationError('Could not accept invitation')
@@ -182,6 +259,255 @@ export function PortfolioView({
       setAcceptingPortfolioInvitation(false)
     }
   }
+
+  const handlePassPortfolioInvitation = async (message?: string) => {
+    if (!currentUserId) return
+    setDecliningPortfolioInvitation(true)
+    setAcceptPortfolioInvitationError(null)
+    try {
+      const res = await fetch(
+        `/api/portfolios/${portfolio.id}/invitations/${currentUserId}/decline`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: message && message.trim().length > 0 ? message.trim() : null }),
+        }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAcceptPortfolioInvitationError(
+          typeof data.error === 'string' ? data.error : 'Could not pass on invitation'
+        )
+        return
+      }
+      setPendingInvitationDismissed(true)
+      setShowPassReason(false)
+      setPassReason('')
+      router.refresh()
+    } catch {
+      setAcceptPortfolioInvitationError('Could not pass on invitation')
+    } finally {
+      setDecliningPortfolioInvitation(false)
+    }
+  }
+
+  const handleFollowFromJoinInvitation = async () => {
+    if (!currentUserId) return
+    setAcceptingPortfolioInvitation(true)
+    setAcceptPortfolioInvitationError(null)
+    try {
+      const followRes = await fetch(`/api/subscriptions/${portfolio.id}`, { method: 'POST' })
+      const followData = await followRes.json().catch(() => ({}))
+      if (!followRes.ok) {
+        setAcceptPortfolioInvitationError(
+          typeof followData.error === 'string' ? followData.error : 'Could not follow space'
+        )
+        return
+      }
+
+      // Resolve the membership invite without joining; inviter gets a follow message, not a pass.
+      await fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}/decline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent: 'follow_only' }),
+      }).catch(() => {})
+
+      setPendingInvitationDismissed(true)
+      setIsCurrentPortfolioSubscribed(true)
+      router.refresh()
+    } catch {
+      setAcceptPortfolioInvitationError('Could not follow space')
+    } finally {
+      setAcceptingPortfolioInvitation(false)
+    }
+  }
+
+  useEffect(() => {
+    spaceInviteRefreshAttemptsRef.current = 0
+  }, [spaceInviteAction, portfolio.id])
+
+  // New-user space invite: one email link lands on the space; prompt Join / Follow / Pass before password (Join Ausna).
+  useEffect(() => {
+    if (spaceInviteAction) return
+    if (!pendingUserInviteToken || !hasPendingPortfolioInvitation || !currentUserId) return
+    if (pendingInvitationDismissed || spaceInvitePickDismissed) return
+    if (invitePopupStage !== null) return
+    setInvitePopupStage('pick_choice')
+  }, [
+    spaceInviteAction,
+    pendingUserInviteToken,
+    hasPendingPortfolioInvitation,
+    currentUserId,
+    pendingInvitationDismissed,
+    spaceInvitePickDismissed,
+    invitePopupStage,
+  ])
+
+  // ---- Auto-handle spaceInviteAction from email magic-link CTAs ----
+  useEffect(() => {
+    if (spaceInviteHandledRef.current) return
+    if (!spaceInviteAction) return
+
+    const gated = !hasPendingPortfolioInvitation || !currentUserId
+    if (gated) {
+      let cancelled = false
+      const tryRefresh = () => {
+        if (cancelled || spaceInviteHandledRef.current) return
+        if (spaceInviteRefreshAttemptsRef.current >= 12) return
+        spaceInviteRefreshAttemptsRef.current += 1
+        router.refresh()
+      }
+
+      void supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
+        if (cancelled || spaceInviteHandledRef.current) return
+        if (session?.user) tryRefresh()
+      })
+
+      let pollTicks = 0
+      const pollMs = 280
+      const maxPollTicks = 30
+      const pollId = window.setInterval(() => {
+        if (cancelled || spaceInviteHandledRef.current) return
+        pollTicks += 1
+        if (pollTicks > maxPollTicks) {
+          window.clearInterval(pollId)
+          return
+        }
+        void supabase.auth.getSession().then(({ data: { session } }: { data: { session: any } }) => {
+          if (cancelled || spaceInviteHandledRef.current) return
+          if (session?.user) tryRefresh()
+        })
+      }, pollMs)
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((event: string, session: any) => {
+        if (cancelled || spaceInviteHandledRef.current) return
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) tryRefresh()
+      })
+
+      return () => {
+        cancelled = true
+        window.clearInterval(pollId)
+        subscription.unsubscribe()
+      }
+    }
+
+    if (!hasPendingPortfolioInvitation) return
+    if (!currentUserId) return
+    spaceInviteHandledRef.current = true
+    setAcceptPortfolioInvitationError(null)
+
+    // Remove query param from URL without reload so the effect doesn't re-run on refresh
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('spaceInviteAction')
+      window.history.replaceState(null, '', url.toString())
+    }
+
+    if (spaceInviteAction === 'join') {
+      setAcceptingPortfolioInvitation(true)
+      fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}`, { method: 'PUT' })
+        .then((res) => {
+          if (res.ok) {
+            setIsMember(true)
+            setPendingInvitationDismissed(true)
+            setInvitePopupStage('join_success')
+          } else {
+            setAcceptPortfolioInvitationError('Could not join space')
+          }
+        })
+        .catch(() => {
+          setAcceptPortfolioInvitationError('Could not join space')
+        })
+        .finally(() => {
+          setAcceptingPortfolioInvitation(false)
+        })
+    } else if (spaceInviteAction === 'follow') {
+      setAcceptingPortfolioInvitation(true)
+      const runFollowInvitePut = () =>
+        fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}`, { method: 'PUT' })
+          .then((res) => {
+            if (res.ok) {
+              setIsCurrentPortfolioSubscribed(true)
+              setPendingInvitationDismissed(true)
+              setInvitePopupStage('follow_success')
+            } else {
+              setAcceptPortfolioInvitationError('Could not follow space')
+            }
+          })
+          .catch(() => {
+            setAcceptPortfolioInvitationError('Could not follow space')
+          })
+          .finally(() => {
+            setAcceptingPortfolioInvitation(false)
+          })
+
+      if (pendingPortfolioInvitationType === 'member') {
+        fetch(`/api/subscriptions/${portfolio.id}`, { method: 'POST' })
+          .then((subRes) => {
+            if (!subRes.ok) {
+              setAcceptPortfolioInvitationError('Could not follow space')
+              return
+            }
+            return fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}/decline`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ intent: 'follow_only' }),
+            }).then((declRes) => {
+              if (!declRes.ok) {
+                setAcceptPortfolioInvitationError('Could not follow space')
+                return
+              }
+              setIsCurrentPortfolioSubscribed(true)
+              setPendingInvitationDismissed(true)
+              setInvitePopupStage('follow_success')
+            })
+          })
+          .catch(() => {
+            setAcceptPortfolioInvitationError('Could not follow space')
+          })
+          .finally(() => {
+            setAcceptingPortfolioInvitation(false)
+          })
+      } else {
+        void runFollowInvitePut()
+      }
+    } else if (spaceInviteAction === 'pass') {
+      setInvitePopupStage('pass_message')
+    }
+  }, [
+    spaceInviteAction,
+    hasPendingPortfolioInvitation,
+    currentUserId,
+    portfolio.id,
+    router,
+    supabase,
+    pendingPortfolioInvitationType,
+  ])
+
+  const handlePassCancelActivate = useCallback(async () => {
+    setInvitePopupStage(null)
+    try {
+      await fetch('/api/auth/activate', { method: 'POST' })
+    } catch {
+      // Still sign out so the user stays on the space as a visitor.
+    }
+    try {
+      await supabase.auth.signOut()
+      router.refresh()
+    } catch {
+      // ignore
+    }
+  }, [supabase, router])
+
+  const dismissAuthMagicLinkBanner = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const u = new URL(window.location.href)
+    u.searchParams.delete('auth_magic_link')
+    const next = u.pathname + (u.search ? `${u.search}` : '')
+    router.replace(next)
+  }, [router])
 
   useEffect(() => {
     setDisplayDescription(basic.description || '')
@@ -757,6 +1083,76 @@ export function PortfolioView({
   })
   const [isFriendVisitor, setIsFriendVisitor] = useState(false)
   const [isCurrentPortfolioSubscribed, setIsCurrentPortfolioSubscribed] = useState(false)
+
+  /** Space invite email → land on space first; then Join Ausna (`/invite/:token`) for password. */
+  const handlePickJoinForActivate = useCallback(async () => {
+    if (!currentUserId) return
+    setAcceptingPortfolioInvitation(true)
+    setAcceptPortfolioInvitationError(null)
+    try {
+      const res = await fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}`, {
+        method: 'PUT',
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setAcceptPortfolioInvitationError(
+          typeof data.error === 'string' ? data.error : 'Could not join space'
+        )
+        return
+      }
+      setIsMember(true)
+      setPendingInvitationDismissed(true)
+      setInvitePopupStage('join_success')
+    } catch {
+      setAcceptPortfolioInvitationError('Could not join space')
+    } finally {
+      setAcceptingPortfolioInvitation(false)
+    }
+  }, [currentUserId, portfolio.id])
+
+  const handlePickFollowForActivate = useCallback(async () => {
+    if (!currentUserId) return
+    setAcceptingPortfolioInvitation(true)
+    setAcceptPortfolioInvitationError(null)
+    try {
+      if (pendingPortfolioInvitationType === 'follow') {
+        const res = await fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}`, {
+          method: 'PUT',
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          setAcceptPortfolioInvitationError(
+            typeof data.error === 'string' ? data.error : 'Could not follow space'
+          )
+          return
+        }
+        setPendingInvitationDismissed(true)
+        setIsCurrentPortfolioSubscribed(true)
+      } else {
+        const followRes = await fetch(`/api/subscriptions/${portfolio.id}`, { method: 'POST' })
+        const followData = await followRes.json().catch(() => ({}))
+        if (!followRes.ok) {
+          setAcceptPortfolioInvitationError(
+            typeof followData.error === 'string' ? followData.error : 'Could not follow space'
+          )
+          return
+        }
+        await fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}/decline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ intent: 'follow_only' }),
+        }).catch(() => {})
+        setPendingInvitationDismissed(true)
+        setIsCurrentPortfolioSubscribed(true)
+      }
+      setInvitePopupStage('follow_success')
+    } catch {
+      setAcceptPortfolioInvitationError('Could not follow space')
+    } finally {
+      setAcceptingPortfolioInvitation(false)
+    }
+  }, [currentUserId, portfolio.id, pendingPortfolioInvitationType])
+
   const didSetInitialTabRef = useRef(initialTab != null)
   /** Same portfolio + search-driven tab key — detect client navigations like ?tab=spaces (state does not reset). */
   const portfolioTabSyncKey = `${portfolio.id}:${initialTab ?? ''}`
@@ -966,6 +1362,8 @@ export function PortfolioView({
   const [spacesSearchMode, setSpacesSearchMode] = useState(false)
   const [spacesQuery, setSpacesQuery] = useState('')
   const [spacesViewMode, setSpacesViewMode] = useState<'grid' | 'upcoming'>('grid')
+  const [showCreateSpaceModal, setShowCreateSpaceModal] = useState(false)
+  const [createSpaceHostId, setCreateSpaceHostId] = useState<string | null>(null)
   const [spacesHighlights, setSpacesHighlights] = useState<Record<string, DailyMatchHighlightMeta>>({})
   const [spacesLastNoteById, setSpacesLastNoteById] = useState<Record<string, string | null>>({})
   const [spacesLastNoteLoaded, setSpacesLastNoteLoaded] = useState(false)
@@ -1627,6 +2025,22 @@ export function PortfolioView({
     />
   ) : (
     <>
+    {authMagicLinkIssue ? (
+      <div className="px-6 pt-6 max-w-2xl w-full">
+        <Card variant="subtle" padding="sm" className="border border-amber-200 bg-amber-50">
+          <Content>
+            {authMagicLinkIssue === 'expired'
+              ? 'This sign-in link expired or was already used. That often happens if the link was opened more than once, or an email scanner visited it first. Ask your host to resend the space invitation and use the new link once.'
+              : 'We could not sign you in from that link. Try opening the invitation from your email again, or ask for a new invite.'}
+          </Content>
+          <div className="mt-3">
+            <Button variant="secondary" size="sm" type="button" onClick={dismissAuthMagicLinkBanner}>
+              <UIText>Dismiss</UIText>
+            </Button>
+          </div>
+        </Card>
+      </div>
+    ) : null}
     {basic.avatar && (
       <ImageViewerPopup
         open={showAvatarPopup}
@@ -2000,10 +2414,12 @@ export function PortfolioView({
             {/* Pending invitation — accept before joining any other way */}
             {portfolio.type !== 'human' &&
               hasPendingPortfolioInvitation &&
+              !pendingInvitationDismissed &&
               !isOwner &&
               !isManager &&
               !isMember &&
-              currentUserId && (
+              currentUserId &&
+              !(pendingUserInviteToken && invitePopupStage !== null) && (
                 <Card variant="subtle" padding="sm" className="mb-4 self-start max-w-lg">
                   <div className="flex flex-col gap-1.5 text-left">
                     <div className="flex items-center gap-1.5">
@@ -2015,23 +2431,113 @@ export function PortfolioView({
                     <Content className="my-1.5">
                       {pendingPortfolioInvitationType === 'manager'
                         ? 'You have been invited to become a manager of this space.'
-                        : 'You have been invited to join this space.'}
+                        : pendingPortfolioInvitationType === 'follow'
+                          ? 'You have been invited to follow this space.'
+                          : 'You have been invited to join this space.'}
                     </Content>
                     {acceptPortfolioInvitationError && (
                       <UIText className="text-red-600">{acceptPortfolioInvitationError}</UIText>
                     )}
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => void handleAcceptPortfolioInvitation()}
-                        disabled={acceptingPortfolioInvitation}
-                      >
-                        <UIText>
-                          {acceptingPortfolioInvitation ? 'Accepting...' : 'Accept invitation'}
-                        </UIText>
-                      </Button>
+                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                      {pendingPortfolioInvitationType === 'follow' ? (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void handleAcceptPortfolioInvitation()}
+                            disabled={acceptingPortfolioInvitation || decliningPortfolioInvitation}
+                            className="!bg-amber-200 !text-amber-950 hover:!bg-amber-300 !border !border-amber-300"
+                          >
+                            <Bell className="w-4 h-4" aria-hidden />
+                            <UIText>{acceptingPortfolioInvitation ? 'Following…' : 'Follow'}</UIText>
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setShowPassReason((v) => !v)}
+                            disabled={acceptingPortfolioInvitation || decliningPortfolioInvitation}
+                          >
+                            <UIText>Pass</UIText>
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => void handleAcceptPortfolioInvitation()}
+                            disabled={acceptingPortfolioInvitation || decliningPortfolioInvitation}
+                            className="!bg-blue-600 !text-white hover:!bg-blue-700 !border !border-blue-700"
+                          >
+                            <Check className="w-4 h-4" aria-hidden />
+                            <UIText>{acceptingPortfolioInvitation ? 'Joining…' : 'Join'}</UIText>
+                          </Button>
+                          {!isCurrentPortfolioSubscribed && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => void handleFollowFromJoinInvitation()}
+                              disabled={acceptingPortfolioInvitation || decliningPortfolioInvitation}
+                              className="!bg-amber-200 !text-amber-950 hover:!bg-amber-300 !border !border-amber-300"
+                            >
+                              <Bell className="w-4 h-4" aria-hidden />
+                              <UIText>{acceptingPortfolioInvitation ? 'Following…' : 'Follow'}</UIText>
+                            </Button>
+                          )}
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setShowPassReason((v) => !v)}
+                            disabled={acceptingPortfolioInvitation || decliningPortfolioInvitation}
+                          >
+                            <UIText>Pass</UIText>
+                          </Button>
+                        </>
+                      )}
                     </div>
+
+                    {showPassReason && (
+                      <div className="mt-2 rounded-md border border-gray-200 bg-white p-2">
+                        <UIText as="label" className="block mb-1" htmlFor="pass-reason">
+                          Optional message
+                        </UIText>
+                        <textarea
+                          id="pass-reason"
+                          value={passReason}
+                          onChange={(e) => setPassReason(e.target.value)}
+                          rows={3}
+                          maxLength={500}
+                          placeholder="If helpful, add a short reason…"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
+                          disabled={decliningPortfolioInvitation || acceptingPortfolioInvitation}
+                        />
+                        <div className="mt-2 flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="text"
+                            size="sm"
+                            onClick={() => {
+                              setShowPassReason(false)
+                              setPassReason('')
+                            }}
+                            disabled={decliningPortfolioInvitation || acceptingPortfolioInvitation}
+                          >
+                            <UIText>Cancel</UIText>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void handlePassPortfolioInvitation(passReason)}
+                            disabled={decliningPortfolioInvitation || acceptingPortfolioInvitation}
+                          >
+                            <UIText>
+                              {decliningPortfolioInvitation ? 'Passing…' : 'Send'}
+                            </UIText>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </Card>
               )}
@@ -2507,6 +3013,7 @@ export function PortfolioView({
                 onEdit={() => setIsEditing(true)}
                 onDelete={handleDelete}
                 isDeleting={isDeleting}
+                initialIsSubscribed={isCurrentPortfolioSubscribed}
                 onOpenCommunityJoin={
                   isCommunityPortfolio(portfolio) &&
                   !isOwner &&
@@ -2666,9 +3173,13 @@ export function PortfolioView({
                           <>
                             {canCreateSpaces && (
                             <div className="flex w-[100px] flex-shrink-0 flex-col items-center">
-                              <Link
-                                href={getSpaceCreateUrl()}
+                              <button
+                                type="button"
                                 className="flex w-full flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors hover:bg-gray-100"
+                                onClick={() => {
+                                  setCreateSpaceHostId(null)
+                                  setShowCreateSpaceModal(true)
+                                }}
                               >
                                 <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 bg-gray-200 transition-colors hover:border-gray-400 hover:bg-gray-300">
                                   <svg
@@ -2688,7 +3199,7 @@ export function PortfolioView({
                                 <UIText className="block w-full min-w-0 text-center leading-tight truncate">
                                   Create Space
                                 </UIText>
-                              </Link>
+                              </button>
                             </div>
                             )}
                             {top.map((p) => renderSpaceFeedRowTile(p))}
@@ -2756,9 +3267,13 @@ export function PortfolioView({
                             <>
                               {canCreateHostedSpace && (
                                 <div className="flex w-[100px] flex-shrink-0 flex-col items-center">
-                                  <Link
-                                    href={`${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`}
+                                  <button
+                                    type="button"
                                     className="flex w-full flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors hover:bg-gray-100"
+                                    onClick={() => {
+                                      setCreateSpaceHostId(portfolio.id)
+                                      setShowCreateSpaceModal(true)
+                                    }}
                                   >
                                     <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 bg-gray-200 transition-colors hover:border-gray-400 hover:bg-gray-300">
                                       <svg
@@ -2778,7 +3293,7 @@ export function PortfolioView({
                                     <UIText className="block w-full min-w-0 text-center leading-tight truncate">
                                       Create Space
                                     </UIText>
-                                  </Link>
+                                  </button>
                                 </div>
                               )}
                               {top.map((p) => renderSpaceFeedRowTile(p))}
@@ -2849,9 +3364,6 @@ export function PortfolioView({
                 const canCreateAsHuman =
                   authChecked && isAuthenticated && isHumanPortfolio(portfolio) && isOwner
                 const canCreateAnySpace = canCreateFromThisSpace || canCreateAsHuman
-                const createSpaceHref = canCreateFromThisSpace
-                  ? `${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`
-                  : getSpaceCreateUrl()
 
                 if (!currentUserId || (allTop.length === 0 && !canCreateAnySpace)) return null
 
@@ -2883,9 +3395,13 @@ export function PortfolioView({
                     <div className="flex items-start gap-2 overflow-x-auto px-6 py-1 md:px-0 scroll-smooth">
                       {canCreateAnySpace && (
                         <div className="flex w-[100px] flex-shrink-0 flex-col items-center">
-                          <Link
-                            href={createSpaceHref}
+                          <button
+                            type="button"
                             className="flex w-full flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors hover:bg-gray-100"
+                            onClick={() => {
+                              setCreateSpaceHostId(canCreateFromThisSpace ? portfolio.id : null)
+                              setShowCreateSpaceModal(true)
+                            }}
                           >
                             <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full border-2 border-gray-300 bg-gray-200 transition-colors hover:border-gray-400 hover:bg-gray-300">
                               <svg
@@ -2905,7 +3421,7 @@ export function PortfolioView({
                             <UIText className="block w-full min-w-0 text-center leading-tight truncate">
                               Create Space
                             </UIText>
-                          </Link>
+                          </button>
                         </div>
                       )}
                       {allTop.map((p) => renderSpaceFeedRowTile(p))}
@@ -2994,18 +3510,19 @@ export function PortfolioView({
 
                 if (!canCreateFromThisSpace && !canCreateAsHuman) return null
 
-                const href = canCreateFromThisSpace
-                  ? `${getSpaceCreateUrl()}?host=${encodeURIComponent(portfolio.id)}`
-                  : getSpaceCreateUrl()
-
                 return (
                   <div className="mb-4 flex justify-start">
-                    <Link href={href}>
-                      <Button variant="primary">
-                        <Plus className="w-4 h-4" aria-hidden />
-                        <UIText>Create Space</UIText>
-                      </Button>
-                    </Link>
+                    <Button
+                      variant="primary"
+                      type="button"
+                      onClick={() => {
+                        setCreateSpaceHostId(canCreateFromThisSpace ? portfolio.id : null)
+                        setShowCreateSpaceModal(true)
+                      }}
+                    >
+                      <Plus className="w-4 h-4" aria-hidden />
+                      <UIText>Create Space</UIText>
+                    </Button>
                   </div>
                 )
               })()}
@@ -3641,6 +4158,289 @@ export function PortfolioView({
             </div>
           )
         })()}
+
+      <CreateSpaceModal
+        isOpen={showCreateSpaceModal}
+        onClose={() => setShowCreateSpaceModal(false)}
+        hostSpaceId={createSpaceHostId}
+      />
+
+      {/* ---- spaceInviteAction popups ---- */}
+
+      {invitePopupStage === 'pick_choice' && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
+          <Card variant="default" className="w-full max-w-md shadow-xl">
+            <div className="p-6 flex flex-col gap-3">
+              <Subtitle as="h2" className="mb-0">
+                {pendingPortfolioInvitationType === 'follow'
+                  ? `You’re invited to follow ${basic.name}`
+                  : `You’re invited to ${basic.name}`}
+              </Subtitle>
+              <Content className="mb-1">
+                {pendingPortfolioInvitationType === 'follow'
+                  ? 'Choose how you’d like to respond. After you continue, you’ll use the same Join Ausna page as a contact invite to set your password, then return here.'
+                  : 'Choose how you’d like to join this space. After you continue, you’ll use the same Join Ausna page as a contact invite to set your password, then return here.'}
+              </Content>
+              <UIText as="p">
+                Join = become a member · Follow = updates only · Pass = decline for now
+              </UIText>
+              {acceptPortfolioInvitationError && (
+                <UIText className="text-red-600">{acceptPortfolioInvitationError}</UIText>
+              )}
+              <div className="flex flex-col gap-2 mt-2">
+                {pendingPortfolioInvitationType === 'follow' ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      onClick={() => void handlePickFollowForActivate()}
+                      disabled={acceptingPortfolioInvitation || activateLoading}
+                      className="!bg-amber-200 !text-amber-950 hover:!bg-amber-300 !border !border-amber-300"
+                    >
+                      <UIText>{acceptingPortfolioInvitation ? 'Working…' : 'Follow'}</UIText>
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      onClick={() => {
+                        setPassMessageText('')
+                        setInvitePopupStage('pass_message')
+                      }}
+                      disabled={acceptingPortfolioInvitation || activateLoading}
+                    >
+                      <UIText>Pass</UIText>
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button
+                      variant="primary"
+                      fullWidth
+                      onClick={() => void handlePickJoinForActivate()}
+                      disabled={acceptingPortfolioInvitation || activateLoading}
+                    >
+                      <UIText>{acceptingPortfolioInvitation ? 'Working…' : 'Join'}</UIText>
+                    </Button>
+                    {!isCurrentPortfolioSubscribed && (
+                      <Button
+                        variant="secondary"
+                        fullWidth
+                        onClick={() => void handlePickFollowForActivate()}
+                        disabled={acceptingPortfolioInvitation || activateLoading}
+                        className="!bg-amber-200 !text-amber-950 hover:!bg-amber-300 !border !border-amber-300"
+                      >
+                        <UIText>{acceptingPortfolioInvitation ? 'Working…' : 'Follow'}</UIText>
+                      </Button>
+                    )}
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      onClick={() => {
+                        setPassMessageText('')
+                        setInvitePopupStage('pass_message')
+                      }}
+                      disabled={acceptingPortfolioInvitation || activateLoading}
+                    >
+                      <UIText>Pass</UIText>
+                    </Button>
+                  </>
+                )}
+                <Button
+                  variant="text"
+                  fullWidth
+                  onClick={() => {
+                    setInvitePopupStage(null)
+                    setSpaceInvitePickDismissed(true)
+                  }}
+                  disabled={acceptingPortfolioInvitation || activateLoading}
+                >
+                  <UIText>Later</UIText>
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Join success popup */}
+      {invitePopupStage === 'join_success' && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
+          <Card variant="default" className="w-full max-w-md shadow-xl">
+            <div className="p-6 flex flex-col gap-3">
+              <div className="text-2xl" aria-hidden>
+                🎉
+              </div>
+              <Subtitle as="h2" className="mb-0">
+                {acceptingPortfolioInvitation
+                  ? `Joining ${basic.name}…`
+                  : `You have joined ${basic.name} successfully`}
+              </Subtitle>
+              <Content className="mb-0">
+                {acceptingPortfolioInvitation
+                  ? 'Please wait while we finish your invitation.'
+                  : 'We prepared an account for you so you can take part later. Activate it on Join Ausna (set your password), same as when someone adds you as a contact — then you’ll come back here signed in.'}
+              </Content>
+              {acceptPortfolioInvitationError && (
+                <UIText className="text-red-600">{acceptPortfolioInvitationError}</UIText>
+              )}
+              <div className="flex flex-col gap-2 mt-2">
+                <Button
+                  variant="primary"
+                  fullWidth
+                  onClick={() => void handleActivateAccount()}
+                  disabled={acceptingPortfolioInvitation || activateLoading}
+                >
+                  <UIText>{activateLoading ? 'Loading…' : 'Activate account'}</UIText>
+                </Button>
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  onClick={() => setInvitePopupStage(null)}
+                  disabled={acceptingPortfolioInvitation}
+                >
+                  <UIText>Later</UIText>
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Follow success popup */}
+      {invitePopupStage === 'follow_success' && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
+          <Card variant="default" className="w-full max-w-md shadow-xl">
+            <div className="p-6 flex flex-col gap-3">
+              <div className="text-2xl" aria-hidden>
+                🔔
+              </div>
+              <Subtitle as="h2" className="mb-0">
+                {acceptingPortfolioInvitation
+                  ? `Following ${basic.name}…`
+                  : `You are now following ${basic.name}`}
+              </Subtitle>
+              <Content className="mb-0">
+                {acceptingPortfolioInvitation
+                  ? 'Please wait while we finish your invitation.'
+                  : 'Please activate your account so you can engage with future updates. You’ll use Join Ausna to set your password (same as a contact invite), then return here signed in.'}
+              </Content>
+              {acceptPortfolioInvitationError && (
+                <UIText className="text-red-600">{acceptPortfolioInvitationError}</UIText>
+              )}
+              <div className="flex flex-col gap-2 mt-2">
+                <Button
+                  variant="primary"
+                  fullWidth
+                  onClick={() => void handleActivateAccount()}
+                  disabled={acceptingPortfolioInvitation || activateLoading}
+                >
+                  <UIText>{activateLoading ? 'Loading…' : 'Activate account'}</UIText>
+                </Button>
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  onClick={() => setInvitePopupStage(null)}
+                  disabled={acceptingPortfolioInvitation}
+                >
+                  <UIText>Later</UIText>
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Pass step 1 — optional message */}
+      {invitePopupStage === 'pass_message' && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
+          <Card variant="default" className="w-full max-w-md shadow-xl">
+            <div className="p-6 flex flex-col gap-3">
+            <Subtitle as="h2" className="mb-0">
+              Thank you for your response
+            </Subtitle>
+            <Content className="mb-0">
+              Feel free to leave a message for {pendingInviterLabel}.
+            </Content>
+            <textarea
+              value={passMessageText}
+              onChange={(e) => setPassMessageText(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="Optional message…"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white mb-4"
+            />
+            <Button
+              variant="primary"
+              fullWidth
+              disabled={passSubmitting}
+              onClick={async () => {
+                setPassSubmitting(true)
+                try {
+                  const res = await fetch(
+                    `/api/portfolios/${portfolio.id}/invitations/${currentUserId}/decline`,
+                    {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        message:
+                          passMessageText.trim().length > 0 ? passMessageText.trim() : null,
+                      }),
+                    }
+                  )
+                  if (!res.ok) {
+                    setPassSubmitting(false)
+                    return
+                  }
+                  setPendingInvitationDismissed(true)
+                  setInvitePopupStage('pass_activate')
+                } catch {
+                  // ignore
+                } finally {
+                  setPassSubmitting(false)
+                }
+              }}
+            >
+              <UIText>{passSubmitting ? 'Sending…' : 'Continue'}</UIText>
+            </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Pass step 2 — activate prompt */}
+      {invitePopupStage === 'pass_activate' && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 p-4">
+          <Card variant="default" className="w-full max-w-md shadow-xl">
+            <div className="p-6 flex flex-col gap-3">
+            <Subtitle as="h2" className="mb-0">
+              Activate your account
+            </Subtitle>
+            <Content className="mb-0">
+              {pendingPortfolioInviterDisplayName
+                ? `${pendingPortfolioInviterDisplayName} invited you to Ausna. Activate your account to connect with them — you’ll use Join Ausna to set your password (same as a contact invite), then return here signed in.`
+                : 'Activate your account to connect on Ausna with the person who invited you. You’ll use Join Ausna to set your password (same as a contact invite), then return here signed in.'}
+            </Content>
+            <div className="flex flex-col gap-2 mt-2">
+              <Button
+                variant="primary"
+                fullWidth
+                onClick={() => void handleActivateAccount()}
+                disabled={activateLoading}
+              >
+                <UIText>{activateLoading ? 'Loading…' : 'Activate account'}</UIText>
+              </Button>
+              <Button
+                variant="secondary"
+                fullWidth
+                onClick={() => void handlePassCancelActivate()}
+              >
+                <UIText>Cancel</UIText>
+              </Button>
+            </div>
+            </div>
+          </Card>
+        </div>
+      )}
     </>
   )
 }

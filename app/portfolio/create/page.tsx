@@ -1,6 +1,6 @@
 import { permanentRedirect } from 'next/navigation'
 
-/** @deprecated Use `/space/create`. */
+/** @deprecated Use the Create Space popup (redirect to `/spaces`). */
 export default function LegacyCreatePortfolioRedirect() {
-  permanentRedirect('/space/create')
+  permanentRedirect('/spaces')
 }

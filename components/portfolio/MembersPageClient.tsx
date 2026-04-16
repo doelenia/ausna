@@ -82,12 +82,17 @@ export function MembersPageClient({
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<UserInfo[]>([])
   const [searching, setSearching] = useState(false)
-  const [inviting, setInviting] = useState<string | null>(null)
+  const [inviting, setInviting] = useState<string | null>(null) // `${userId}:${kind}`
   const [invitingManager, setInvitingManager] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
-  const [inviteRoleInputs, setInviteRoleInputs] = useState<{ [userId: string]: string }>({})
   const [inviteMessageInputs, setInviteMessageInputs] = useState<{ [userId: string]: string }>({})
   const [members, setMembers] = useState(memberDetails)
+  // New-user invite-by-email state
+  const [newInviteeSuggestion, setNewInviteeSuggestion] = useState<{ email: string; name: string } | null>(null)
+  const [newEmailInviteName, setNewEmailInviteName] = useState('')
+  const [newEmailInviteKind, setNewEmailInviteKind] = useState<'join' | 'follow'>('join')
+  const [newEmailInviteMessage, setNewEmailInviteMessage] = useState('')
+  const [invitingNewEmail, setInvitingNewEmail] = useState(false)
   const [showCreatorTransfer, setShowCreatorTransfer] = useState(false)
   const [newCreatorId, setNewCreatorId] = useState<string>('')
   const [editingRole, setEditingRole] = useState<string | null>(null)
@@ -180,9 +185,12 @@ export function MembersPageClient({
   const isManager = managers.some(m => m.id === currentUserId) || isCreator
   const isMember = members.some(m => m.id === currentUserId) || isCreator
 
+  const looksLikeEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
+
   const handleSearch = async (query: string) => {
     if (!query.trim()) {
       setSearchResults([])
+      setNewInviteeSuggestion(null)
       return
     }
 
@@ -192,13 +200,22 @@ export function MembersPageClient({
       if (response.ok) {
         const data = await response.json()
         setSearchResults(data.users || [])
+        const suggestion = data.newInviteeSuggestion ?? null
+        if (suggestion && looksLikeEmail(query)) {
+          setNewInviteeSuggestion({ email: query.trim().toLowerCase(), name: '' })
+          setNewEmailInviteName('')
+        } else {
+          setNewInviteeSuggestion(null)
+        }
       } else {
         console.error('Search failed')
         setSearchResults([])
+        setNewInviteeSuggestion(null)
       }
     } catch (error) {
       console.error('Error searching users:', error)
       setSearchResults([])
+      setNewInviteeSuggestion(null)
     } finally {
       setSearching(false)
     }
@@ -213,18 +230,56 @@ export function MembersPageClient({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery])
 
-  const handleInvite = async (userId: string, role: string = 'Member') => {
-    setInviting(userId)
+  const handleInviteByEmail = async (email: string, name: string, kind: 'follow' | 'join') => {
+    if (!email || !name.trim()) {
+      alert('Please enter both name and email.')
+      return
+    }
+    setInvitingNewEmail(true)
+    try {
+      const message = newEmailInviteMessage.trim()
+      const response = await fetch(`/api/portfolios/${portfolioId}/invitations/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          invites: [{ email, name: name.trim(), kind }],
+          message: message.length > 0 ? message : undefined,
+        }),
+      })
+
+      if (response.ok) {
+        alert('Invitation sent successfully!')
+        setSearchQuery('')
+        setSearchResults([])
+        setNewInviteeSuggestion(null)
+        setNewEmailInviteName('')
+        setNewEmailInviteKind('join')
+        setNewEmailInviteMessage('')
+        router.refresh()
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to send invitation')
+      }
+    } catch (error) {
+      console.error('Error sending email invitation:', error)
+      alert('Failed to send invitation')
+    } finally {
+      setInvitingNewEmail(false)
+    }
+  }
+
+  const handleInvite = async (userId: string, kind: 'follow' | 'join') => {
+    const invitingKey = `${userId}:${kind}`
+    setInviting(invitingKey)
     try {
       const message = inviteMessageInputs[userId] || ''
-      const response = await fetch(`/api/portfolios/${portfolioId}/members/invite`, {
+      const response = await fetch(`/api/portfolios/${portfolioId}/invitations/bulk`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          userId,
-          role,
+          invites: [{ inviteeId: userId, kind }],
           message: message.trim().length > 0 ? message.trim() : undefined,
         }),
       })
@@ -246,6 +301,37 @@ export function MembersPageClient({
     } catch (error) {
       console.error('Error sending invitation:', error)
       alert('Failed to send invitation')
+    } finally {
+      setInviting(null)
+    }
+  }
+
+  const handleResendInvitationEmail = async (userId: string, kind: 'follow' | 'join') => {
+    const invitingKey = `${userId}:resend:${kind}`
+    setInviting(invitingKey)
+    try {
+      const message = inviteMessageInputs[userId] || ''
+      const response = await fetch(`/api/portfolios/${portfolioId}/invitations/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          invites: [{ inviteeId: userId, kind }],
+          message: message.trim().length > 0 ? message.trim() : undefined,
+        }),
+      })
+
+      if (response.ok) {
+        alert('Invitation email resent successfully!')
+        router.refresh()
+      } else {
+        const data = await response.json()
+        alert(data.error || 'Failed to resend invitation email')
+      }
+    } catch (error) {
+      console.error('Error resending invitation email:', error)
+      alert('Failed to resend invitation email')
     } finally {
       setInviting(null)
     }
@@ -422,6 +508,9 @@ export function MembersPageClient({
   const isUserAlreadyMember = (userId: string) =>
     (!!creator && creator.id === userId) || members.some((m) => m.id === userId)
 
+  const isUserAlreadyFollower = (userId: string) =>
+    subscriberDetails.some((s) => s.id === userId)
+
   const handleCancelInvitation = async (inviteeId: string) => {
     if (!confirm('Cancel this invitation?')) return
     setCancellingInviteeId(inviteeId)
@@ -474,16 +563,28 @@ export function MembersPageClient({
             const pendingReq = getPendingJoinRequestForUser(user.id)
             const pendingInv = getPendingInvitationForUser(user.id)
             const alreadyMember = isUserAlreadyMember(user.id)
+            const alreadyFollower = isUserAlreadyFollower(user.id)
+            const resendKind: 'follow' | 'join' =
+              pendingInv?.invitation_type === 'follow' ? 'follow' : 'join'
+            const canResendInvite =
+              !!pendingInv &&
+              (pendingInv.invitation_type === 'follow' || pendingInv.invitation_type === 'member')
             const statusHint = alreadyMember
               ? 'Already a member of this space.'
+              : alreadyFollower
+                ? 'Already following this space.'
               : pendingReq
                 ? 'This person has a pending join request. Resolve it before sending an invitation.'
                 : pendingInv
                   ? pendingInv.invitation_type === 'manager'
                     ? 'A manager invitation is already pending for this person.'
-                    : 'An invitation is already pending for this person.'
+                    : pendingInv.invitation_type === 'follow'
+                      ? 'A follow invitation is already pending for this person.'
+                      : 'An invitation is already pending for this person.'
                   : null
             const canInviteUser = !alreadyMember && !pendingReq && !pendingInv
+            const canInviteFollow = canInviteUser && !alreadyFollower
+            const canInviteJoin = canInviteUser
 
             return (
               <div
@@ -506,18 +607,8 @@ export function MembersPageClient({
                     )}
                   </div>
                 </div>
-                {canInviteUser && (
+                {(canInviteUser || canResendInvite) && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <input
-                      type="text"
-                      value={inviteRoleInputs[user.id] || 'Member'}
-                      onChange={(e) =>
-                        setInviteRoleInputs({ ...inviteRoleInputs, [user.id]: e.target.value })
-                      }
-                      placeholder="Role (max 2 words)"
-                      maxLength={50}
-                      className="px-2 py-1 text-sm border border-gray-300 rounded w-32"
-                    />
                     <input
                       type="text"
                       value={inviteMessageInputs[user.id] || ''}
@@ -528,13 +619,37 @@ export function MembersPageClient({
                       maxLength={200}
                       className="px-2 py-1 text-sm border border-gray-300 rounded w-48"
                     />
-                    <Button
-                      variant="primary"
-                      onClick={() => handleInvite(user.id, inviteRoleInputs[user.id] || 'Member')}
-                      disabled={inviting === user.id}
-                    >
-                      <UIText>{inviting === user.id ? 'Sending...' : 'Invite'}</UIText>
-                    </Button>
+                    {canInviteFollow && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleInvite(user.id, 'follow')}
+                        disabled={inviting === `${user.id}:follow`}
+                      >
+                        <UIText>{inviting === `${user.id}:follow` ? 'Sending...' : 'Invite to follow'}</UIText>
+                      </Button>
+                    )}
+                    {canInviteJoin && (
+                      <Button
+                        variant="primary"
+                        onClick={() => handleInvite(user.id, 'join')}
+                        disabled={inviting === `${user.id}:join`}
+                      >
+                        <UIText>{inviting === `${user.id}:join` ? 'Sending...' : 'Invite to join'}</UIText>
+                      </Button>
+                    )}
+                    {canResendInvite && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleResendInvitationEmail(user.id, resendKind)}
+                        disabled={inviting === `${user.id}:resend:${resendKind}`}
+                      >
+                        <UIText>
+                          {inviting === `${user.id}:resend:${resendKind}`
+                            ? 'Resending...'
+                            : 'Resend invite email'}
+                        </UIText>
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -543,7 +658,59 @@ export function MembersPageClient({
         </div>
       )}
 
-      {searchQuery && !searching && searchResults.length === 0 && (
+      {/* New-user invite-by-email suggestion */}
+      {newInviteeSuggestion && searchQuery && !searching && (
+        <div className="mt-4 rounded-md border border-dashed border-amber-300 bg-amber-50 p-3">
+          <UIText as="div" className="text-amber-800 mb-2">
+            <strong>{newInviteeSuggestion.email}</strong> is not on Ausna yet. Fill in their name and invite them.
+          </UIText>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:flex-wrap">
+            <div>
+              <UIText as="label" className="block text-xs text-gray-600 mb-1">Name *</UIText>
+              <input
+                type="text"
+                value={newEmailInviteName}
+                onChange={(e) => setNewEmailInviteName(e.target.value)}
+                placeholder="Their name"
+                maxLength={100}
+                className="px-2 py-1 text-sm border border-gray-300 rounded w-40 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <UIText as="label" className="block text-xs text-gray-600 mb-1">Invite to</UIText>
+              <select
+                value={newEmailInviteKind}
+                onChange={(e) => setNewEmailInviteKind(e.target.value as 'join' | 'follow')}
+                className="px-2 py-1 text-sm border border-gray-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="join">Join</option>
+                <option value="follow">Follow</option>
+              </select>
+            </div>
+            <div>
+              <UIText as="label" className="block text-xs text-gray-600 mb-1">Message (optional)</UIText>
+              <input
+                type="text"
+                value={newEmailInviteMessage}
+                onChange={(e) => setNewEmailInviteMessage(e.target.value)}
+                placeholder="Optional message"
+                maxLength={200}
+                className="px-2 py-1 text-sm border border-gray-300 rounded w-48 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => handleInviteByEmail(newInviteeSuggestion.email, newEmailInviteName, newEmailInviteKind)}
+              disabled={invitingNewEmail || !newEmailInviteName.trim()}
+            >
+              <UIText>{invitingNewEmail ? 'Sending…' : 'Send Invite'}</UIText>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {searchQuery && !searching && searchResults.length === 0 && !newInviteeSuggestion && (
         <div className="mt-4">
           <UIText>No users found</UIText>
         </div>
@@ -579,7 +746,7 @@ export function MembersPageClient({
               : 'border-transparent text-gray-600 hover:text-gray-900'
           }`}
         >
-          <UIText as="span">Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
+          <UIText as="span">Followers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
         </button>
         {canShowJoinRequestsTab && (
           <button
@@ -799,11 +966,11 @@ export function MembersPageClient({
         <div>
           <div className="mb-3">
             <UIText as="h2">
-              Subscribers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}
+              Followers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}
             </UIText>
           </div>
           {subscriberDetails.length === 0 ? (
-            <div><UIText>No subscribers yet</UIText></div>
+            <div><UIText>No followers yet</UIText></div>
           ) : (
             <div className="space-y-2">
               {subscriberDetails.map((subscriber) => (
@@ -879,7 +1046,11 @@ export function MembersPageClient({
                   const inviteeName = getDisplayName(inv.invitee)
                   const inviterName = getDisplayName(inv.inviter)
                   const typeLabel =
-                    inv.invitation_type === 'manager' ? 'Manager invite' : 'Member invite'
+                    inv.invitation_type === 'manager'
+                      ? 'Manager invite'
+                      : inv.invitation_type === 'follow'
+                        ? 'Follow invite'
+                        : 'Join invite'
                   const canCancel = inv.inviter.id === currentUserId
 
                   return (

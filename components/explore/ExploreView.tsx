@@ -93,7 +93,7 @@ function MatchDetailsDev({ details }: { details: ActivityMatchDetails }) {
                 </li>
                 <li>
                   <UIText className="text-gray-600">
-                    Host has user subscribed project:{' '}
+                    Host has user followed project:{' '}
                     {details.trustworthy.hostHasSubscribedProject ? 'yes' : 'no'}
                   </UIText>
                 </li>

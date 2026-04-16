@@ -39,7 +39,7 @@ function truncateText(text: string, max: number): string {
 function feedSourceLabel(source: NoteSource | null | undefined): string | null {
   if (!source) return null
   if (source.type === 'friend') return 'Friend'
-  if (source.type === 'subscribed') return 'Subscribed'
+  if (source.type === 'subscribed') return 'Followed'
   if (source.type === 'space') return `From ${source.spaceName}`
   return null
 }

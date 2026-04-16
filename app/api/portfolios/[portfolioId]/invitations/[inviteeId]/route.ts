@@ -101,6 +101,7 @@ export async function PUT(
     }
 
     const isManagerInvitation = invitation.invitation_type === 'manager'
+    const isFollowInvitation = invitation.invitation_type === 'follow'
 
     // Get portfolio
     const { data: portfolio, error: portfolioError } = await supabase
@@ -127,6 +128,50 @@ export async function PUT(
     const metadata = portfolio.metadata as any
     const members = metadata?.members || []
     const managers = metadata?.managers || []
+
+    if (isFollowInvitation) {
+      // Follow invitation: create a subscription (if not already following), then accept invite.
+      // Prevent users from following their own portfolios.
+      if (portfolio.user_id === user.id) {
+        return NextResponse.json({ error: 'Cannot follow your own space' }, { status: 400 })
+      }
+
+      const { data: existingSubscription } = await supabase
+        .from('subscriptions')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('portfolio_id', portfolioId)
+        .maybeSingle()
+
+      if (!existingSubscription) {
+        const { error: subError } = await supabase.from('subscriptions').insert({
+          user_id: user.id,
+          portfolio_id: portfolioId,
+        })
+        if (subError) {
+          return NextResponse.json({ error: 'Failed to follow space' }, { status: 500 })
+        }
+      }
+
+      await supabase
+        .from('portfolio_invitations')
+        .update({
+          status: 'accepted',
+          accepted_at: new Date().toISOString(),
+        })
+        .eq('id', invitation.id)
+
+      const basic = metadata?.basic || {}
+      const portfolioName = basic.name || 'this space'
+
+      await supabase.from('messages').insert({
+        sender_id: user.id,
+        receiver_id: invitation.inviter_id,
+        text: `accepted your invitation to follow ${portfolioName} (space)`,
+      })
+
+      return NextResponse.json({ success: true })
+    }
 
     if (isManagerInvitation) {
       // Handle manager invitation acceptance

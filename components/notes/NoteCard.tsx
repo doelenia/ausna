@@ -1999,7 +1999,7 @@ export function NoteCard({
                 <UIText as="span" className="px-2 py-1 rounded-full bg-gray-100">
                   {note.feedSource.type === 'friend' && 'Friend'}
                   {note.feedSource.type === 'space' && `From ${note.feedSource.spaceName}`}
-                  {note.feedSource.type === 'subscribed' && 'Subscribed'}
+                  {note.feedSource.type === 'subscribed' && 'Followed'}
                 </UIText>
               )}
             </div>

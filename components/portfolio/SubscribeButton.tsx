@@ -52,11 +52,11 @@ export function SubscribeButton({
         router.refresh()
       } else {
         const data = await response.json()
-        alert(data.error || 'Failed to update subscription')
+        alert(data.error || 'Failed to update follow')
       }
     } catch (error) {
       console.error('Error toggling subscription:', error)
-      alert('Failed to update subscription')
+      alert('Failed to update follow')
     } finally {
       setIsLoading(false)
     }
@@ -85,8 +85,8 @@ export function SubscribeButton({
         {isLoading
           ? '...'
           : isSubscribed
-          ? 'Unsubscribe'
-          : 'Subscribe'}
+          ? 'Unfollow'
+          : 'Follow'}
       </UIText>
     </Button>
   )
