@@ -3,7 +3,7 @@
 import { useEffect, useState, FormEvent } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Button, Title, Content, UIText } from '@/components/ui'
-import { buildLoginHref } from '@/lib/auth/login-redirect'
+import { buildLoginHref, sanitizeReturnTo } from '@/lib/auth/login-redirect'
 
 function isValidEmail(email: string): boolean {
   const trimmed = email.trim()
@@ -108,8 +108,12 @@ export default function InviteAcceptPage() {
         return
       }
 
-      // On success, the API will have created a session; send user to main
-      router.push('/main')
+      // On success, the API will have created a session
+      const returnToParam =
+        typeof window !== 'undefined'
+          ? new URLSearchParams(window.location.search).get('returnTo')
+          : null
+      router.push(sanitizeReturnTo(returnToParam))
     } catch (err) {
       console.error('Error completing invite:', err)
       setSubmitError('Failed to complete invite. Please try again.')
@@ -145,7 +149,7 @@ export default function InviteAcceptPage() {
         Join Ausna
       </Title>
       <Content className="mb-4">
-        Set your email and password to finish joining Ausna. You will be logged in right away and connected with the person who invited you.
+        Set your password to finish activating your Ausna account. After you join, you will return to where you left off (for example the space you opened from your invite).
       </Content>
       <form onSubmit={handleSubmit} className="space-y-4 max-w-md">
         <div>

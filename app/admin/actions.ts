@@ -1760,7 +1760,6 @@ export async function createHumanPortfolioWithProjects(
           description: projectData.description || '',
           avatar: '',
         },
-        pinned: [],
         settings: {},
         members: memberUserIds,
         managers: [humanPortfolio.user_id], // Creator is manager

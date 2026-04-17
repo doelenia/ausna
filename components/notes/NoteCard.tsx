@@ -16,10 +16,11 @@ import { formatActivityLocation } from '@/lib/formatActivityLocation'
 import { Title, Subtitle, Content, UIText, UIButtonText, Card, UserAvatar, Button } from '@/components/ui'
 import { SkeletonAvatar, SkeletonText, SkeletonBanner } from '@/components/ui/Skeleton'
 import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
+import { NotePostKindPill } from '@/components/notes/NotePostKindPill'
 import { NoteActions } from './NoteActions'
 import { useRouter } from 'next/navigation'
 import { useDataCache } from '@/lib/cache/useDataCache'
-import { MessageCircle, Heart, Lock, Megaphone, Hand, Send, UsersRound, Folder } from 'lucide-react'
+import { MessageCircle, Heart, Lock, Megaphone, Hand, Send, UsersRound } from 'lucide-react'
 import type { OpenCallMetadata } from '@/types/note'
 import { SendItemModal } from '@/components/messages/SendItemModal'
 import { buildLoginHref } from '@/lib/auth/login-redirect'
@@ -29,7 +30,6 @@ interface NoteCardProps {
   portfolioId?: string
   currentUserId?: string
   isPreview?: boolean
-  isPinned?: boolean
   viewMode?: 'default' | 'collage'
   isViewMode?: boolean
   /**
@@ -80,7 +80,6 @@ export function NoteCard({
   portfolioId,
   currentUserId,
   isPreview = false,
-  isPinned = false,
   viewMode = 'default',
   isViewMode = false,
   flatOnMobile = false,
@@ -1925,13 +1924,6 @@ export function NoteCard({
       /* Regular layout: Header - Owner and Date (hidden in collage view) */
       !isCollageView && (
         <div className="px-3 pt-3">
-          {/* Resource header: place at top (matching Open Call header placement) */}
-          {isResource && (
-            <div className="mb-3 flex items-center gap-2">
-              <Folder className="w-5 h-5 text-gray-600" strokeWidth={1.5} aria-hidden />
-              <UIText as="span">Resource</UIText>
-            </div>
-          )}
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-3 flex-wrap">
               {loadingPortfolios ? (
@@ -1999,36 +1991,41 @@ export function NoteCard({
                 <UIText as="span" className="px-2 py-1 rounded-full bg-gray-100">
                   {note.feedSource.type === 'friend' && 'Friend'}
                   {note.feedSource.type === 'space' && `From ${note.feedSource.spaceName}`}
-                  {note.feedSource.type === 'subscribed' && 'Subscribed'}
+                  {note.feedSource.type === 'subscribed' && 'Followed'}
                 </UIText>
               )}
             </div>
             
             {/* View Mode Actions (and private lock to the left when in view mode) */}
-            {isViewMode && (
+            {(isViewMode || isResource) && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {isPrivate && <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />}
-                {(isMembersOnly || isFriendsOnly) && (
-                  <UsersRound
-                    className="w-4 h-4 text-gray-500 flex-shrink-0"
-                    aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
-                  />
-                )}
-                {/* More Menu */}
-                {(isOwner || isCollaborator) && (
-                  <NoteActions
-                    note={note}
-                    portfolioId={portfolioId}
-                    currentUserId={currentUserId}
-                    isCollaborator={isCollaborator}
-                    isOpenCall={isOpenCall}
-                    onDelete={onDeleted}
-                    onRemoveFromPortfolio={onRemovedFromPortfolio}
-                    onLeftCollaboration={onLeftCollaboration}
-                    onVisibilityChange={setLocalVisibility}
-                    onOpenEditCollaborators={isOwner ? () => setShowEditCollaboratorsModal(true) : undefined}
-                    onOpenEditSpaces={isOwner ? () => setShowEditSpacesModal(true) : undefined}
-                  />
+                {isResource && <NotePostKindPill kind="resource" />}
+                {isViewMode && (
+                  <>
+                    {isPrivate && <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />}
+                    {(isMembersOnly || isFriendsOnly) && (
+                      <UsersRound
+                        className="w-4 h-4 text-gray-500 flex-shrink-0"
+                        aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
+                      />
+                    )}
+                    {/* More Menu */}
+                    {(isOwner || isCollaborator) && (
+                      <NoteActions
+                        note={note}
+                        portfolioId={portfolioId}
+                        currentUserId={currentUserId}
+                        isCollaborator={isCollaborator}
+                        isOpenCall={isOpenCall}
+                        onDelete={onDeleted}
+                        onRemoveFromPortfolio={onRemovedFromPortfolio}
+                        onLeftCollaboration={onLeftCollaboration}
+                        onVisibilityChange={setLocalVisibility}
+                        onOpenEditCollaborators={isOwner ? () => setShowEditCollaboratorsModal(true) : undefined}
+                        onOpenEditSpaces={isOwner ? () => setShowEditSpacesModal(true) : undefined}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             )}

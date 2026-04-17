@@ -48,7 +48,7 @@ export function renderDigestEmailShell(input: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${title}</title>
   </head>
-  <body style="margin:0; padding:0; background:#f9fafb;">
+  <body style="margin:0; padding:0; background:#f9fafb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;">
     <div style="max-width: 600px; margin: 0 auto; padding: 28px 16px;">
       <div style="background:#ffffff; border-radius: 16px; padding: 20px 16px 16px 16px;">
         <h1 style="margin:0 0 8px 0; font-size: 20px; line-height: 1.4; font-weight: 700; color:#111827;">

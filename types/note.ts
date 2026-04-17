@@ -61,7 +61,7 @@ export interface Note {
   metadata?: Record<string, unknown> | OpenCallMetadata
   /**
    * User IDs of collaborators. They appear as creator in feed and human portfolio,
-   * can pin to portfolio and leave collaboration, but have no extra rights.
+   * can leave collaboration, but have no extra rights.
    */
   collaborator_account_ids?: string[]
   text: string

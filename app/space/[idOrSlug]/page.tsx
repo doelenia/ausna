@@ -13,6 +13,8 @@ import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import type { Metadata } from 'next'
 import { getSiteUrl } from '@/lib/utils/site-url'
+import { createServiceClient } from '@/lib/supabase/service'
+import { isPendingContactInviteUser } from '@/lib/auth/contact-invite-metadata'
 
 interface SpacePortfolioPageProps {
   params: { idOrSlug: string }
@@ -106,12 +108,58 @@ export default async function SpacePortfolioPage({ params, searchParams }: Space
   const isAdmin = adminUser !== null
 
   let hasPendingPortfolioInvitation = false
-  let pendingPortfolioInvitationType: 'member' | 'manager' | null = null
+  let pendingPortfolioInvitationType: 'follow' | 'member' | 'manager' | null = null
+  let pendingPortfolioInviterDisplayName: string | null = null
   if (user && !isHumanPortfolio(portfolio)) {
     const invRes = await getCurrentUserPendingPortfolioInvitation(portfolio.id)
     if (invRes.success && invRes.hasPending && invRes.invitationType) {
       hasPendingPortfolioInvitation = true
       pendingPortfolioInvitationType = invRes.invitationType
+      pendingPortfolioInviterDisplayName =
+        typeof invRes.inviterDisplayName === 'string' && invRes.inviterDisplayName.trim().length > 0
+          ? invRes.inviterDisplayName.trim()
+          : null
+    }
+  }
+
+  let pendingUserInviteToken: string | null = null
+  if (user?.email && !isHumanPortfolio(portfolio)) {
+    const meta = user.user_metadata as Record<string, unknown> | undefined
+    if (isPendingContactInviteUser(meta)) {
+      try {
+        const svc = createServiceClient()
+        const email = user.email.trim().toLowerCase()
+        const { data: portInv } = await svc
+          .from('portfolio_invitations')
+          .select('inviter_id')
+          .eq('portfolio_id', portfolio.id)
+          .eq('invitee_id', user.id)
+          .eq('status', 'pending')
+          .maybeSingle()
+        if (portInv?.inviter_id) {
+          const { data: ui } = await svc
+            .from('user_invites')
+            .select('token')
+            .eq('inviter_user_id', portInv.inviter_id)
+            .eq('invitee_email', email)
+            .eq('status', 'pending')
+            .maybeSingle()
+          pendingUserInviteToken = ui?.token ?? null
+        }
+        if (!pendingUserInviteToken) {
+          const { data: uiFb } = await svc
+            .from('user_invites')
+            .select('token')
+            .eq('invitee_email', email)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          pendingUserInviteToken = uiFb?.token ?? null
+        }
+      } catch {
+        pendingUserInviteToken = null
+      }
     }
   }
 
@@ -142,6 +190,8 @@ export default async function SpacePortfolioPage({ params, searchParams }: Space
       hasPendingCommunityApplication={hasPendingCommunityApplication}
       hasPendingPortfolioInvitation={hasPendingPortfolioInvitation}
       pendingPortfolioInvitationType={pendingPortfolioInvitationType}
+      pendingPortfolioInviterDisplayName={pendingPortfolioInviterDisplayName}
+      pendingUserInviteToken={pendingUserInviteToken}
       initialTab={initialTab}
       openJoinFromUrl={openJoinFromUrl}
     />

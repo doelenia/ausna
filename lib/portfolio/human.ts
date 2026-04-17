@@ -66,7 +66,6 @@ export async function ensureHumanPortfolio(userId: string): Promise<HumanPortfol
           description: '',
           avatar: currentUser?.user_metadata?.avatar_url || '',
         },
-        pinned: [],
         settings: {},
         username, // Keep for backward compatibility
         email,

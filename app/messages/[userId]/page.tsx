@@ -8,7 +8,7 @@ import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { ActivityUpdateCard } from '@/components/portfolio/ActivityUpdateCard'
 import { Portfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
-import { getHumanProfileUrl } from '@/lib/portfolio/routes'
+import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { MessagePortfolioCard } from '@/components/messages/MessagePortfolioCard'
 import { NoteCollaborationInvitationCard } from '@/components/notes/NoteCollaborationInvitationCard'
@@ -47,7 +47,7 @@ function ConversationViewContent() {
   const [portfolioInvitations, setPortfolioInvitations] = useState<Map<string, {
     invitationId: string
     portfolioId: string
-    status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null
+    status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null
     created_at: string
     inviter_id: string
     invitee_id: string
@@ -372,7 +372,7 @@ function ConversationViewContent() {
       const invitationMap = new Map<string, {
         invitationId: string
         portfolioId: string
-        status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null
+        status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null
         created_at: string
         inviter_id: string
         invitee_id: string
@@ -380,11 +380,13 @@ function ConversationViewContent() {
       }>()
 
       invitations?.forEach((invitation: any) => {
-        let status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null = null
+        let status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null = null
         if (invitation.status === 'accepted') {
           status = 'accepted'
         } else if (invitation.status === 'cancelled') {
           status = 'cancelled'
+        } else if (invitation.status === 'declined') {
+          status = 'declined'
         } else if (invitation.inviter_id === user.id) {
           status = 'pending_sent'
         } else {
@@ -977,9 +979,17 @@ function ConversationViewContent() {
               const noteCollaborationInvite = isNoteCollaborationInviteMessage && message.note_id
                 ? noteCollaborationInvites.get(message.note_id)
                 : null
-              const isInviteMessage = messageText.includes('invited you to join') || messageText.includes('invited you to become a manager')
+              const isInviteMessage =
+                messageText.includes('invited you to join') ||
+                messageText.includes('invited you to become a manager') ||
+                messageText.includes('invited you to follow')
+              const isFollowInviteMessage = messageText.includes('invited you to follow')
               const isManagerInviteMessage = messageText.includes('invited you to become a manager')
-              const isAcceptMessage = messageText.includes('accepted your invitation to join') || messageText.includes('accepted your invitation to become a manager')
+              const isAcceptMessage =
+                messageText.includes('accepted your invitation to join') ||
+                messageText.includes('accepted your invitation to become a manager') ||
+                messageText.includes('accepted your invitation to follow')
+              const isFollowAcceptMessage = messageText.includes('accepted your invitation to follow')
               const isManagerAcceptMessage = messageText.includes('accepted your invitation to become a manager')
               const isPortfolioInvitationMessage = isInviteMessage || isAcceptMessage
               const isPortfolioShareMessage = message.message_type === 'portfolio_share'
@@ -995,29 +1005,39 @@ function ConversationViewContent() {
               const isActivityUpdateMessage = activityUpdateRef !== null
               const activityUpdateDetails = parseActivityUpdateMessageDetails(messageText)
               
-              let portfolioInvitation: { invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string } | null = null
+              let portfolioInvitation: { invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string } | null = null
               if (isPortfolioInvitationMessage && portfolioInvitations.size > 0 && currentUserId) {
                 const expectedInviterId = isInviteMessage ? message.sender_id : message.receiver_id
                 const expectedInviteeId = isInviteMessage ? message.receiver_id : message.sender_id
 
                 // Backend formats:
                 // - "invited you to join <name> (portfolio)"
+                // - "invited you to follow <name> (space)"
                 // - "invited you to become a manager of <name> (portfolio)"
                 // - "accepted your invitation to join <name> (<typeLabel>)"
                 const match = messageText.match(
-                  /(?:invited you to (?:join|become a manager of)|accepted your invitation to (?:join|become a manager of))\s+(.+?)\s+\(([^)]+)\)/i
+                  /(?:invited you to (?:join|follow|become a manager of)|accepted your invitation to (?:join|follow|become a manager of))\s+(.+?)\s+\(([^)]+)\)/i
                 )
                 const portfolioNameFromMessage = match ? match[1].trim() : null
 
-                const matchingInvitations: Array<{ invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string }> = []
+                const matchingInvitations: Array<{ invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string }> = []
                 
+                const expectedType: 'manager' | 'follow' | 'member' =
+                  (isManagerInviteMessage || isManagerAcceptMessage)
+                    ? 'manager'
+                    : (isFollowInviteMessage || isFollowAcceptMessage)
+                      ? 'follow'
+                      : 'member'
+
                 portfolioInvitations.forEach((invitation) => {
                   if (invitation.inviter_id === expectedInviterId && 
                       invitation.invitee_id === expectedInviteeId) {
                     const invitationType = invitation.invitation_type || 'member'
-                    if ((isManagerInviteMessage || isManagerAcceptMessage) && invitationType === 'manager') {
+                    if (expectedType === 'manager' && invitationType === 'manager') {
                       matchingInvitations.push(invitation)
-                    } else if (!isManagerInviteMessage && !isManagerAcceptMessage && invitationType === 'member') {
+                    } else if (expectedType === 'follow' && invitationType === 'follow') {
+                      matchingInvitations.push(invitation)
+                    } else if (expectedType === 'member' && invitationType === 'member') {
                       matchingInvitations.push(invitation)
                     }
                   }
@@ -1209,14 +1229,13 @@ function ConversationViewContent() {
                       {isReceivedPortfolioInvitation && portfolioInvitation && (
                         <div className="mt-2 pt-2 border-t border-gray-300">
                           <Button
-                            variant="success"
+                            variant="secondary"
                             size="sm"
                             fullWidth
-                            onClick={() => {
-                              handleAcceptPortfolioInvitation(portfolioInvitation!.portfolioId)
-                            }}
+                            asLink
+                            href={getSpaceUrl((portfolio as any)?.slug || portfolioInvitation.portfolioId)}
                           >
-                            <UIText>Accept Invite</UIText>
+                            <UIText>Check invite</UIText>
                           </Button>
                         </div>
                       )}

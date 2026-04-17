@@ -54,30 +54,10 @@ export interface PortfolioBasicMetadata {
 }
 
 /**
- * Pinned item: link to another space portfolio or a note.
- * Stored `type` may be legacy `"portfolio"`; use `normalizePinnedItemType`.
- */
-export interface PinnedItem {
-  type: 'space' | 'note' | 'portfolio'
-  id: string
-}
-
-export function normalizePinnedItemType(
-  t: string | null | undefined
-): 'space' | 'note' | null {
-  if (!t) return null
-  const s = String(t).toLowerCase()
-  if (s === 'note') return 'note'
-  if (s === 'space' || s === 'portfolio') return 'space'
-  return null
-}
-
-/**
  * Base metadata structure for all portfolios
  */
 export interface PortfolioMetadata {
   basic: PortfolioBasicMetadata
-  pinned: PinnedItem[] // Array of pinned items (max 9)
   settings: Record<string, any> // Empty for now, reserved for future use
 }
 
@@ -279,7 +259,7 @@ export interface ActivityPortfolioProperties extends PortfolioProperties {
  */
 export interface PortfolioEntityMetadata extends PortfolioMetadata {
   members: string[] // Array of user IDs (includes owner)
-  managers: string[] // Array of user IDs (managers can edit, manage pinned, etc.)
+  managers: string[] // Array of user IDs (managers can edit portfolio details, members, etc.)
   project_type_general?: string // General category (e.g., "Arts & Culture")
   project_type_specific?: string // Specific type (e.g., "Film", max 2 words)
   memberRoles?: { [userId: string]: string } // Object mapping userId to role (max 2 words)

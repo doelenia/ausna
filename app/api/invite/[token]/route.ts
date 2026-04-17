@@ -6,6 +6,7 @@ import {
   updateHumanPortfolioMetadataById,
 } from '@/lib/portfolio/admin-helpers'
 import { PENDING_CONTACT_INVITE_META_KEY } from '@/lib/auth/contact-invite-metadata'
+import { findAuthUserIdByEmail } from '@/lib/auth-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -153,31 +154,10 @@ export async function POST(
     const normalizedEmail = email.trim().toLowerCase()
     const trimmedName = name.trim() || invite.invitee_name || ''
 
-    // Find or create auth user for this email
-    const { data: listResult, error: listError } =
-      await serviceClient.auth.admin.listUsers({
-        email: normalizedEmail,
-        perPage: 1,
-      } as any)
+    // Find or create auth user for this email (listUsers does not support email filter — paginate)
+    let authUserId: string | null = await findAuthUserIdByEmail(serviceClient, normalizedEmail)
 
-    if (listError) {
-      console.error('Error checking auth user in invite completion:', listError)
-      return NextResponse.json(
-        { error: 'Failed to complete invite.' },
-        { status: 500 }
-      )
-    }
-
-    let authUserId: string | null = null
-    const existingUser =
-      (listResult as any)?.users?.find(
-        (u: any) =>
-          typeof u.email === 'string' &&
-          u.email.toLowerCase() === normalizedEmail
-      ) ?? null
-
-      if (existingUser) {
-      authUserId = existingUser.id as string
+    if (authUserId) {
       const { data: existingAuth } = await serviceClient.auth.admin.getUserById(authUserId)
       const mergedMeta = {
         ...(existingAuth?.user?.user_metadata || {}),

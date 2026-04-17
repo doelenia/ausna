@@ -38,8 +38,8 @@ export function ResourcesSection({
   const [resourceCount, setResourceCount] = useState(0)
 
   const createUrl = useMemo(() => {
-    if (portfolioType === 'human') return '/notes/create/resource'
-    return `/notes/create/resource?portfolio=${encodeURIComponent(portfolioId)}`
+    if (portfolioType === 'human') return '/notes/create?kind=resource'
+    return `/notes/create?portfolio=${encodeURIComponent(portfolioId)}&kind=resource`
   }, [portfolioId, portfolioType])
 
   useEffect(() => {
@@ -98,7 +98,6 @@ export function ResourcesSection({
         notes={resources}
         portfolioId={portfolioId}
         currentUserId={currentUserId}
-        pinnedNoteIds={new Set()}
         disableNavigation
         onNoteClick={openPopupAt}
         showPlaceholder={showPlaceholder}

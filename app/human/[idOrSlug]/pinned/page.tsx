@@ -1,51 +1,29 @@
 import { createClient } from '@/lib/supabase/server'
 import { isHumanPortfolio } from '@/types/portfolio'
 import { notFound, permanentRedirect } from 'next/navigation'
-import { getPortfolioBasic, isPortfolioOwner } from '@/lib/portfolio/helpers'
-import { EditPinnedView } from '@/components/portfolio/EditPinnedView'
-import { Title, UIText } from '@/components/ui'
 import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
-import { getHumanPinnedUrl, getSpacePinnedUrl } from '@/lib/portfolio/routes'
+import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 
-interface HumanEditPinnedPageProps {
+interface HumanPinnedRedirectProps {
   params: { idOrSlug: string }
 }
 
-export default async function HumanEditPinnedPage({ params }: HumanEditPinnedPageProps) {
+/** Legacy URL: `/human/.../pinned` redirects to the profile. */
+export default async function HumanPinnedRedirect({ params }: HumanPinnedRedirectProps) {
   const idOrSlug = params.idOrSlug
   if (!idOrSlug) notFound()
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) notFound()
-
   const portfolio = await loadPortfolioForPage(supabase, idOrSlug)
   if (!portfolio) notFound()
 
   if (!isHumanPortfolio(portfolio)) {
-    permanentRedirect(getSpacePinnedUrl(portfolio.slug || portfolio.id))
+    permanentRedirect(getSpaceUrl(portfolio.slug || portfolio.id))
   }
 
   if (portfolio.slug && idOrSlug !== portfolio.slug) {
-    permanentRedirect(getHumanPinnedUrl(portfolio.slug))
+    permanentRedirect(getHumanProfileUrl(portfolio.slug))
   }
 
-  const isOwner = await isPortfolioOwner(portfolio.id, user.id)
-  if (!isOwner) notFound()
-
-  const basic = getPortfolioBasic(portfolio)
-
-  return (
-    <div className="bg-white shadow rounded-lg p-6">
-      <div className="mb-6">
-        <Title as="h1" className="mb-2">
-          Edit Pinned Items
-        </Title>
-        <UIText as="p">{basic.name}</UIText>
-      </div>
-      <EditPinnedView portfolioId={portfolio.id} portfolioType={portfolio.type} />
-    </div>
-  )
+  permanentRedirect(getHumanProfileUrl(portfolio.slug || portfolio.id))
 }

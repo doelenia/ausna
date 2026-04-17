@@ -74,11 +74,24 @@ export function InviteHandler() {
       if (!hash) return
 
       const params = new URLSearchParams(hash.substring(1))
+      const hashError = params.get('error')
+      const errorCode = params.get('error_code')
+      if (hashError || errorCode) {
+        const next = new URL(window.location.href)
+        next.hash = ''
+        if (errorCode === 'otp_expired' || hashError === 'access_denied') {
+          next.searchParams.set('auth_magic_link', 'expired')
+        } else {
+          next.searchParams.set('auth_magic_link', 'denied')
+        }
+        window.history.replaceState(null, '', next.toString())
+        router.refresh()
+        return
+      }
+
       const accessToken = params.get('access_token')
       const type = params.get('type')
       if (!accessToken) return
-
-      console.log('Processing auth hash fragment, type:', type)
 
       if (type === 'recovery') {
         try {

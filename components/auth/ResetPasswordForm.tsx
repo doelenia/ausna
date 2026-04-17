@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button, UIText } from '@/components/ui'
 
 export function ResetPasswordForm() {
@@ -12,36 +12,41 @@ export function ResetPasswordForm() {
   const [error, setError] = useState<string | null>(null)
   const [hasValidSession, setHasValidSession] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
 
+  // `returnTo` allows callers (e.g. space invite activation flow) to redirect
+  // back to a specific page after password reset instead of the default login page.
+  const returnTo = searchParams?.get('returnTo') || null
+
   useEffect(() => {
-    // Check if we have a valid session from the recovery token
     const checkSession = async () => {
-      // First, check if there's a hash fragment with recovery token
       if (typeof window !== 'undefined') {
         const hash = window.location.hash
         if (hash) {
           const params = new URLSearchParams(hash.substring(1))
           const accessToken = params.get('access_token')
           const type = params.get('type')
-          
-          // If we have a recovery token in the hash, set the session
+
           if (accessToken && type === 'recovery') {
             try {
               const { data, error } = await supabase.auth.setSession({
                 access_token: accessToken,
                 refresh_token: params.get('refresh_token') || '',
               })
-              
+
               if (error) {
                 console.error('Error setting recovery session:', error)
                 setHasValidSession(false)
                 return
               }
-              
+
               if (data.session) {
-                // Clear hash and update URL
-                window.history.replaceState(null, '', '/reset-password')
+                // Preserve returnTo param when cleaning the hash
+                const cleanPath = returnTo
+                  ? `/reset-password?returnTo=${encodeURIComponent(returnTo)}`
+                  : '/reset-password'
+                window.history.replaceState(null, '', cleanPath)
                 setHasValidSession(true)
                 return
               }
@@ -53,15 +58,15 @@ export function ResetPasswordForm() {
           }
         }
       }
-      
-      // Check for existing session
+
       const {
         data: { session },
       } = await supabase.auth.getSession()
       setHasValidSession(!!session)
     }
     checkSession()
-  }, [supabase])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -81,14 +86,21 @@ export function ResetPasswordForm() {
     }
 
     try {
-      const { error: updateError } = await supabase.auth.updateUser({
-        password: password,
-      })
-
+      const { error: updateError } = await supabase.auth.updateUser({ password })
       if (updateError) throw updateError
 
-      // Password updated successfully, redirect to login
-      router.push('/login?password_reset=success')
+      // Finalize account activation (clear pseudo flag + pending invite metadata)
+      try {
+        await fetch('/api/auth/activate', { method: 'POST' })
+      } catch {
+        // Non-critical; proceed regardless
+      }
+
+      if (returnTo) {
+        window.location.href = returnTo
+      } else {
+        router.push('/login?password_reset=success')
+      }
     } catch (err: any) {
       setError(err.message || 'An error occurred. Please try again.')
     } finally {
@@ -106,11 +118,7 @@ export function ResetPasswordForm() {
           <UIText className="mb-4">
             This password reset link is invalid or has expired. Please request a new one.
           </UIText>
-          <Button
-            variant="primary"
-            asLink
-            href="/forgot-password"
-          >
+          <Button variant="primary" asLink href="/forgot-password">
             <UIText>Request new reset link</UIText>
           </Button>
         </div>
@@ -159,18 +167,10 @@ export function ResetPasswordForm() {
           </div>
         )}
 
-        <Button
-          type="submit"
-          variant="primary"
-          fullWidth
-          disabled={loading}
-        >
-          <UIText>
-            {loading ? 'Updating...' : 'Update password'}
-          </UIText>
+        <Button type="submit" variant="primary" fullWidth disabled={loading}>
+          <UIText>{loading ? 'Updating...' : 'Update password'}</UIText>
         </Button>
       </form>
     </div>
   )
 }
-

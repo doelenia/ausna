@@ -316,7 +316,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
     if (items.length === 0) {
       return (
         <Card variant="default" padding="md">
-          <Content className="text-gray-500">No subscribed or joined spaces right now.</Content>
+          <Content className="text-gray-500">No followed or joined spaces right now.</Content>
         </Card>
       )
     }

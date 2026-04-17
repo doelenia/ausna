@@ -43,7 +43,7 @@ export function renderDailyActivityMatchEmail(input: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
   </head>
-  <body style="margin:0; padding:0; background:#f9fafb;">
+  <body style="margin:0; padding:0; background:#f9fafb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;">
     <div style="max-width: 600px; margin: 0 auto; padding: 28px 16px;">
       <div style="background:#ffffff; border-radius: 16px; padding: 0;">
         <div style="border-radius: 16px; overflow:hidden;${activitySectionBackgroundStyle}">

@@ -137,7 +137,6 @@ export async function createPlaceholderHumanPortfolio(
           description: '',
           avatar: '',
         },
-        pinned: [],
         settings: {},
         email: email.toLowerCase(),
         username: email.split('@')[0] || 'user',

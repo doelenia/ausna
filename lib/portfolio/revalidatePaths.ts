@@ -1,7 +1,7 @@
 import { revalidatePath } from 'next/cache'
 
-const HUMAN_EXTRAS = ['', '/friends', '/communities', '/pinned'] as const
-const SPACE_EXTRAS = ['', '/members', '/pinned'] as const
+const HUMAN_EXTRAS = ['', '/friends', '/communities'] as const
+const SPACE_EXTRAS = ['', '/members'] as const
 
 /**
  * Revalidate Next.js cache for canonical human/space URLs (Deploy 2).

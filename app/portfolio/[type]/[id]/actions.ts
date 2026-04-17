@@ -5,8 +5,6 @@ import { requireAuth } from '@/lib/auth/requireAuth'
 import {
   Portfolio,
   isHumanPortfolio,
-  normalizePinnedItemType,
-  PinnedItem,
   ActivityCallToJoinConfig,
   HumanAvailabilitySchedule,
   DB_NON_HUMAN_TYPES,
@@ -16,15 +14,13 @@ import {
   getPortfolioBasic,
   canEditPortfolio,
   canDeletePortfolio,
-  canManagePinned,
-  canAddToPinned,
-  getPinnedItemsCount,
   isNoteAssignedToPortfolio,
 } from '@/lib/portfolio/helpers'
 import { Note } from '@/types/note'
 import { revalidatePortfolioPathsForIdAndSlug } from '@/lib/portfolio/revalidatePaths'
 import { getSpaceMembersUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import { deriveSpaceCapabilities } from '@/lib/portfolio/spaceCapabilities'
+import { createServiceClient } from '@/lib/supabase/service'
 
 interface UpdatePortfolioResult {
   success: boolean
@@ -50,75 +46,6 @@ interface GetSubPortfoliosResult {
   success: boolean
   projects?: SubPortfolio[]
   communities?: SubPortfolio[]
-  error?: string
-}
-
-interface PinnedItemWithData {
-  type: 'space' | 'note'
-  id: string
-  portfolio?: {
-    id: string
-    type: string
-    name: string
-    avatar?: string
-    slug: string
-    role?: 'manager' | 'member' // Role of the human portfolio owner in this pinned portfolio
-  }
-  note?: {
-    id: string
-    text: string
-    owner_account_id: string
-    created_at: string
-    references?: any[]
-    assigned_portfolios?: string[]
-    mentioned_note_id?: string | null
-    updated_at?: string
-    deleted_at?: string | null
-    summary?: string | null
-    compound_text?: string | null
-    topics?: string[]
-    intentions?: string[]
-    indexing_status?: any
-    visibility?: 'public' | 'private'
-  }
-}
-
-interface GetPinnedItemsResult {
-  success: boolean
-  items?: PinnedItemWithData[]
-  error?: string
-}
-
-interface AddToPinnedResult {
-  success: boolean
-  error?: string
-}
-
-interface RemoveFromPinnedResult {
-  success: boolean
-  error?: string
-}
-
-interface UpdatePinnedListResult {
-  success: boolean
-  error?: string
-}
-
-interface EligibleItem {
-  type: 'space' | 'note'
-  id: string
-  name?: string
-  text?: string
-  avatar?: string
-  slug?: string
-  role?: string // Role of the current user in this portfolio (for human portfolios)
-  isPinned: boolean
-}
-
-interface GetEligibleItemsResult {
-  success: boolean
-  notes?: EligibleItem[]
-  portfolios?: EligibleItem[]
   error?: string
 }
 
@@ -1460,7 +1387,9 @@ export async function getCurrentUserPendingPortfolioInvitation(
 ): Promise<{
   success: boolean
   hasPending?: boolean
-  invitationType?: 'member' | 'manager'
+  invitationType?: 'follow' | 'member' | 'manager'
+  /** Inviter display name for invite UX (space flows). */
+  inviterDisplayName?: string | null
   error?: string
 }> {
   try {
@@ -1476,7 +1405,7 @@ export async function getCurrentUserPendingPortfolioInvitation(
     }
     const { data: inv, error } = await supabase
       .from('portfolio_invitations')
-      .select('id, invitation_type')
+      .select('id, invitation_type, inviter_id')
       .eq('portfolio_id', portfolioId)
       .eq('invitee_id', user.id)
       .eq('status', 'pending')
@@ -1485,8 +1414,29 @@ export async function getCurrentUserPendingPortfolioInvitation(
     if (!inv) {
       return { success: true, hasPending: false }
     }
-    const invitationType = inv.invitation_type === 'manager' ? 'manager' : 'member'
-    return { success: true, hasPending: true, invitationType }
+    const invitationType =
+      inv.invitation_type === 'manager'
+        ? 'manager'
+        : inv.invitation_type === 'follow'
+          ? 'follow'
+          : 'member'
+
+    let inviterDisplayName: string | null = null
+    const inviterId = inv.inviter_id as string | undefined
+    if (inviterId) {
+      try {
+        const serviceClient = createServiceClient()
+        const { data: inviterAuth } = await serviceClient.auth.admin.getUserById(inviterId)
+        const meta = (inviterAuth?.user?.user_metadata || {}) as Record<string, unknown>
+        const raw = meta.full_name ?? meta.name
+        inviterDisplayName =
+          typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null
+      } catch {
+        inviterDisplayName = null
+      }
+    }
+
+    return { success: true, hasPending: true, invitationType, inviterDisplayName }
   } catch (e: any) {
     return { success: false, error: e?.message || 'Failed to check invitation' }
   }
@@ -2321,539 +2271,3 @@ export async function rejectCommunityJoinRequest(
   return rejectActivityJoinRequest(requestId, rejectionMessage)
 }
 
-interface PinnedItemWithData {
-  type: 'space' | 'note'
-  id: string
-  portfolio?: {
-    id: string
-    type: string
-    name: string
-    avatar?: string
-    slug: string
-    role?: 'manager' | 'member' // Role of the human portfolio owner in this pinned portfolio
-  }
-  note?: {
-    id: string
-    text: string
-    owner_account_id: string
-    created_at: string
-    references?: any[]
-    assigned_portfolios?: string[]
-    mentioned_note_id?: string | null
-    updated_at?: string
-    deleted_at?: string | null
-    summary?: string | null
-    compound_text?: string | null
-    topics?: string[]
-    intentions?: string[]
-    indexing_status?: any
-    visibility?: 'public' | 'private'
-  }
-}
-
-interface GetPinnedItemsResult {
-  success: boolean
-  items?: PinnedItemWithData[]
-  error?: string
-}
-
-interface AddToPinnedResult {
-  success: boolean
-  error?: string
-}
-
-interface RemoveFromPinnedResult {
-  success: boolean
-  error?: string
-}
-
-interface UpdatePinnedListResult {
-  success: boolean
-  error?: string
-}
-
-interface EligibleItem {
-  type: 'space' | 'note'
-  id: string
-  name?: string
-  text?: string
-  avatar?: string
-  slug?: string
-  role?: string // Role of the current user in this portfolio (for human portfolios)
-  isPinned: boolean
-}
-
-interface GetEligibleItemsResult {
-  success: boolean
-  notes?: EligibleItem[]
-  portfolios?: EligibleItem[]
-  error?: string
-}
-
-/**
- * Get pinned items for a portfolio with full data
- */
-export async function getPinnedItems(portfolioId: string): Promise<GetPinnedItemsResult> {
-  try {
-    const supabase = await createClient()
-    
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('*')
-      .eq('id', portfolioId)
-      .single()
-
-    if (portfolioError || !portfolio) {
-      return {
-        success: false,
-        error: 'Portfolio not found',
-      }
-    }
-
-    const portfolioData = portfolio as Portfolio
-    const metadata = portfolioData.metadata as any
-    const pinned = metadata?.pinned || []
-    
-    if (!Array.isArray(pinned) || pinned.length === 0) {
-      return {
-        success: true,
-        items: [],
-      }
-    }
-
-    // For human portfolios, we'll determine the role of the portfolio owner in pinned portfolios
-    const userId = isHumanPortfolio(portfolioData) ? portfolioData.user_id : null
-
-    // Fetch full data for pinned items
-    const items: PinnedItemWithData[] = []
-    
-    for (const item of pinned as PinnedItem[]) {
-      // For human portfolios, only return notes (not portfolios)
-      if (normalizePinnedItemType(item.type) === 'space' && !isHumanPortfolio(portfolioData)) {
-        const { data: pinnedPortfolio } = await supabase
-          .from('portfolios')
-          .select('*')
-          .eq('id', item.id)
-          .single()
-
-        if (pinnedPortfolio) {
-          const basic = getPortfolioBasic(pinnedPortfolio as Portfolio)
-          
-          // Determine role if this is a human portfolio viewing pinned projects/communities
-          let role: 'manager' | 'member' | undefined = undefined
-          if (userId && !isHumanPortfolio(pinnedPortfolio as Portfolio)) {
-            const pinnedMetadata = pinnedPortfolio.metadata as any
-            const managers = pinnedMetadata?.managers || []
-            const members = pinnedMetadata?.members || []
-            
-            if (Array.isArray(managers) && managers.includes(userId)) {
-              role = 'manager'
-            } else if (Array.isArray(members) && members.includes(userId)) {
-              role = 'member'
-            }
-          }
-          
-          items.push({
-            type: 'space',
-            id: item.id,
-            portfolio: {
-              id: pinnedPortfolio.id,
-              type: pinnedPortfolio.type,
-              name: basic.name,
-              avatar: basic.avatar,
-              slug: pinnedPortfolio.slug,
-              role,
-            },
-          })
-        }
-      } else if (item.type === 'note') {
-        const { data: pinnedNote } = await supabase
-          .from('notes')
-          .select('*') // Select all columns including references
-          .eq('id', item.id)
-          .is('deleted_at', null)
-          .single()
-
-        if (pinnedNote) {
-          items.push({
-            type: 'note',
-            id: item.id,
-            note: {
-              id: pinnedNote.id,
-              text: pinnedNote.text,
-              owner_account_id: pinnedNote.owner_account_id,
-              created_at: pinnedNote.created_at,
-              references: Array.isArray(pinnedNote.references) ? pinnedNote.references : [],
-              assigned_portfolios: pinnedNote.assigned_portfolios || [],
-              mentioned_note_id: pinnedNote.mentioned_note_id,
-              updated_at: pinnedNote.updated_at,
-              deleted_at: pinnedNote.deleted_at,
-              summary: pinnedNote.summary,
-              compound_text: pinnedNote.compound_text,
-              topics: pinnedNote.topics || [],
-              intentions: pinnedNote.intentions || [],
-              indexing_status: pinnedNote.indexing_status,
-              visibility: (pinnedNote as any).visibility === 'private' ? 'private' : 'public',
-            },
-          })
-        }
-      }
-    }
-
-    return {
-      success: true,
-      items,
-    }
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred',
-    }
-  }
-}
-
-/**
- * Add an item to the pinned list
- */
-export async function addToPinned(
-  portfolioId: string,
-  itemType: 'space' | 'note',
-  itemId: string
-): Promise<AddToPinnedResult> {
-  try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
-
-    // Check if user can manage pinned (creator or manager)
-    const canManage = await canManagePinned(portfolioId, user.id)
-    if (!canManage) {
-      return {
-        success: false,
-        error: 'Only the creator or managers can edit pinned items',
-      }
-    }
-
-    // Get portfolio
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('*')
-      .eq('id', portfolioId)
-      .single()
-
-    if (portfolioError || !portfolio) {
-      return {
-        success: false,
-        error: 'Portfolio not found',
-      }
-    }
-
-    const portfolioData = portfolio as Portfolio
-
-    // Validate if item can be added
-    const validation = await canAddToPinned(portfolioData, itemType, itemId)
-    if (!validation.canAdd) {
-      return {
-        success: false,
-        error: validation.error || 'Cannot add item to pinned list',
-      }
-    }
-
-    // Get current pinned list
-    const metadata = portfolioData.metadata as any
-    const pinned = metadata?.pinned || []
-    const pinnedArray = Array.isArray(pinned) ? [...pinned] : []
-
-    // Add new item
-    pinnedArray.push({ type: itemType, id: itemId })
-
-    // Update portfolio
-    const { error: updateError } = await supabase
-      .from('portfolios')
-      .update({
-        metadata: {
-          ...metadata,
-          pinned: pinnedArray,
-        },
-      })
-      .eq('id', portfolioId)
-
-    if (updateError) {
-      return {
-        success: false,
-        error: updateError.message || 'Failed to update pinned list',
-      }
-    }
-
-    return {
-      success: true,
-    }
-  } catch (error: any) {
-    if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
-      const digest = (error as any).digest || ''
-      if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
-        throw error
-      }
-    }
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred',
-    }
-  }
-}
-
-/**
- * Remove an item from the pinned list
- */
-export async function removeFromPinned(
-  portfolioId: string,
-  itemType: 'space' | 'note',
-  itemId: string
-): Promise<RemoveFromPinnedResult> {
-  try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
-
-    // Check if user can manage pinned (creator or manager)
-    const canManage = await canManagePinned(portfolioId, user.id)
-    if (!canManage) {
-      return {
-        success: false,
-        error: 'Only the creator or managers can edit pinned items',
-      }
-    }
-
-    // Get portfolio
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('*')
-      .eq('id', portfolioId)
-      .single()
-
-    if (portfolioError || !portfolio) {
-      return {
-        success: false,
-        error: 'Portfolio not found',
-      }
-    }
-
-    const portfolioData = portfolio as Portfolio
-    const metadata = portfolioData.metadata as any
-    const pinned = metadata?.pinned || []
-    const pinnedArray = Array.isArray(pinned) ? [...pinned] : []
-
-    // Remove item
-    const updatedPinned = pinnedArray.filter(
-      (item: PinnedItem) => !(item.type === itemType && item.id === itemId)
-    )
-
-    // Update portfolio
-    const { error: updateError } = await supabase
-      .from('portfolios')
-      .update({
-        metadata: {
-          ...metadata,
-          pinned: updatedPinned,
-        },
-      })
-      .eq('id', portfolioId)
-
-    if (updateError) {
-      return {
-        success: false,
-        error: updateError.message || 'Failed to update pinned list',
-      }
-    }
-
-    return {
-      success: true,
-    }
-  } catch (error: any) {
-    if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
-      const digest = (error as any).digest || ''
-      if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
-        throw error
-      }
-    }
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred',
-    }
-  }
-}
-
-/**
- * Update the entire pinned list (for edit page)
- */
-export async function updatePinnedList(
-  portfolioId: string,
-  items: PinnedItem[]
-): Promise<UpdatePinnedListResult> {
-  try {
-    const { user } = await requireAuth()
-    const supabase = await createClient()
-
-    // Check if user can manage pinned (creator or manager)
-    const canManage = await canManagePinned(portfolioId, user.id)
-    if (!canManage) {
-      return {
-        success: false,
-        error: 'Only the creator or managers can edit pinned items',
-      }
-    }
-
-    // Validate max length
-    if (items.length > 9) {
-      return {
-        success: false,
-        error: 'Pinned list cannot exceed 9 items',
-      }
-    }
-
-    // Get portfolio
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('*')
-      .eq('id', portfolioId)
-      .single()
-
-    if (portfolioError || !portfolio) {
-      return {
-        success: false,
-        error: 'Portfolio not found',
-      }
-    }
-
-    const portfolioData = portfolio as Portfolio
-    const metadata = portfolioData.metadata as any
-
-    // Update portfolio
-    const { error: updateError } = await supabase
-      .from('portfolios')
-      .update({
-        metadata: {
-          ...metadata,
-          pinned: items,
-        },
-      })
-      .eq('id', portfolioId)
-
-    if (updateError) {
-      return {
-        success: false,
-        error: updateError.message || 'Failed to update pinned list',
-      }
-    }
-
-    return {
-      success: true,
-    }
-  } catch (error: any) {
-    if (error && typeof error === 'object' && ('digest' in error || 'message' in error)) {
-      const digest = (error as any).digest || ''
-      if (typeof digest === 'string' && digest.startsWith('NEXT_REDIRECT')) {
-        throw error
-      }
-    }
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred',
-    }
-  }
-}
-
-/**
- * Get eligible items for pinning (notes and sub-portfolios)
- */
-export async function getEligibleItemsForPinning(portfolioId: string): Promise<GetEligibleItemsResult> {
-  try {
-    const supabase = await createClient()
-    
-    // Get portfolio and pinned items
-    const { data: portfolio, error: portfolioError } = await supabase
-      .from('portfolios')
-      .select('*')
-      .eq('id', portfolioId)
-      .single()
-
-    if (portfolioError || !portfolio) {
-      return {
-        success: false,
-        error: 'Portfolio not found',
-      }
-    }
-
-    const portfolioData = portfolio as Portfolio
-    const metadata = portfolioData.metadata as any
-    const pinned = metadata?.pinned || []
-    const pinnedArray = Array.isArray(pinned) ? pinned : []
-    const pinnedIds = new Set<string>()
-    pinnedArray.forEach((item: PinnedItem) => {
-      pinnedIds.add(`${item.type}:${item.id}`)
-    })
-
-    // Get eligible notes (assigned to this portfolio)
-    // For projects/communities: managers can select notes assigned to portfolio
-    // For human portfolios: can select notes assigned to portfolio
-    const { data: notes, error: notesError } = await supabase
-      .from('notes')
-      .select('id, text, owner_account_id, created_at')
-      .contains('assigned_portfolios', [portfolioId])
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-
-    const eligibleNotes: EligibleItem[] = []
-    if (notes && !notesError) {
-      for (const note of notes) {
-        const isPinned = pinnedIds.has(`note:${note.id}`)
-        eligibleNotes.push({
-          type: 'note',
-          id: note.id,
-          text: note.text,
-          isPinned,
-        })
-      }
-    }
-
-    // Get eligible sub-portfolios
-    // For human portfolios: fetch portfolios where user is manager OR member
-    // For projects/communities: no portfolios can be pinned (hosts concept removed)
-    const eligiblePortfolios: EligibleItem[] = []
-    
-    if (isHumanPortfolio(portfolioData)) {
-      // For human portfolios: use getSubPortfolios which returns portfolios where user is manager/member
-      const subPortfoliosResult = await getSubPortfolios(portfolioId)
-      
-      if (subPortfoliosResult.success) {
-        const allSubPortfolios = [
-          ...(subPortfoliosResult.projects || []),
-          ...(subPortfoliosResult.communities || []),
-        ]
-        
-        for (const subPortfolio of allSubPortfolios) {
-          const isPinned = pinnedIds.has(`portfolio:${subPortfolio.id}`)
-          eligiblePortfolios.push({
-            type: 'space',
-            id: subPortfolio.id,
-            name: subPortfolio.name,
-            avatar: subPortfolio.avatar,
-            slug: subPortfolio.slug,
-            role: subPortfolio.role,
-            isPinned,
-          })
-        }
-      }
-    }
-    // For projects/communities: no portfolios can be pinned, so eligiblePortfolios stays empty
-
-    return {
-      success: true,
-      notes: eligibleNotes,
-      portfolios: eligiblePortfolios,
-    }
-  } catch (error: any) {
-    return {
-      success: false,
-      error: error.message || 'An unexpected error occurred',
-    }
-  }
-}

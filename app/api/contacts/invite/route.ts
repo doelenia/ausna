@@ -229,7 +229,6 @@ export async function POST(request: NextRequest) {
           description: '',
           avatar: '',
         },
-        pinned: [],
         settings: {},
         email: normalizedEmail,
       }
