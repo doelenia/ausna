@@ -13,7 +13,15 @@ import { StickerAvatar } from '@/components/portfolio/StickerAvatar'
 import Link from 'next/link'
 import { ensureBrowserCompatibleImage } from '@/lib/utils/heic-converter'
 import { getHostnameFromUrl, getFaviconUrl } from '@/lib/notes/url-helpers'
-import { Image as ImageIcon, Link2, Megaphone, Plus, Circle, CheckCircle2 } from 'lucide-react'
+import { NotePostKindPill, type PostKind } from '@/components/notes/NotePostKindPill'
+import {
+  Image as ImageIcon,
+  Link2,
+  Megaphone,
+  Plus,
+  Circle,
+  CheckCircle2,
+} from 'lucide-react'
 import {
   addDays,
   addMonths,
@@ -72,6 +80,9 @@ export function CreateNoteForm({
 }: CreateNoteFormProps) {
   const router = useRouter()
   const [text, setText] = useState('')
+  const [postKind, setPostKind] = useState<PostKind>(isResource ? 'resource' : 'post')
+  const [postKindMenuOpen, setPostKindMenuOpen] = useState(false)
+  const postKindMenuRef = useRef<HTMLDivElement>(null)
   const [openCallTitle, setOpenCallTitle] = useState('')
   const [openCallEndDate, setOpenCallEndDate] = useState<Date | null>(() => {
     const d = new Date()
@@ -107,9 +118,6 @@ export function CreateNoteForm({
   const [newCollectionName, setNewCollectionName] = useState('')
   const [isCreatingCollection, setIsCreatingCollection] = useState(false)
   const [loadingCollections, setLoadingCollections] = useState(false)
-  const [shouldPin, setShouldPin] = useState(false)
-  const [pinInfo, setPinInfo] = useState<{ count: number; max: number; canPin: boolean } | null>(null)
-  const [loadingPinInfo, setLoadingPinInfo] = useState(false)
   const [annotationPrivacy, setAnnotationPrivacy] = useState<'authors' | 'friends' | 'everyone'>('everyone')
   const [visibility, setVisibility] = useState<NoteVisibility>('public')
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -118,6 +126,25 @@ export function CreateNoteForm({
   const [assignableSpaces, setAssignableSpaces] = useState<Portfolio[]>([])
   const [assignableLoading, setAssignableLoading] = useState(false)
   /** When collaborators are added: portfolio id -> true if all (owner + collaborators) can create there */
+
+  const isEffectiveResource = isResource || postKind === 'resource'
+  const canSelectPostKind = !isOpenCall && !mentionedNoteId && !isResource
+
+  useEffect(() => {
+    if (!postKindMenuOpen) return
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+      if (postKindMenuRef.current && postKindMenuRef.current.contains(target)) return
+      setPostKindMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+    }
+  }, [postKindMenuOpen])
   const [portfolioIdsAllCanCreate, setPortfolioIdsAllCanCreate] = useState<Record<string, boolean>>({})
   const [portfolioIdsAllCanCreateLoading, setPortfolioIdsAllCanCreateLoading] = useState(false)
   const supabase = useMemo(() => createClient(), [])
@@ -137,7 +164,7 @@ export function CreateNoteForm({
   // Filter to show portfolios passed in (currently projects/activities/communities)
   const displayablePortfolios = effectivePortfolios
 
-  // With multi-space assignment, "context" features (collections, pin info, members label)
+  // With multi-space assignment, "context" features (collections, members label)
   // are only well-defined when exactly one space is selected.
   const selectedSpaceIds = useMemo(() => {
     return selectedPortfolios.filter((id) => {
@@ -195,50 +222,6 @@ export function CreateNoteForm({
       .catch(() => setCollaboratorCandidates([]))
       .finally(() => setCollaboratorCandidatesLoading(false))
   }, [showCollaboratorPopup, selectedContextId, collaboratorSearchQuery])
-
-  // Fetch pin info for the selected project or activity
-  useEffect(() => {
-    const fetchPinInfo = async () => {
-      if (!selectedContextId) {
-        setPinInfo(null)
-        setShouldPin(false)
-        return
-      }
-
-      setLoadingPinInfo(true)
-      try {
-        const response = await fetch(`/api/portfolios/${selectedContextId}/pin-info`)
-        if (response.ok) {
-          const data = await response.json()
-          if (data.success) {
-            setPinInfo({
-              count: data.pinCount || 0,
-              max: 9,
-              canPin: data.canPin || false,
-            })
-            // Reset pin selection if can't pin
-            if (!data.canPin) {
-              setShouldPin(false)
-            }
-          } else {
-            setPinInfo(null)
-            setShouldPin(false)
-          }
-        } else {
-          setPinInfo(null)
-          setShouldPin(false)
-        }
-      } catch (error) {
-        console.error('Error fetching pin info:', error)
-        setPinInfo(null)
-        setShouldPin(false)
-      } finally {
-        setLoadingPinInfo(false)
-      }
-    }
-
-    fetchPinInfo()
-  }, [selectedContextId])
 
   // Reset selected collections when context portfolio changes
   useEffect(() => {
@@ -975,24 +958,22 @@ export function CreateNoteForm({
         if (openCallEndDate) {
           formData.append('open_call_end_date', openCallEndDate.toISOString())
         }
-      } else if (isResource) {
-        formData.append('note_type', 'resource')
       } else {
+        if (!mentionedNoteId) {
+          formData.append('note_type', postKind)
+        }
+        if (!isEffectiveResource) {
         if (!mentionedNoteId) {
           formData.append('annotation_privacy', annotationPrivacy)
         }
         if (selectedCollectionIds.length > 0) {
           formData.append('collection_ids', JSON.stringify(selectedCollectionIds))
         }
+        }
       }
 
       // Visibility: public/friends/private (unassigned) or public/members (assigned)
       formData.append('visibility', visibility)
-
-      // Add pin preference if user wants to pin
-      if (!isResource && shouldPin && pinInfo?.canPin) {
-        formData.append('should_pin', 'true')
-      }
 
       const result = await createNote(formData)
 
@@ -1086,60 +1067,103 @@ export function CreateNoteForm({
 
       {/* Authors pill (stacked avatars when 2+ people) + Plus to add collaborators (invite after create) */}
       {ownerPortfolio && (
-        <div className="flex items-center gap-2 flex-wrap mb-2">
-          <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0">
-            {collaborators.length === 0 ? (
-              <>
-                <UserAvatar
-                  userId={currentUserId ?? ''}
-                  name={ownerName}
-                  avatar={ownerBasic?.avatar}
-                  size={32}
-                  showLink={false}
-                />
-                <UIText as="span" className="text-gray-700 whitespace-nowrap">{ownerName}</UIText>
-              </>
-            ) : (
-              (() => {
-                const authorProfiles: { id: string; name: string; avatar?: string | null }[] = [
-                  { id: currentUserId ?? '', name: ownerName, avatar: ownerBasic?.avatar },
-                  ...collaborators.map((c) => ({ id: c.id, name: c.name || c.username || c.id.slice(0, 8), avatar: c.avatar })),
-                ]
-                const display = authorProfiles.slice(0, 5)
-                const label =
-                  authorProfiles.length === 2
-                    ? `${authorProfiles[0].name} and ${authorProfiles[1].name}`
-                    : authorProfiles.length > 2
-                      ? `${authorProfiles[0].name}, ${authorProfiles[1].name}, and others`
-                      : authorProfiles[0].name
-                return (
-                  <>
-                    <div className="flex -space-x-2 flex-shrink-0">
-                      {display.map((p, index) => (
-                        <div
-                          key={p.id}
-                          className="relative ring-2 ring-white rounded-full"
-                          style={{ zIndex: display.length - index }}
-                        >
-                          <UserAvatar userId={p.id} name={p.name} avatar={p.avatar} size={32} showLink={false} />
-                        </div>
-                      ))}
-                    </div>
-                    <UIText as="span" className="text-gray-700 whitespace-nowrap">{label}</UIText>
-                  </>
-                )
-              })()
-            )}
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="inline-flex items-center gap-2 px-2 py-1 rounded-full hover:bg-gray-100 transition-colors flex-shrink-0 min-w-0">
+              {collaborators.length === 0 ? (
+                <>
+                  <UserAvatar
+                    userId={currentUserId ?? ''}
+                    name={ownerName}
+                    avatar={ownerBasic?.avatar}
+                    size={32}
+                    showLink={false}
+                  />
+                  <UIText as="span" className="text-gray-700 whitespace-nowrap">{ownerName}</UIText>
+                </>
+              ) : (
+                (() => {
+                  const authorProfiles: { id: string; name: string; avatar?: string | null }[] = [
+                    { id: currentUserId ?? '', name: ownerName, avatar: ownerBasic?.avatar },
+                    ...collaborators.map((c) => ({ id: c.id, name: c.name || c.username || c.id.slice(0, 8), avatar: c.avatar })),
+                  ]
+                  const display = authorProfiles.slice(0, 5)
+                  const label =
+                    authorProfiles.length === 2
+                      ? `${authorProfiles[0].name} and ${authorProfiles[1].name}`
+                      : authorProfiles.length > 2
+                        ? `${authorProfiles[0].name}, ${authorProfiles[1].name}, and others`
+                        : authorProfiles[0].name
+                  return (
+                    <>
+                      <div className="flex -space-x-2 flex-shrink-0">
+                        {display.map((p, index) => (
+                          <div
+                            key={p.id}
+                            className="relative ring-2 ring-white rounded-full"
+                            style={{ zIndex: display.length - index }}
+                          >
+                            <UserAvatar userId={p.id} name={p.name} avatar={p.avatar} size={32} showLink={false} />
+                          </div>
+                        ))}
+                      </div>
+                      <UIText as="span" className="text-gray-700 whitespace-nowrap">{label}</UIText>
+                    </>
+                  )
+                })()
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCollaboratorPopup(true)}
+              className="p-2 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 flex-shrink-0"
+              title="Add collaborators (invite)"
+              aria-label="Add collaborators"
+            >
+              <Plus className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowCollaboratorPopup(true)}
-            className="p-2 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 flex-shrink-0"
-            title="Add collaborators (invite)"
-            aria-label="Add collaborators"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
+
+          {/* Post kind selector (top-right). Hidden for open calls, annotations, and dedicated resource route. */}
+          {!isOpenCall && !mentionedNoteId && (
+            <div className="relative" ref={postKindMenuRef}>
+              {canSelectPostKind ? (
+                <button
+                  type="button"
+                  onClick={() => setPostKindMenuOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={postKindMenuOpen}
+                  className="focus:outline-none"
+                >
+                  <NotePostKindPill kind={postKind} interactive={true} showChevron={true} />
+                </button>
+              ) : (
+                <NotePostKindPill kind="resource" />
+              )}
+
+              {canSelectPostKind && postKindMenuOpen && (
+                <div
+                  role="menu"
+                  className="absolute right-0 mt-2 w-48 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden z-50"
+                >
+                  {(['post', 'resource'] as PostKind[]).map((kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setPostKind(kind)
+                        setPostKindMenuOpen(false)
+                      }}
+                      className="w-full px-3 py-2 hover:bg-gray-50 flex items-center justify-start"
+                    >
+                      <NotePostKindPill kind={kind} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1766,23 +1790,6 @@ export function CreateNoteForm({
         </div>
       )}
 
-      {/* Pin option - only show if user is owner and there's space */}
-      {!isResource && selectedContextId && pinInfo?.canPin && (
-        <div>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={shouldPin}
-              onChange={(e) => setShouldPin(e.target.checked)}
-              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-              <UIText as="span">
-                Pin to portfolio ({pinInfo.count}/{pinInfo.max} pinned)
-              </UIText>
-          </label>
-        </div>
-      )}
-
       {/* Advanced settings: visibility, collections — collapsed by default */}
       <div className="border border-gray-200 rounded-lg overflow-hidden">
         <button
@@ -1870,7 +1877,7 @@ export function CreateNoteForm({
             </div>
 
             {/* Collection selection - only show if a context portfolio is selected (hidden for open call) */}
-            {!isOpenCall && !isResource && selectedContextId && (
+            {!isOpenCall && !isEffectiveResource && selectedContextId && (
               <div>
                 <UIText as="label" className="block mb-2">
                   Collections (optional)
@@ -1940,7 +1947,7 @@ export function CreateNoteForm({
               ? 'Creating...'
               : isOpenCall
                 ? 'Create Open call'
-                : isResource
+                : isEffectiveResource
                   ? 'Create Resource'
                   : 'Create Note'}
           </UIText>

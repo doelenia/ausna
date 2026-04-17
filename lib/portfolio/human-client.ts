@@ -96,7 +96,6 @@ export function createHumanPortfolioHelpers(supabase: Client) {
               description: '',
               avatar: user.user_metadata?.avatar_url || '',
             },
-            pinned: [],
             settings: {},
             username, // Keep for backward compatibility
             email,

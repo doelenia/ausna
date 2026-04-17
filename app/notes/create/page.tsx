@@ -2,16 +2,15 @@ import { createClient } from '@/lib/supabase/server'
 import { requireAuth } from '@/lib/auth/requireAuth'
 import { getHumanPortfolio } from '@/lib/portfolio/human'
 import { Portfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
-import { getPortfolioBasic } from '@/lib/portfolio/helpers'
 import { CreateNoteForm } from '@/components/notes/CreateNoteForm'
 import { redirect } from 'next/navigation'
-import { Button, Content, UIText } from '@/components/ui'
-import { canCreateResourceInPortfolio } from '@/lib/notes/helpers'
+import { Content, UIText } from '@/components/ui'
 
 interface CreateNotePageProps {
   searchParams: {
     portfolio?: string
     annotate?: string
+    kind?: string
   }
 }
 
@@ -79,12 +78,8 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
   if (sourcePortfolio) {
     defaultPortfolioIds.push(sourcePortfolio.id)
   }
-
-  // When creating from a portfolio, also offer a quick path to create a Resource.
-  let canCreateResource = false
-  if (sourcePortfolio) {
-    canCreateResource = await canCreateResourceInPortfolio(sourcePortfolio.id, user.id)
-  }
+  
+  const isResource = searchParams.kind === 'resource'
 
   return (
     <div className="bg-white shadow rounded-lg p-6">
@@ -103,22 +98,8 @@ export default async function CreateNotePage({ searchParams }: CreateNotePagePro
             currentUserId={user.id}
             mentionedNoteId={searchParams.annotate || undefined}
             redirectUrl="/main"
+            isResource={isResource}
           />
-
-          {sourcePortfolio && canCreateResource && (
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <div className="flex items-center justify-between gap-4">
-                <UIText as="p">Prefer a Resource note instead?</UIText>
-                <Button
-                  asLink
-                  variant="secondary"
-                  href={`/notes/create/resource?portfolio=${encodeURIComponent(sourcePortfolio.id)}`}
-                >
-                  <UIText>Create Resource</UIText>
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
   )
 }

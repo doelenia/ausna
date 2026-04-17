@@ -67,7 +67,6 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     const parentNoteId = formData.get('parent_note_id') as string | null
     const url = formData.get('url') as string | null
     const collectionIds = formData.get('collection_ids') as string | null
-    const shouldPin = formData.get('should_pin') === 'true'
     const annotationPrivacyRaw = formData.get('annotation_privacy') as string | null
     const noteTypeRaw = formData.get('note_type') as string | null
     const visibilityRaw = formData.get('visibility') as string | null
@@ -193,7 +192,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
     // - Explicit note_type from formData takes precedence (validated to the allowed set)
     // - Otherwise, infer 'annotation' when mentioning another note
     // - Fallback to 'post'
-    let noteType: 'post' | 'annotation' | 'reaction' | 'open_call' | 'resource' = 'post'
+    let noteType: Note['type'] = 'post'
     if (
       noteTypeRaw === 'post' ||
       noteTypeRaw === 'annotation' ||
@@ -201,7 +200,7 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       noteTypeRaw === 'open_call' ||
       noteTypeRaw === 'resource'
     ) {
-      noteType = noteTypeRaw
+      noteType = noteTypeRaw as Note['type']
     } else if (mentionedNoteId) {
       noteType = 'annotation'
     }
@@ -475,51 +474,6 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       } catch (error: any) {
         console.error('Error assigning note to collections:', error)
         // Don't fail the entire operation, just log the error
-      }
-    }
-
-    // Pin note if user requested it (only if user is owner and there's space)
-    // Resource notes are never pinned.
-    if (!isResource && shouldPin && portfolioIds.length > 0) {
-      try {
-        const { addToPinned } = await import('@/app/portfolio/[idOrSlug]/actions')
-        const { isPortfolioOwner, getPinnedItemsCount } = await import('@/lib/portfolio/helpers')
-
-        const portfolioId = portfolioIds[0]
-        
-        // Check if user is owner
-        const isOwner = await isPortfolioOwner(portfolioId, user.id)
-        if (isOwner) {
-          // Get portfolio to check pinned count
-          const { data: portfolio } = await supabase
-            .from('portfolios')
-            .select('*')
-            .eq('id', portfolioId)
-            .single()
-
-          if (portfolio) {
-            const portfolioData = portfolio as any
-            const pinnedCount = getPinnedItemsCount(portfolioData)
-
-            // Only add if pinned list is not full (max 9 items)
-            if (pinnedCount < 9) {
-              // Check if note is already pinned
-              const metadata = portfolioData.metadata as any
-              const pinned = metadata?.pinned || []
-              const isAlreadyPinned = Array.isArray(pinned) && pinned.some(
-                (item: any) => item.type === 'note' && item.id === note.id
-              )
-
-              if (!isAlreadyPinned) {
-                // Add to pinned list
-                await addToPinned(portfolioId, 'note', note.id)
-              }
-            }
-          }
-        }
-      } catch (err) {
-        // Don't fail note creation if pinning fails
-        console.error('Failed to pin note:', err)
       }
     }
 
@@ -1080,7 +1034,7 @@ export async function getNotesByPortfolio(portfolioId: string): Promise<GetNotes
     // Ensure references is an array for all notes (handle null/undefined cases)
     const notesWithReferences: Note[] = (notes || []).map((note: any) => ({
       ...note,
-      type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
+      type: (note.type as Note['type']) || 'post',
       references: Array.isArray(note.references) ? note.references : [],
     }))
 
@@ -1208,7 +1162,7 @@ export async function getNotesByPortfolioPaginated(
       // Explicitly construct the note object to ensure references are included
       const normalizedNote: Note = {
         id: note.id,
-        type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
+        type: (note.type as Note['type']) || 'post',
         owner_account_id: note.owner_account_id,
         text: note.text,
         references: finalReferences, // Explicitly set references
@@ -1270,7 +1224,7 @@ export async function getNotesByPortfolioPaginated(
       // Build a plain object that's guaranteed to be serializable
       const plainNote = {
         id: String(note.id),
-        type: (note.type as 'post' | 'annotation' | 'reaction') || 'post',
+        type: (note.type as Note['type']) || 'post',
         owner_account_id: String(note.owner_account_id),
         text: String(note.text || ''),
         references: Array.isArray(refs) && refs.length > 0

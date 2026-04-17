@@ -12,7 +12,6 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 
 interface NotesMasonryProps {
   notes: Note[]
-  pinnedNoteIds?: Set<string>
   portfolioId?: string
   currentUserId?: string
   canAnnotate?: boolean
@@ -76,7 +75,6 @@ function PlaceholderCard({ href }: { href: string }) {
 
 export function NotesMasonry({
   notes,
-  pinnedNoteIds = new Set(),
   portfolioId,
   currentUserId,
   canAnnotate = false,
@@ -302,7 +300,6 @@ export function NotesMasonry({
                   note={item.note}
                   portfolioId={portfolioId}
                   currentUserId={currentUserId}
-                  isPinned={pinnedNoteIds.has(item.note.id)}
                   viewMode="collage"
                   disableNavigation={disableNavigation}
                   onCardClick={

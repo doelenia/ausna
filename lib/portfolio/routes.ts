@@ -23,10 +23,6 @@ export function getHumanCommunitiesUrl(idOrSlug: string): string {
   return `/human/${encodeURIComponent(idOrSlug)}/communities`
 }
 
-export function getHumanPinnedUrl(idOrSlug: string): string {
-  return `/human/${encodeURIComponent(idOrSlug)}/pinned`
-}
-
 export function getSpaceUrl(idOrSlug: string): string {
   return `/space/${encodeURIComponent(idOrSlug)}`
 }
@@ -34,10 +30,6 @@ export function getSpaceUrl(idOrSlug: string): string {
 export function getSpaceMembersUrl(idOrSlug: string, query?: string): string {
   const base = `/space/${encodeURIComponent(idOrSlug)}/members`
   return query ? `${base}?${query.replace(/^\?/, '')}` : base
-}
-
-export function getSpacePinnedUrl(idOrSlug: string): string {
-  return `/space/${encodeURIComponent(idOrSlug)}/pinned`
 }
 
 export function getSpaceCreateUrl(): string {

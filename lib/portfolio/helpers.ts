@@ -1,11 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import {
-  Portfolio,
-  PortfolioType,
-  PinnedItem,
-  isHumanPortfolio,
-  normalizePinnedItemType,
-} from '@/types/portfolio'
+import { Portfolio, PortfolioType, isHumanPortfolio } from '@/types/portfolio'
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // Re-export pure utility functions (can be used in client components)
@@ -110,17 +104,6 @@ export async function canDeletePortfolio(
 }
 
 /**
- * Check if user can manage pinned items (server-side)
- * Returns true if user is creator or manager
- */
-export async function canManagePinned(
-  portfolioId: string,
-  userId: string
-): Promise<boolean> {
-  return await canEditPortfolio(portfolioId, userId)
-}
-
-/**
  * Get human portfolio by user_id (server-side)
  */
 export async function getHumanPortfolioByUserId(
@@ -165,96 +148,6 @@ export async function isNoteAssignedToPortfolio(
 
   const assignedPortfolios = note.assigned_portfolios || []
   return Array.isArray(assignedPortfolios) && assignedPortfolios.includes(portfolioId)
-}
-
-/**
- * Get the count of pinned items in a portfolio
- */
-export function getPinnedItemsCount(portfolio: Portfolio): number {
-  const metadata = portfolio.metadata as any
-  const pinned = metadata?.pinned || []
-  return Array.isArray(pinned) ? pinned.length : 0
-}
-
-/**
- * Check if an item can be added to pinned list
- */
-export async function canAddToPinned(
-  portfolio: Portfolio,
-  itemType: 'space' | 'note' | 'portfolio',
-  itemId: string
-): Promise<{ canAdd: boolean; error?: string }> {
-  // Check if pinned list is full
-  const pinnedCount = getPinnedItemsCount(portfolio)
-  if (pinnedCount >= 9) {
-    return {
-      canAdd: false,
-      error: 'Pinned list is full (maximum 9 items)',
-    }
-  }
-
-  // Check if item is already pinned
-  const metadata = portfolio.metadata as any
-  const pinned = metadata?.pinned || []
-  if (Array.isArray(pinned)) {
-    const isAlreadyPinned = pinned.some((item: PinnedItem) => {
-      const a = normalizePinnedItemType(item.type)
-      const b = normalizePinnedItemType(itemType)
-      return a === b && b !== null && item.id === itemId
-    })
-    if (isAlreadyPinned) {
-      return {
-        canAdd: false,
-        error: 'Item is already pinned',
-      }
-    }
-  }
-
-  // Validate based on item type
-  if (normalizePinnedItemType(itemType) === 'space') {
-    // For human portfolios: can pin portfolios where user is manager or member
-    // For project/community portfolios: can pin portfolios where user is manager or member
-    // This validation will be done in the calling code based on portfolio type
-    // For now, allow it (validation happens at fetch time)
-  } else if (itemType === 'note') {
-    // For human portfolios: check if note creator is the portfolio owner
-    // For project/community portfolios: check if note is assigned to portfolio
-    if (isHumanPortfolio(portfolio)) {
-      const supabase = await createClient()
-      const { data: note, error } = await supabase
-        .from('notes')
-        .select('owner_account_id')
-        .eq('id', itemId)
-        .is('deleted_at', null)
-        .single()
-
-      if (error || !note) {
-        return {
-          canAdd: false,
-          error: 'Note not found',
-        }
-      }
-
-      // For human portfolios, check if note creator matches portfolio owner
-      if (note.owner_account_id !== portfolio.user_id) {
-        return {
-          canAdd: false,
-          error: 'Note must be created by the portfolio owner',
-        }
-      }
-    } else {
-      // For project/community portfolios, check if note is assigned
-      const isAssigned = await isNoteAssignedToPortfolio(itemId, portfolio.id)
-      if (!isAssigned) {
-        return {
-          canAdd: false,
-          error: 'Note must be assigned to this portfolio',
-        }
-      }
-    }
-  }
-
-  return { canAdd: true }
 }
 
 /**

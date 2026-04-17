@@ -103,7 +103,6 @@ async function ensurePseudoUserForEmail(
       is_pseudo: true,
       metadata: {
         basic: { name: trimmedName, description: '', avatar: '' },
-        pinned: [],
         settings: {},
         email: normalizedEmail,
       },

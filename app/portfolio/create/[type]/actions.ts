@@ -238,7 +238,6 @@ export async function createPortfolio(
         avatar: storedAvatarFromUrl || '',
         emoji: emoji || '',
       },
-      pinned: [],
       settings: {},
       members: initialMembers,
       managers: [user.id], // Creator is always a manager (can edit)

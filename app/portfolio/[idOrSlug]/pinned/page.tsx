@@ -2,13 +2,13 @@ import { createClient } from '@/lib/supabase/server'
 import { isHumanPortfolio } from '@/types/portfolio'
 import { notFound, permanentRedirect } from 'next/navigation'
 import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
-import { getHumanPinnedUrl, getSpacePinnedUrl } from '@/lib/portfolio/routes'
+import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 
 interface LegacyPinnedRedirectProps {
   params: { idOrSlug: string }
 }
 
-/** @deprecated Use `/human/.../pinned` or `/space/.../pinned`. */
+/** @deprecated Portfolio pinned URLs redirect to the canonical human or space page. */
 export default async function LegacyPinnedRedirect({ params }: LegacyPinnedRedirectProps) {
   const idOrSlug = params.idOrSlug
   if (!idOrSlug) notFound()
@@ -19,7 +19,7 @@ export default async function LegacyPinnedRedirect({ params }: LegacyPinnedRedir
 
   const slugOrId = portfolio.slug || portfolio.id
   if (isHumanPortfolio(portfolio)) {
-    permanentRedirect(getHumanPinnedUrl(slugOrId))
+    permanentRedirect(getHumanProfileUrl(slugOrId))
   }
-  permanentRedirect(getSpacePinnedUrl(slugOrId))
+  permanentRedirect(getSpaceUrl(slugOrId))
 }
