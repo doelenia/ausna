@@ -3483,7 +3483,7 @@ export function PortfolioView({
                   onClick={() => setSpacesViewMode('grid')}
                   disabled={spacesLoading}
                 >
-                  <UIText>Grid</UIText>
+                  <UIText>All</UIText>
                 </Button>
                 <Button
                   type="button"
@@ -3614,8 +3614,53 @@ export function PortfolioView({
                       )
                     }
                     return (
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2 items-start">
-                        {gridSorted.map((p) => renderSpaceFeedRowTile(p, true, true))}
+                      <div className="space-y-3">
+                        {gridSorted.map((p) => {
+                          const joinable = isSpaceJoinable(p)
+                          const a = toExploreActivity(p)
+                          const meta = (p.metadata as any) || {}
+                          const managersArr: string[] = Array.isArray(meta?.managers) ? meta.managers : []
+                          const membersArr: string[] = Array.isArray(meta?.members) ? meta.members : []
+                          const memberUserIds = Array.from(
+                            new Set<string>([p.user_id, ...managersArr, ...membersArr].filter(Boolean))
+                          )
+                          const memberLabel =
+                            memberUserIds.length > 0
+                              ? `${memberUserIds.length} member${memberUserIds.length === 1 ? '' : 's'}`
+                              : undefined
+                          const memberUsers =
+                            Array.isArray(p.member_preview) && p.member_preview.length > 0
+                              ? p.member_preview.map((u) => ({
+                                  userId: u.userId,
+                                  name: u.name ?? null,
+                                  avatar: u.avatar ?? null,
+                                }))
+                              : undefined
+
+                          const joinedViewer = !!currentUserId && userIsInSpace(p, currentUserId)
+                          const unreadForSpace = feedRowUnreadBySpaceId[String(p.id)] || 0
+                          const joinHref =
+                            currentUserId && joinable && !userIsInSpace(p, currentUserId)
+                              ? `${getSpaceUrl(p.slug || p.id)}?join=1`
+                              : undefined
+
+                          return (
+                            <ActivityCard
+                              key={p.id}
+                              activity={a as any}
+                              hrefOverride={getSpaceUrl(p.slug || p.id)}
+                              avatarTypeOverride="space"
+                              joinable={joinable}
+                              highlight={spacesHighlights[p.id]}
+                              memberLabel={memberLabel}
+                              memberUserIds={memberUserIds}
+                              memberUsers={memberUsers}
+                              joined={joinedViewer}
+                              timelineUnreadCount={joinedViewer ? unreadForSpace : undefined}
+                              joinHref={joinHref}
+                            />
+                          )
+                        })}
                       </div>
                     )
                   }

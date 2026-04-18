@@ -165,6 +165,15 @@ interface SpacesDirectoryViewProps {
   currentUserId: string
 }
 
+type MemberPreviewUser = { userId: string; name?: string | null; avatar?: string | null }
+
+function chunk<T>(xs: T[], size: number): T[][] {
+  if (size <= 0) return [xs]
+  const out: T[][] = []
+  for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size))
+  return out
+}
+
 export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps) {
   const supabase = useMemo(() => createClient(), [])
   const [loading, setLoading] = useState(true)
@@ -173,6 +182,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
   const [searchMode, setSearchMode] = useState(false)
   const [query, setQuery] = useState('')
   const [viewMode, setViewMode] = useState<'grid' | 'upcoming'>('grid')
+  const [memberPreviewByUserId, setMemberPreviewByUserId] = useState<Record<string, MemberPreviewUser>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -191,6 +201,67 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
       cancelled = true
     }
   }, [supabase, currentUserId])
+
+  // Hydrate member avatars for the "members" pill on space cards.
+  // PortfolioView already has `member_preview` from its spaces API; the /spaces directory doesn't,
+  // so we batch-fetch minimal user previews once and reuse across cards.
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!items || items.length === 0) {
+        setMemberPreviewByUserId({})
+        return
+      }
+
+      const ids = Array.from(
+        new Set(
+          items
+            .flatMap((row) => {
+              const p = row.portfolio
+              const meta = (p.metadata as Record<string, unknown>) || {}
+              const managersArr: string[] = Array.isArray(meta?.managers) ? (meta.managers as string[]) : []
+              const membersArr: string[] = Array.isArray(meta?.members) ? (meta.members as string[]) : []
+              const memberUserIds = Array.from(
+                new Set<string>([String(p.user_id), ...managersArr, ...membersArr].filter(Boolean))
+              )
+              return memberUserIds.slice(0, 3)
+            })
+            .filter(Boolean)
+            .map(String)
+        )
+      )
+
+      if (ids.length === 0) {
+        setMemberPreviewByUserId({})
+        return
+      }
+
+      try {
+        const next: Record<string, MemberPreviewUser> = {}
+        const batches = chunk(ids, 50)
+        for (const batch of batches) {
+          const qs = new URLSearchParams({ ids: batch.join(',') })
+          const res = await fetch(`/api/users/by-ids?${qs.toString()}`)
+          if (!res.ok) continue
+          const data = (await res.json().catch(() => ({}))) as {
+            users?: Array<{ id: string; name: string | null; avatar: string | null }>
+          }
+          const users = Array.isArray(data?.users) ? data.users : []
+          users.forEach((u) => {
+            if (!u?.id) return
+            next[String(u.id)] = { userId: String(u.id), name: u.name, avatar: u.avatar }
+          })
+        }
+        if (!cancelled) setMemberPreviewByUserId(next)
+      } catch {
+        // non-critical UI enhancement
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [items])
 
   useEffect(() => {
     if (!currentUserId || items.length === 0) {
@@ -341,6 +412,10 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
                 [String(p.user_id), ...managersArr, ...membersArr].filter(Boolean)
               )
             )
+            const memberUsers: MemberPreviewUser[] | undefined = memberUserIds
+              .slice(0, 3)
+              .map((id) => memberPreviewByUserId[String(id)])
+              .filter(Boolean)
             const memberLabel =
               memberUserIds.length > 0
                 ? `${memberUserIds.length} member${memberUserIds.length === 1 ? '' : 's'}`
@@ -355,6 +430,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
                 highlight={highlights[String(p.id)]}
                 memberLabel={memberLabel}
                 memberUserIds={memberUserIds}
+                memberUsers={memberUsers}
               />
             )
           })}
@@ -371,8 +447,48 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
         )
       }
       return (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(100px,1fr))] gap-2 items-start">
-          {filteredPortfolios.map((row) => renderGridTile(row, true))}
+        <div className="space-y-3">
+          {filteredPortfolios.map((row) => {
+            const p = row.portfolio
+            const joinedViewer = userIsInPortfolioRow(currentUserId, p)
+            const unreadForSpace = row.unread ?? 0
+            const joinHref =
+              isSpaceJoinable(p, currentUserId) && !userIsInPortfolioRow(currentUserId, p)
+                ? `${getSpaceUrl((p.slug as string) || p.id)}?join=1`
+                : undefined
+
+            const meta = (p.metadata as Record<string, unknown>) || {}
+            const managersArr: string[] = Array.isArray(meta?.managers) ? (meta.managers as string[]) : []
+            const membersArr: string[] = Array.isArray(meta?.members) ? (meta.members as string[]) : []
+            const memberUserIds = Array.from(
+              new Set<string>([String(p.user_id), ...managersArr, ...membersArr].filter(Boolean))
+            )
+            const memberUsers: MemberPreviewUser[] | undefined = memberUserIds
+              .slice(0, 3)
+              .map((id) => memberPreviewByUserId[String(id)])
+              .filter(Boolean)
+            const memberLabel =
+              memberUserIds.length > 0
+                ? `${memberUserIds.length} member${memberUserIds.length === 1 ? '' : 's'}`
+                : undefined
+
+            return (
+              <ActivityCard
+                key={p.id}
+                activity={toExploreActivity(p) as ExploreActivity}
+                hrefOverride={getSpaceUrl((p.slug as string) || p.id)}
+                avatarTypeOverride="space"
+                joinable={isSpaceJoinable(p, currentUserId)}
+                highlight={highlights[String(p.id)]}
+                memberLabel={memberLabel}
+                memberUserIds={memberUserIds}
+                memberUsers={memberUsers}
+                joined={joinedViewer}
+                timelineUnreadCount={joinedViewer ? unreadForSpace : undefined}
+                joinHref={joinHref}
+              />
+            )
+          })}
         </div>
       )
     }
@@ -448,6 +564,10 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
                   const memberUserIds = Array.from(
                     new Set<string>([String(p.user_id), ...managersArr, ...membersArr].filter(Boolean))
                   )
+                  const memberUsers: MemberPreviewUser[] | undefined = memberUserIds
+                    .slice(0, 3)
+                    .map((id) => memberPreviewByUserId[String(id)])
+                    .filter(Boolean)
                   const memberLabel =
                     memberUserIds.length > 0
                       ? `${memberUserIds.length} member${memberUserIds.length === 1 ? '' : 's'}`
@@ -463,6 +583,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
                       highlight={highlights[String(p.id)]}
                       memberLabel={memberLabel}
                       memberUserIds={memberUserIds}
+                      memberUsers={memberUsers}
                       joined={joinedViewer}
                       timelineUnreadCount={joinedViewer ? unreadForSpace : undefined}
                       joinHref={joinHref}
@@ -519,7 +640,7 @@ export function SpacesDirectoryView({ currentUserId }: SpacesDirectoryViewProps)
           onClick={() => setViewMode('grid')}
           disabled={loading}
         >
-          <UIText>Grid</UIText>
+          <UIText>All</UIText>
         </Button>
         <Button
           type="button"

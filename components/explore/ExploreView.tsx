@@ -923,26 +923,14 @@ export function ExploreView({ activities, userId, isAdmin = false, dailyMatch }:
           <Balloon className="w-5 h-5 text-gray-600" strokeWidth={1.5} />
           <UIText className="text-gray-700">Joinable activities</UIText>
         </div>
-        <div className="relative pl-4">
-          <div className="absolute left-1 top-0 bottom-0 border-l border-dashed border-gray-200" />
-          <div className="space-y-6">
-            {groups.map((group) => (
-              <div key={group.label} className="relative pb-1">
-                <div className="ml-2 mb-2 text-gray-500">
-                  <UIButtonText as="span">{group.label}</UIButtonText>
-                </div>
-                <div className="ml-2 space-y-4">
-                  {group.activities.map((activity) => (
-                    <ActivityCard
-                      key={activity.id}
-                      activity={activity}
-                      highlight={joinableHighlights[activity.id]}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className="space-y-4">
+          {restActivities.map((activity) => (
+            <ActivityCard
+              key={activity.id}
+              activity={activity}
+              highlight={joinableHighlights[activity.id]}
+            />
+          ))}
         </div>
       </section>
     </div>

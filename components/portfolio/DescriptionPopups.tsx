@@ -286,7 +286,7 @@ export function DescriptionFieldSection({
   value: string
   onChange: (next: string) => void
   disabled?: boolean
-  helperContent: ReactNode
+  helperContent?: ReactNode
   previewEmptyText: string
   editorPlaceholder?: string
 }) {
@@ -305,7 +305,7 @@ export function DescriptionFieldSection({
         <UIText as="label" className="block mb-2">
           Description
         </UIText>
-        <div className="mb-2">{helperContent}</div>
+        {helperContent ? <div className="mb-2">{helperContent}</div> : null}
         <button
           type="button"
           disabled={disabled}
