@@ -19,7 +19,6 @@ import { EmojiPicker } from './EmojiPicker'
 import { StickerAvatar } from './StickerAvatar'
 import {
   DescriptionFieldSection,
-  HUMAN_DESCRIPTION_HELP_TEXT,
   HUMAN_DESCRIPTION_PLACEHOLDER,
   SPACE_DESCRIPTION_HELP_TEXT,
 } from './DescriptionPopups'
@@ -828,9 +827,7 @@ export function PortfolioEditor({
               disabled={loading}
               helperContent={
                 isHumanPortfolio(portfolio) ? (
-                  <UIText as="p" className="whitespace-pre-wrap text-gray-500">
-                    {HUMAN_DESCRIPTION_HELP_TEXT}
-                  </UIText>
+                  null
                 ) : (
                   <UIText as="p" className="text-gray-500">
                     {SPACE_DESCRIPTION_HELP_TEXT}

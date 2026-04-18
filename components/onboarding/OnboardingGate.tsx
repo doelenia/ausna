@@ -50,8 +50,6 @@ function formatOpenCallEndDateSummary(openCallEndDate: Date | null): string {
   if (daysLeft < 30) return `Ends in ${daysLeft} days`
   return `Ends on ${end.toLocaleDateString()}`
 }
-const HUMAN_DESCRIPTION_HELP_TEXT =
-  'Tell us a bit about what you’re working on, what you care about, and what kinds of opportunities you’d like to find. You can also add links to projects, portfolios, websites, or other work that represents you (please do not put LinkedIn links here).\n\nThis helps us recommend more relevant opportunities to you.'
 const HUMAN_DESCRIPTION_PLACEHOLDER =
   'Student into climate tech, design, and community projects. Also love cafes, creative ideas, and meeting people. Currently working on hackathons and startup-related projects in Tokyo. Looking for collaborators!'
 
@@ -803,9 +801,6 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
         <div>
           <UIText as="label" className="block mb-1">
             Description <span className="text-danger-600" aria-hidden="true">*</span>
-          </UIText>
-          <UIText as="p" className="text-xs text-gray-500 mb-1">
-            {HUMAN_DESCRIPTION_HELP_TEXT}
           </UIText>
           <textarea
             value={description}
