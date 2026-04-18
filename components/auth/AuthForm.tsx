@@ -317,8 +317,11 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
           <Title as="h3" className="mb-2">Check your email!</Title>
           <UIText className="mb-4">{pseudoActivatedNotice}</UIText>
           <UIText as="p" className="mb-4 text-xs text-gray-500">
-            If you do not see the reset email, check your spam folder and then request a new reset link from
-            Forgot your password.
+            <span className="text-red-700">
+              If you don’t see the email, check your Spam/Junk folder. If it’s there, move it to your Inbox (mark it
+              as “Not spam”) so you can open it and click the link.
+            </span>{' '}
+            You can also request a new reset link from “Forgot your password”.
           </UIText>
           <Button
             variant="text"
@@ -363,7 +366,12 @@ export function AuthForm({ mode: _mode }: AuthFormProps) {
             email to verify your account.
           </UIText>
           <UIText as="p" className="mb-4 text-xs text-gray-500">
-            Didn't receive the email? Check your spam folder or{' '}
+            Didn’t receive the email?{' '}
+            <span className="text-red-700">
+              Check your Spam/Junk folder. If it’s there, move it to your Inbox (mark it as “Not spam”) so you can
+              see and click the link,
+            </span>{' '}
+            or{' '}
             <Button
               variant="text"
               type="button"

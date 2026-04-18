@@ -100,7 +100,12 @@ export function ForgotPasswordForm() {
             We've sent a password reset link to <strong>{email}</strong>. Please check your email and click the link to reset your password.
           </UIText>
           <UIText as="p" className="text-xs text-gray-500">
-            Didn't receive the email? Check your spam folder or try again.
+            Didn’t receive the email?{' '}
+            <span className="text-red-700">
+              Check your Spam/Junk folder. If it’s there, move it to your Inbox (mark it as “Not spam”) so you can
+              open it and click the link,
+            </span>{' '}
+            or try again.
           </UIText>
         </div>
       </div>
