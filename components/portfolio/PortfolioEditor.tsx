@@ -12,6 +12,7 @@ import {
 } from '@/types/portfolio'
 import { createClient } from '@/lib/supabase/client'
 import { createAvatarUploadHelpers } from '@/lib/storage/avatars-client'
+import { prepareProfileAvatarFile } from '@/lib/utils/profile-avatar-client'
 import { getPortfolioBasic } from '@/lib/portfolio/utils'
 import { updatePortfolio, updateActivityCallToJoin } from '@/app/portfolio/[idOrSlug]/actions'
 import { EmojiPicker } from './EmojiPicker'
@@ -385,27 +386,19 @@ export function PortfolioEditor({
         setError('Please select an image file')
         return
       }
-      
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Image must be less than 5MB')
-        return
-      }
 
       setError(null)
 
       try {
-        // Convert HEIC to JPEG if needed
-        const { ensureBrowserCompatibleImage } = await import('@/lib/utils/heic-converter')
-        const compatibleFile = await ensureBrowserCompatibleImage(file)
-        
-        setAvatarFile(compatibleFile)
+        const prepared = await prepareProfileAvatarFile(file)
+        setAvatarFile(prepared)
         setSelectedEmoji(null) // Clear emoji when image is selected
 
         const reader = new FileReader()
         reader.onloadend = () => {
           setAvatarPreview(reader.result as string)
         }
-        reader.readAsDataURL(compatibleFile)
+        reader.readAsDataURL(prepared)
       } catch (error: any) {
         console.error('Error processing image:', error)
         setError(error.message || 'Failed to process image. Please try a different image.')

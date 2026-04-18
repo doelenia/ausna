@@ -879,14 +879,14 @@ export function MembersPageClient({
                             <div className="flex items-center gap-2">
                               <input
                                 type="text"
-                                value={roleInputs[member.id] || member.role || ''}
+                                value={roleInputs[member.id] ?? member.role ?? ''}
                                 onChange={(e) => setRoleInputs({ ...roleInputs, [member.id]: e.target.value })}
                                 placeholder="Role (max 2 words)"
                                 maxLength={50}
                                 className="px-2 py-1 text-sm border border-gray-300 rounded"
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
-                                    handleRoleUpdate(member.id, roleInputs[member.id] || '')
+                                    handleRoleUpdate(member.id, roleInputs[member.id] ?? member.role ?? '')
                                   } else if (e.key === 'Escape') {
                                     setEditingRole(null)
                                     setRoleInputs({ ...roleInputs, [member.id]: '' })
@@ -897,7 +897,7 @@ export function MembersPageClient({
                               <Button
                                 variant="primary"
                                 size="sm"
-                                onClick={() => handleRoleUpdate(member.id, roleInputs[member.id] || '')}
+                                onClick={() => handleRoleUpdate(member.id, roleInputs[member.id] ?? member.role ?? '')}
                               >
                                 <UIText>Save</UIText>
                               </Button>
