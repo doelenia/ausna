@@ -31,6 +31,7 @@ import {
   isBefore,
   startOfDay,
 } from 'date-fns'
+import { prepareProfileAvatarFile } from '@/lib/utils/profile-avatar-client'
 
 const OPEN_CALL_NEVER_ENDS_WARNING = 'Setting never ends might lower the priority for broadcasting.'
 
@@ -621,6 +622,8 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [avatarPreparing, setAvatarPreparing] = useState(false)
+  const avatarBlobUrlRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -637,14 +640,61 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
     return () => { cancelled = true }
   }, [])
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    return () => {
+      if (avatarBlobUrlRef.current) {
+        URL.revokeObjectURL(avatarBlobUrlRef.current)
+        avatarBlobUrlRef.current = null
+      }
+    }
+  }, [])
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      setAvatarFile(file)
-      setAvatarPreview(URL.createObjectURL(file))
-    } else {
+    if (!file) {
       setAvatarFile(null)
-      setAvatarPreview(null)
+      setAvatarPreview(initialAvatarUrl)
+      if (avatarBlobUrlRef.current) {
+        URL.revokeObjectURL(avatarBlobUrlRef.current)
+        avatarBlobUrlRef.current = null
+      }
+      return
+    }
+
+    if (
+      !file.type.startsWith('image/') &&
+      !file.name.toLowerCase().endsWith('.heic') &&
+      !file.name.toLowerCase().endsWith('.heif')
+    ) {
+      setError('Please select an image file.')
+      e.target.value = ''
+      return
+    }
+
+    setError(null)
+    setAvatarPreparing(true)
+    try {
+      const prepared = await prepareProfileAvatarFile(file)
+      if (avatarBlobUrlRef.current) {
+        URL.revokeObjectURL(avatarBlobUrlRef.current)
+      }
+      const url = URL.createObjectURL(prepared)
+      avatarBlobUrlRef.current = url
+      setAvatarFile(prepared)
+      setAvatarPreview(url)
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : 'Could not process this image. Try another photo.'
+      setError(msg)
+      setAvatarFile(null)
+      setAvatarPreview(initialAvatarUrl)
+      if (avatarBlobUrlRef.current) {
+        URL.revokeObjectURL(avatarBlobUrlRef.current)
+        avatarBlobUrlRef.current = null
+      }
+      e.target.value = ''
+    } finally {
+      setAvatarPreparing(false)
     }
   }
 
@@ -688,8 +738,10 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
         return
       }
       onComplete()
-    } catch (err) {
-      setError('An unexpected error occurred.')
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.'
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -724,7 +776,8 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
             type="file"
             accept="image/*"
             onChange={handleAvatarChange}
-            className="w-full text-gray-600 file:mr-2 file:py-2 file:px-4 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700"
+            disabled={avatarPreparing}
+            className="w-full text-gray-600 file:mr-2 file:py-2 file:px-4 file:rounded file:border-0 file:bg-blue-50 file:text-blue-700 disabled:opacity-60"
           />
           {(avatarPreview || initialAvatarUrl) && (
             <img
@@ -769,10 +822,10 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
           <div className="space-y-3">
             <div>
               <Subtitle as="h2" className="mb-1">
-                Links &amp; notes (optional)
+                Resources (optional)
               </Subtitle>
               <UIText className="text-gray-600 block">
-                Drop a few links with a short caption. We’ll turn them into Resources after you submit.
+                Drop links that help people connect with you. Add a short caption if you want to give context.
               </UIText>
             </div>
 
@@ -809,7 +862,7 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
                           prev.map((r, i) => (i === idx ? { ...r, caption: e.target.value } : r))
                         )
                       }
-                      placeholder="What is this link about?"
+                      placeholder="e.g. LinkedIn, Instagram, personal website"
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 bg-white"
                     />
                   </div>
@@ -848,8 +901,8 @@ function OnboardingProfileStep({ onComplete }: { onComplete: () => void }) {
             <UIText className="text-red-700">{error}</UIText>
           </div>
         )}
-        <Button type="submit" variant="primary" disabled={loading}>
-          <UIText>{loading ? 'Saving...' : 'Save'}</UIText>
+        <Button type="submit" variant="primary" disabled={loading || avatarPreparing}>
+          <UIText>{loading ? 'Saving...' : avatarPreparing ? 'Preparing photo...' : 'Save'}</UIText>
         </Button>
       </form>
     </Card>

@@ -409,31 +409,35 @@ export function CreateSpaceModal({ isOpen, onClose, hostSpaceId }: CreateSpaceMo
 
   return (
     <div
-      className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-[999] flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center sm:p-6"
       role="presentation"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl"
+        className="my-auto w-full min-h-0 max-w-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-space-modal-title"
       >
-        <Card variant="default" padding="md">
-          <div className="mb-4">
+        <Card
+          variant="default"
+          padding="md"
+          className="flex max-h-[min(calc(100vh-2rem),calc(100dvh-2rem))] min-h-0 flex-col overflow-hidden"
+        >
+          <div className="mb-4 shrink-0">
             <Title as="h2" id="create-space-modal-title">
               Create space
             </Title>
           </div>
 
           {error && (
-            <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2">
+            <div className="mb-3 shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-2">
               <UIText className="text-red-700">{error}</UIText>
             </div>
           )}
 
-          <div className="space-y-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
             <div>
               <UIText as="label" className="block mb-2" htmlFor="create-space-topic">
                 Topic <span className="text-red-500">*</span>
@@ -762,7 +766,7 @@ export function CreateSpaceModal({ isOpen, onClose, hostSpaceId }: CreateSpaceMo
             </Card>
           </div>
 
-          <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <div className="mt-5 flex shrink-0 flex-wrap justify-end gap-2">
             <Button variant="secondary" onClick={onClose} disabled={loading}>
               <UIText>Cancel</UIText>
             </Button>
