@@ -58,6 +58,33 @@ import { ActivityCard } from '@/components/explore/ExploreView'
 import { getExploreActivityHighlights, type DailyMatchHighlightMeta } from '@/app/explore/actions'
 import { CreateSpaceModal } from '@/components/spaces/CreateSpaceModal'
 
+/** Set only after landing from the space-invite email magic link (`?spaceInviteFlow=1`). */
+const SPACE_INVITE_EMAIL_SESSION_KEY = 'ausna_space_invite_email_flow'
+
+function setSpaceInviteEmailSessionFlag(): void {
+  try {
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(SPACE_INVITE_EMAIL_SESSION_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSpaceInviteEmailSessionFlag(): void {
+  try {
+    if (typeof window !== 'undefined') window.sessionStorage.removeItem(SPACE_INVITE_EMAIL_SESSION_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+function hasSpaceInviteEmailSessionFlag(): boolean {
+  try {
+    return typeof window !== 'undefined' && window.sessionStorage.getItem(SPACE_INVITE_EMAIL_SESSION_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 interface PortfolioViewProps {
   portfolio: Portfolio
   basic: {
@@ -182,6 +209,8 @@ export function PortfolioView({
   const searchParams = useSearchParams()
   const authMagicLinkIssue = searchParams?.get('auth_magic_link')
   const spaceInviteAction = searchParams?.get('spaceInviteAction') as 'join' | 'follow' | 'pass' | null
+  /** Present only on magic-link redirect from space-invite email (`bulk` route). */
+  const spaceInviteFlow = searchParams?.get('spaceInviteFlow')
   const spaceInviteHandledRef = useRef(false)
   /** PKCE/hash often establishes the session after the first paint; bounded refreshes sync server props. */
   const spaceInviteRefreshAttemptsRef = useRef(0)
@@ -194,6 +223,7 @@ export function PortfolioView({
 
   const handleActivateAccount = useCallback(async () => {
     if (activateLoading) return
+    clearSpaceInviteEmailSessionFlag()
     setActivateLoading(true)
     try {
       // Same as add-contact invite: Join Ausna (`/invite/:token`) with returnTo this space.
@@ -326,15 +356,32 @@ export function PortfolioView({
     spaceInviteRefreshAttemptsRef.current = 0
   }, [spaceInviteAction, portfolio.id])
 
-  // New-user space invite: one email link lands on the space; prompt Join / Follow / Pass before password (Join Ausna).
+  // After handling (or stripping) `spaceInviteAction`, allow a later invite link on the same page session.
+  useEffect(() => {
+    if (!spaceInviteAction) {
+      spaceInviteHandledRef.current = false
+    }
+  }, [spaceInviteAction])
+
+  // New-user space invite from email only: magic link lands with `spaceInviteFlow=1` (see bulk invite route).
   useEffect(() => {
     if (spaceInviteAction) return
+    if (spaceInviteFlow !== '1') return
     if (!pendingUserInviteToken || !hasPendingPortfolioInvitation || !currentUserId) return
     if (pendingInvitationDismissed || spaceInvitePickDismissed) return
     if (invitePopupStage !== null) return
+    setSpaceInviteEmailSessionFlag()
     setInvitePopupStage('pick_choice')
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href)
+      if (url.searchParams.get('spaceInviteFlow') === '1') {
+        url.searchParams.delete('spaceInviteFlow')
+        window.history.replaceState(null, '', url.toString())
+      }
+    }
   }, [
     spaceInviteAction,
+    spaceInviteFlow,
     pendingUserInviteToken,
     hasPendingPortfolioInvitation,
     currentUserId,
@@ -343,7 +390,7 @@ export function PortfolioView({
     invitePopupStage,
   ])
 
-  // ---- Auto-handle spaceInviteAction from email magic-link CTAs ----
+  // ---- Auto-handle `spaceInviteAction` (messages deep-link here; new-user email uses the same param only with a pending invite token) ----
   useEffect(() => {
     if (spaceInviteHandledRef.current) return
     if (!spaceInviteAction) return
@@ -395,6 +442,8 @@ export function PortfolioView({
 
     if (!hasPendingPortfolioInvitation) return
     if (!currentUserId) return
+    /** Activation popups only for invite-email placeholder users who opened that flow in this tab (not message deep links). */
+    const showSpaceInviteActivateFlow = !!pendingUserInviteToken && hasSpaceInviteEmailSessionFlag()
     spaceInviteHandledRef.current = true
     setAcceptPortfolioInvitationError(null)
 
@@ -412,7 +461,11 @@ export function PortfolioView({
           if (res.ok) {
             setIsMember(true)
             setPendingInvitationDismissed(true)
-            setInvitePopupStage('join_success')
+            if (showSpaceInviteActivateFlow) {
+              setInvitePopupStage('join_success')
+            } else {
+              router.refresh()
+            }
           } else {
             setAcceptPortfolioInvitationError('Could not join space')
           }
@@ -431,7 +484,11 @@ export function PortfolioView({
             if (res.ok) {
               setIsCurrentPortfolioSubscribed(true)
               setPendingInvitationDismissed(true)
-              setInvitePopupStage('follow_success')
+              if (showSpaceInviteActivateFlow) {
+                setInvitePopupStage('follow_success')
+              } else {
+                router.refresh()
+              }
             } else {
               setAcceptPortfolioInvitationError('Could not follow space')
             }
@@ -461,7 +518,11 @@ export function PortfolioView({
               }
               setIsCurrentPortfolioSubscribed(true)
               setPendingInvitationDismissed(true)
-              setInvitePopupStage('follow_success')
+              if (showSpaceInviteActivateFlow) {
+                setInvitePopupStage('follow_success')
+              } else {
+                router.refresh()
+              }
             })
           })
           .catch(() => {
@@ -474,7 +535,30 @@ export function PortfolioView({
         void runFollowInvitePut()
       }
     } else if (spaceInviteAction === 'pass') {
-      setInvitePopupStage('pass_message')
+      if (showSpaceInviteActivateFlow) {
+        setInvitePopupStage('pass_message')
+      } else {
+        setAcceptingPortfolioInvitation(true)
+        fetch(`/api/portfolios/${portfolio.id}/invitations/${currentUserId}/decline`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: null }),
+        })
+          .then((res) => {
+            if (res.ok) {
+              setPendingInvitationDismissed(true)
+              router.refresh()
+            } else {
+              setAcceptPortfolioInvitationError('Could not pass on invitation')
+            }
+          })
+          .catch(() => {
+            setAcceptPortfolioInvitationError('Could not pass on invitation')
+          })
+          .finally(() => {
+            setAcceptingPortfolioInvitation(false)
+          })
+      }
     }
   }, [
     spaceInviteAction,
@@ -484,9 +568,11 @@ export function PortfolioView({
     router,
     supabase,
     pendingPortfolioInvitationType,
+    pendingUserInviteToken,
   ])
 
   const handlePassCancelActivate = useCallback(async () => {
+    clearSpaceInviteEmailSessionFlag()
     setInvitePopupStage(null)
     try {
       await fetch('/api/auth/activate', { method: 'POST' })
@@ -500,6 +586,12 @@ export function PortfolioView({
       // ignore
     }
   }, [supabase, router])
+
+  useEffect(() => {
+    if (!pendingUserInviteToken) {
+      clearSpaceInviteEmailSessionFlag()
+    }
+  }, [pendingUserInviteToken])
 
   const dismissAuthMagicLinkBanner = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -4294,6 +4386,7 @@ export function PortfolioView({
                   variant="text"
                   fullWidth
                   onClick={() => {
+                    clearSpaceInviteEmailSessionFlag()
                     setInvitePopupStage(null)
                     setSpaceInvitePickDismissed(true)
                   }}
@@ -4340,7 +4433,10 @@ export function PortfolioView({
                 <Button
                   variant="secondary"
                   fullWidth
-                  onClick={() => setInvitePopupStage(null)}
+                  onClick={() => {
+                    clearSpaceInviteEmailSessionFlag()
+                    setInvitePopupStage(null)
+                  }}
                   disabled={acceptingPortfolioInvitation}
                 >
                   <UIText>Later</UIText>
@@ -4384,7 +4480,10 @@ export function PortfolioView({
                 <Button
                   variant="secondary"
                   fullWidth
-                  onClick={() => setInvitePopupStage(null)}
+                  onClick={() => {
+                    clearSpaceInviteEmailSessionFlag()
+                    setInvitePopupStage(null)
+                  }}
                   disabled={acceptingPortfolioInvitation}
                 >
                   <UIText>Later</UIText>

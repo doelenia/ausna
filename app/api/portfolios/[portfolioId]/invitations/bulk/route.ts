@@ -410,7 +410,8 @@ export async function POST(
           try {
             // One magic link only: Supabase invalidates the previous OTP when a new magic link is
             // issued for the same email — parallel join/follow/pass links left only the last valid.
-            const redirectTo = `${siteUrl}${spacePath}`
+            // Lets the space page show the new-user invite modal only after this email link (not in-app links).
+            const redirectTo = `${siteUrl}${spacePath}?spaceInviteFlow=1`
             const { data: linkData, error: linkError } = await serviceClient.auth.admin.generateLink({
               type: 'magiclink',
               email: toEmail,
