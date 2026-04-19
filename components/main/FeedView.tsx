@@ -22,6 +22,13 @@ import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import { renderFeedTopRowSpaceStatusOverlay } from '@/components/main/feedTopRowSpaceStatus'
 import { fetchViewerEligibleSpaceFeedItems } from '@/lib/spaces/viewerFeedSpaces'
 
+export type MemberFeedCountsPayload = {
+  all: number
+  resources: number
+  collections: Record<string, number>
+  countsCapped?: boolean
+}
+
 interface FeedViewProps {
   currentUserId?: string
   apiPath?: string
@@ -30,6 +37,12 @@ interface FeedViewProps {
   showOpenCallStack?: boolean
   /** From e.g. /main?showOpenCalls=1 — opens the open-call carousel once data is ready */
   initialOpenCallsPopup?: boolean
+  /** Increment to refetch the feed list (e.g. after creating a note inline). */
+  refreshNonce?: number
+  /** Appended to the feed fetch URL (e.g. space member-feed tab filters). */
+  extraQueryParams?: Record<string, string>
+  /** Called when the feed API returns `feedCounts` (member-feed offset 0). */
+  onMemberFeedCounts?: (counts: MemberFeedCountsPayload | null) => void
 }
 
 /** Main feed top row: humans (friends) + spaces (joined/subscribed), ordered like portfolio feed rows. */
@@ -80,6 +93,9 @@ export function FeedView({
   openCallPortfolioId,
   showOpenCallStack = true,
   initialOpenCallsPopup = false,
+  refreshNonce = 0,
+  extraQueryParams,
+  onMemberFeedCounts,
 }: FeedViewProps) {
   const { setCachedNote } = useDataCache()
   // Keep supabase client stable so effects don't re-run every render.
@@ -100,12 +116,20 @@ export function FeedView({
   const loadedNoteIdsRef = useRef<Set<string>>(new Set())
   const loadNotesRef = useRef<((reset: boolean) => Promise<void>) | null>(null)
   const inFlightRef = useRef(false)
+  /** Bumped on every reset fetch so overlapping requests (e.g. rapid tab changes) cannot apply stale results. */
+  const loadEpochRef = useRef(0)
+  const prevRefreshNonceRef = useRef<number | null>(null)
 
   const loadNotes = useCallback(
     async (reset: boolean = false) => {
-      if (inFlightRef.current) {
+      if (inFlightRef.current && !reset) {
         return
       }
+
+      if (reset) {
+        loadEpochRef.current += 1
+      }
+      const epoch = loadEpochRef.current
 
       inFlightRef.current = true
 
@@ -131,6 +155,14 @@ export function FeedView({
           params.append('spaceId', activeSpaceId)
         }
 
+        if (extraQueryParams) {
+          for (const [k, v] of Object.entries(extraQueryParams)) {
+            if (v !== undefined && v !== null && v !== '') {
+              params.set(k, v)
+            }
+          }
+        }
+
         const url = `${apiPath}?${params.toString()}`
 
         const response = await fetch(url)
@@ -140,8 +172,26 @@ export function FeedView({
         }
 
         const data = await response.json()
+        if (epoch !== loadEpochRef.current) {
+          return
+        }
+
         const newItems: FeedItem[] = data.items || []
         const newHasMore = data.hasMore ?? false
+
+        if (reset && typeof onMemberFeedCounts === 'function' && 'feedCounts' in data) {
+          const fc = data.feedCounts
+          if (fc && typeof fc.all === 'number' && typeof fc.resources === 'number') {
+            onMemberFeedCounts({
+              all: fc.all,
+              resources: fc.resources,
+              collections: typeof fc.collections === 'object' && fc.collections ? fc.collections : {},
+              countsCapped: fc.countsCapped === true,
+            })
+          } else {
+            onMemberFeedCounts(null)
+          }
+        }
 
         if (reset) {
           setItems(newItems)
@@ -203,15 +253,19 @@ export function FeedView({
         setHasMore(newHasMore)
         offsetRef.current += newItems.length
       } catch (err: any) {
-        console.error('Error loading feed:', err)
-        setError(err.message || 'Failed to load feed')
+        if (epoch === loadEpochRef.current) {
+          console.error('Error loading feed:', err)
+          setError(err.message || 'Failed to load feed')
+        }
       } finally {
-        setLoading(false)
         setLoadingMore(false)
-        inFlightRef.current = false
+        if (epoch === loadEpochRef.current) {
+          setLoading(false)
+          inFlightRef.current = false
+        }
       }
     },
-    [activeFeed, activeSpaceId, currentUserId, apiPath]
+    [activeFeed, activeSpaceId, currentUserId, apiPath, extraQueryParams, onMemberFeedCounts]
   )
 
   // Keep loadNotes ref up to date
@@ -223,6 +277,13 @@ export function FeedView({
   useEffect(() => {
     loadNotes(true)
   }, [activeFeed, activeSpaceId, loadNotes])
+
+  useEffect(() => {
+    if (refreshNonce <= 0) return
+    if (prevRefreshNonceRef.current === refreshNonce) return
+    prevRefreshNonceRef.current = refreshNonce
+    loadNotes(true)
+  }, [refreshNonce, loadNotes])
 
   // Infinite scroll observer (only for logged-in users)
   useEffect(() => {

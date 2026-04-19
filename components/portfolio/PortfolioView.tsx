@@ -51,7 +51,16 @@ import { isCallToJoinWindowOpen } from '@/lib/callToJoin'
 import { ActivityDateTimeBadge } from './ActivityDateTimeBadge'
 import { ActivityLocationBadge } from './ActivityLocationBadge'
 import { ActivityLinkBadge } from './ActivityLinkBadge'
-import { FeedView, invalidateMainFeedTopRowCache } from '@/components/main/FeedView'
+import {
+  FeedView,
+  invalidateMainFeedTopRowCache,
+  type MemberFeedCountsPayload,
+} from '@/components/main/FeedView'
+import { SpaceFeedMiniNoteComposer } from '@/components/notes/SpaceFeedMiniNoteComposer'
+import {
+  SpaceMemberFeedFilterTabs,
+  type SpaceMemberFeedTab,
+} from '@/components/notes/SpaceMemberFeedFilterTabs'
 import { renderFeedTopRowSpaceStatusOverlay } from '@/components/main/feedTopRowSpaceStatus'
 import { normalizePortfolioType } from '@/types/portfolio'
 import { ActivityCard } from '@/components/explore/ExploreView'
@@ -1164,6 +1173,8 @@ export function PortfolioView({
   const [isCommunityLoginRequiredOpen, setIsCommunityLoginRequiredOpen] = useState(false)
 
   const shouldShowSpacesTab = isHumanPortfolio(portfolio) || normalizePortfolioType(portfolio.type) === 'space'
+  const isSpaceHostPortfolio =
+    !isHumanPortfolio(portfolio) && normalizePortfolioType(portfolio.type) === 'space'
   const spacesApiPath = isHumanPortfolio(portfolio)
     ? `/api/portfolios/${encodeURIComponent(portfolio.id)}/member-spaces`
     : `/api/portfolios/${encodeURIComponent(portfolio.id)}/hosted-spaces`
@@ -1173,8 +1184,58 @@ export function PortfolioView({
     if (initialTab === 'feed' || initialTab === 'overview' || initialTab === 'spaces') return initialTab
     return 'overview'
   })
+  const [feedListRefreshNonce, setFeedListRefreshNonce] = useState(0)
+  const [spaceMemberFeedTab, setSpaceMemberFeedTab] = useState<SpaceMemberFeedTab>(null)
+  const [spaceMemberFeedCounts, setSpaceMemberFeedCounts] = useState<MemberFeedCountsPayload | null>(null)
+  const [spaceFeedCollections, setSpaceFeedCollections] = useState<Array<{ id: string; name: string }>>([])
   const [isFriendVisitor, setIsFriendVisitor] = useState(false)
   const [isCurrentPortfolioSubscribed, setIsCurrentPortfolioSubscribed] = useState(false)
+
+  useEffect(() => {
+    if (activeTab !== 'feed') {
+      setSpaceMemberFeedTab(null)
+    }
+  }, [activeTab])
+
+  const spaceMemberFeedQueryParams = useMemo((): Record<string, string> | undefined => {
+    if (!isSpaceHostPortfolio) return undefined
+    if (spaceMemberFeedTab === null) return undefined
+    if (spaceMemberFeedTab === 'resources') return { feed_tab: 'resources' }
+    return { feed_tab: 'collection', collection_id: spaceMemberFeedTab.id }
+  }, [isSpaceHostPortfolio, spaceMemberFeedTab])
+
+  const handleMemberFeedCounts = useCallback((payload: MemberFeedCountsPayload | null) => {
+    setSpaceMemberFeedCounts(payload)
+  }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'feed' || !isSpaceHostPortfolio || !currentUserId) {
+      return
+    }
+    let cancelled = false
+    const run = async () => {
+      try {
+        const res = await fetch(`/api/collections?portfolio_id=${encodeURIComponent(portfolio.id)}`)
+        const data = await res.json().catch(() => ({}))
+        if (!cancelled && data.success && Array.isArray(data.collections)) {
+          setSpaceFeedCollections(
+            data.collections.map((c: { id: string; name?: string }) => ({
+              id: c.id,
+              name: (c.name && String(c.name).trim()) || 'Collection',
+            }))
+          )
+        } else if (!cancelled) {
+          setSpaceFeedCollections([])
+        }
+      } catch {
+        if (!cancelled) setSpaceFeedCollections([])
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, isSpaceHostPortfolio, currentUserId, portfolio.id])
 
   /** Space invite email → land on space first; then Join Ausna (`/invite/:token`) for password. */
   const handlePickJoinForActivate = useCallback(async () => {
@@ -3176,7 +3237,9 @@ export function PortfolioView({
                           : 'text-gray-700 hover:bg-gray-200'
                       }`}
                     >
-                      <UIText>Spaces</UIText>
+                      <UIText>
+                        {spacesLoading ? 'Spaces' : `Spaces (${spacesList.length})`}
+                      </UIText>
                     </button>
                   )}
                 </div>
@@ -3412,7 +3475,8 @@ export function PortfolioView({
           {/* Feed tab: show notes feed for all portfolio types */}
           {activeTab === 'feed' && (
             <div className="mt-6 -mx-6 md:mx-0">
-              {currentUserId &&
+              {!isSpaceHostPortfolio &&
+                currentUserId &&
                 (spacesLoading || (!spacesLastNoteLoaded && spacesList.length > 0)) && (
                 <div className="mb-6 md:px-10">
                   <div className="flex items-start gap-2 overflow-x-auto px-6 py-1 md:px-0 scroll-smooth">
@@ -3430,7 +3494,8 @@ export function PortfolioView({
                   </div>
                 </div>
               )}
-              {(() => {
+              {!isSpaceHostPortfolio &&
+                (() => {
                 // Avoid rendering the row until we have stable ordering (last-note timestamps loaded).
                 if (!spacesLastNoteLoaded) return null
                 if (spacesLoading) return null
@@ -3521,10 +3586,36 @@ export function PortfolioView({
                   </div>
                 )
               })()}
+              {!isHumanPortfolio(portfolio) &&
+                normalizePortfolioType(portfolio.type) === 'space' &&
+                canCreateNote &&
+                currentUserId && (
+                  <SpaceFeedMiniNoteComposer
+                    portfolio={portfolio}
+                    isOwner={isOwner}
+                    isManager={isManager}
+                    isMember={isMember}
+                    onCreated={() => {
+                      invalidateMainFeedTopRowCache()
+                      setFeedListRefreshNonce((n) => n + 1)
+                    }}
+                  />
+                )}
+              {isSpaceHostPortfolio && (
+                <SpaceMemberFeedFilterTabs
+                  active={spaceMemberFeedTab}
+                  onChange={setSpaceMemberFeedTab}
+                  collections={spaceFeedCollections}
+                  counts={spaceMemberFeedCounts}
+                />
+              )}
               <FeedView
                 currentUserId={currentUserId}
                 apiPath={`/api/portfolios/${portfolio.id}/member-feed`}
                 showOpenCallStack={false}
+                refreshNonce={feedListRefreshNonce}
+                extraQueryParams={spaceMemberFeedQueryParams}
+                onMemberFeedCounts={isSpaceHostPortfolio ? handleMemberFeedCounts : undefined}
               />
             </div>
           )}

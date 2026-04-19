@@ -1070,22 +1070,36 @@ export function NoteCard({
   const isMembersOnly = effectiveVisibility === 'members'
   const isFriendsOnly = effectiveVisibility === 'friends'
 
-  const visibilityCornerIcon = !isViewMode ? (
-    isPrivate ? (
-      <Lock
-        className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none"
-        aria-label="Private"
-      />
-    ) : isMembersOnly || isFriendsOnly ? (
-      <UsersRound
-        className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none"
-        aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
-      />
-    ) : null
+  const isCollageView = viewMode === 'collage'
+
+  /** Non-public notes in feed / portfolio list: show with header row so type pills (resource, open call) do not overlap absolute corner icons. */
+  const showVisibilityInStandardHeader =
+    !isViewMode && !isCollageView && (isPrivate || isMembersOnly || isFriendsOnly)
+
+  const visibilityStatusIcons = isPrivate ? (
+    <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
+  ) : isMembersOnly || isFriendsOnly ? (
+    <UsersRound
+      className="w-4 h-4 text-gray-500 flex-shrink-0"
+      aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
+    />
   ) : null
 
-  const isCollageView = viewMode === 'collage'
-  
+  const visibilityCornerIcon =
+    !isViewMode && !showVisibilityInStandardHeader ? (
+      isPrivate ? (
+        <Lock
+          className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none"
+          aria-label="Private"
+        />
+      ) : isMembersOnly || isFriendsOnly ? (
+        <UsersRound
+          className="absolute right-3 top-3 w-4 h-4 text-gray-500 z-20 pointer-events-none"
+          aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
+        />
+      ) : null
+    ) : null
+
   // Ensure references is an array
   // Handle case where references might be a JSON string or need parsing
   let references = note.references
@@ -1694,13 +1708,13 @@ export function NoteCard({
 
   const openCallHeader = isOpenCall ? (
     <div className="flex items-center justify-between gap-2 flex-wrap">
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap min-w-0">
         <Megaphone
           className="w-5 h-5 text-orange-600 flex-shrink-0"
           strokeWidth={1.5}
           aria-hidden
         />
-        <UIText as="span" className="flex items-center gap-2 text-orange-600">
+        <UIText as="span" className="flex items-center gap-2 text-orange-600 min-w-0">
           Open call
           {openCallDaysLeft !== null && openCallDaysLeft > 0 && (
             <>
@@ -1712,11 +1726,16 @@ export function NoteCard({
           )}
         </UIText>
       </div>
-      {isOpenCallPreview && isOpenCallNew && (
-        <div className="inline-flex items-center px-2 py-0.5 rounded-full bg-orange-500">
-          <UIText as="span" className="text-white">
-            NEW
-          </UIText>
+      {(showVisibilityInStandardHeader || (isOpenCallPreview && isOpenCallNew)) && (
+        <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+          {showVisibilityInStandardHeader && visibilityStatusIcons}
+          {isOpenCallPreview && isOpenCallNew && (
+            <div className="inline-flex items-center px-2 py-0.5 rounded-full bg-orange-500">
+              <UIText as="span" className="text-white">
+                NEW
+              </UIText>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1896,8 +1915,10 @@ export function NoteCard({
             </div>
             {!isOpenCallPreview && (isOwner || isCollaborator) && (
               <div className="flex items-center gap-2 flex-shrink-0">
-                {isPrivate && <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />}
-                {(isMembersOnly || isFriendsOnly) && (
+                {!showVisibilityInStandardHeader && isPrivate && (
+                  <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />
+                )}
+                {!showVisibilityInStandardHeader && (isMembersOnly || isFriendsOnly) && (
                   <UsersRound
                     className="w-4 h-4 text-gray-500 flex-shrink-0"
                     aria-label={isMembersOnly ? 'Members only' : 'Friends only'}
@@ -1996,10 +2017,11 @@ export function NoteCard({
               )}
             </div>
             
-            {/* View Mode Actions (and private lock to the left when in view mode) */}
-            {(isViewMode || isResource) && (
-              <div className="flex items-center gap-2 flex-shrink-0">
+            {/* View mode actions, resource type pill, and feed visibility (non-collage; corner icon suppressed when shown here) */}
+            {(isViewMode || isResource || showVisibilityInStandardHeader) && (
+              <div className="flex items-center justify-end gap-2 flex-shrink-0">
                 {isResource && <NotePostKindPill kind="resource" />}
+                {showVisibilityInStandardHeader && visibilityStatusIcons}
                 {isViewMode && (
                   <>
                     {isPrivate && <Lock className="w-4 h-4 text-gray-500 flex-shrink-0" aria-label="Private" />}
