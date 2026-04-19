@@ -12,8 +12,6 @@ type ResourcesApiResponse = {
   success: boolean
   resources: Note[]
   canCreateResource: boolean
-  resourceLimit: number
-  resourceCount: number
   error?: string
 }
 
@@ -34,8 +32,6 @@ export function ResourcesSection({
   const [popupOpen, setPopupOpen] = useState(false)
   const [popupIndex, setPopupIndex] = useState(0)
   const [canCreateResource, setCanCreateResource] = useState(false)
-  const [resourceLimit, setResourceLimit] = useState(6)
-  const [resourceCount, setResourceCount] = useState(0)
 
   const createUrl = useMemo(() => {
     if (portfolioType === 'human') return '/notes/create?kind=resource'
@@ -55,8 +51,6 @@ export function ResourcesSection({
         if (res.ok && data?.success) {
           setResources(Array.isArray(data.resources) ? data.resources : [])
           setCanCreateResource(!!data.canCreateResource)
-          setResourceLimit(typeof data.resourceLimit === 'number' ? data.resourceLimit : 6)
-          setResourceCount(typeof data.resourceCount === 'number' ? data.resourceCount : 0)
         } else {
           setError(data?.error || 'Failed to load resources')
         }
@@ -75,7 +69,7 @@ export function ResourcesSection({
   }, [portfolioId, currentUserId])
 
   const showSection = canCreateResource || resources.length > 0
-  const showPlaceholder = canCreateResource && resourceCount < resourceLimit
+  const showPlaceholder = canCreateResource
 
   if (loading) return null
   if (error) return null
