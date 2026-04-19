@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enrichNotesWithAuthorProfiles, type FeedItem } from '@/app/main/actions'
 import { getPortfolioBasic } from '@/lib/portfolio/helpers'
-import { DB_NON_HUMAN_TYPES, type Portfolio } from '@/types/portfolio'
+import { DB_NON_HUMAN_TYPES, normalizePortfolioType, type Portfolio } from '@/types/portfolio'
 import { loadPortfolioForPage } from '@/lib/portfolio/loadPortfolioForPage'
 
 export const dynamic = 'force-dynamic'
@@ -102,6 +102,8 @@ export async function GET(
 
     const memberSet = new Set(memberUserIds)
     const mustBeAssigned = type !== 'human'
+    /** Space portfolio feed (not main app feed): default tab shows posts + resources. */
+    const spaceFeedAllIncludesResources = normalizePortfolioType(type) === 'space'
 
     let collectionNoteIdSet: Set<string> | null = null
     if (mustBeAssigned && feedTab === 'collection' && feedCollectionId) {
@@ -152,7 +154,11 @@ export async function GET(
       rows = rows.filter((note: any) => notePassesMemberFilter(note, memberSet))
 
       if (feedTab === 'all') {
-        rows = rows.filter((note: any) => note?.type !== 'open_call' && note?.type !== 'resource')
+        rows = rows.filter((note: any) =>
+          spaceFeedAllIncludesResources
+            ? note?.type !== 'open_call'
+            : note?.type !== 'open_call' && note?.type !== 'resource'
+        )
       } else if (feedTab === 'collection') {
         if (!collectionNoteIdSet || collectionNoteIdSet.size === 0) {
           rows = []
@@ -283,8 +289,10 @@ export async function GET(
       const memberFiltered = poolRows.filter((note: any) => notePassesMemberFilter(note, memberSet))
       const countsCapped = poolRows.length >= ASSIGNED_NOTES_FETCH_CAP
 
-      const all = memberFiltered.filter(
-        (n: any) => n?.type !== 'open_call' && n?.type !== 'resource'
+      const all = memberFiltered.filter((n: any) =>
+        spaceFeedAllIncludesResources
+          ? n?.type !== 'open_call'
+          : n?.type !== 'open_call' && n?.type !== 'resource'
       ).length
       const resources = memberFiltered.filter((n: any) => n?.type === 'resource').length
 
