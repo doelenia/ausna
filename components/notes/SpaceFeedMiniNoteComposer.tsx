@@ -1,11 +1,15 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import type { Portfolio } from '@/types/portfolio'
 import { isHumanPortfolio } from '@/types/portfolio'
 import { createNote } from '@/app/notes/actions'
 import { Button, Card, Content, UIText } from '@/components/ui'
 import { NotePostKindPill, type PostKind } from '@/components/notes/NotePostKindPill'
+import {
+  NoteReferenceAttachments,
+  type NoteReferenceAttachmentsHandle,
+} from '@/components/notes/NoteReferenceAttachments'
 import { Settings } from 'lucide-react'
 import type { NoteVisibility } from '@/types/note'
 
@@ -55,6 +59,7 @@ export function SpaceFeedMiniNoteComposer({
   const [selectedCollectionIds, setSelectedCollectionIds] = useState<string[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const referenceAttachmentsRef = useRef<NoteReferenceAttachmentsHandle>(null)
 
   const canResource = canCreateResourceClient(portfolio, isOwner, isManager, isMember)
   const canSelectPostKind = canResource
@@ -119,7 +124,7 @@ export function SpaceFeedMiniNoteComposer({
     )
   }, [])
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     const trimmed = text.trim()
     if (!trimmed || isSubmitting) return
@@ -129,6 +134,7 @@ export function SpaceFeedMiniNoteComposer({
     try {
       const formData = new FormData()
       formData.append('text', trimmed)
+      referenceAttachmentsRef.current?.appendToFormData(formData)
       formData.append('assigned_portfolios', JSON.stringify([portfolio.id]))
       formData.append('note_type', postKind)
       formData.append('visibility', visibility)
@@ -142,6 +148,7 @@ export function SpaceFeedMiniNoteComposer({
       const result = await createNote(formData)
       if (result.success) {
         setText('')
+        referenceAttachmentsRef.current?.reset()
         setSelectedCollectionIds([])
         setPostKindMenuOpen(false)
         setSettingsOpen(false)
@@ -285,6 +292,12 @@ export function SpaceFeedMiniNoteComposer({
             placeholder="Write a note..."
             rows={1}
             className="w-full min-h-[24px] resize-none border-0 bg-transparent px-0 py-2 focus:outline-none"
+            disabled={isSubmitting}
+          />
+
+          <NoteReferenceAttachments
+            ref={referenceAttachmentsRef}
+            setError={setError}
             disabled={isSubmitting}
           />
 
