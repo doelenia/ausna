@@ -3,8 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { isPortfolioManager, isPortfolioCreator } from '@/lib/portfolio/helpers'
 
 /**
- * POST /api/portfolios/[portfolioId]/managers/invite - Invite a member to become a manager
- * Only managers can invite other members to become managers
+ * POST /api/portfolios/[portfolioId]/managers/invite — Promote an existing member to manager immediately.
+ * Only creators and managers may call this route.
  */
 export async function POST(
   request: NextRequest,
@@ -131,65 +131,123 @@ export async function POST(
       )
     }
 
-    // Check if there's already a pending invitation (member or manager)
-    const { data: existingInvitation } = await supabase
+    const { data: existingPendingInvite } = await supabase
       .from('portfolio_invitations')
-      .select('id')
+      .select('id, invitation_type')
       .eq('portfolio_id', portfolioId)
       .eq('invitee_id', userId)
       .eq('status', 'pending')
       .maybeSingle()
 
-    if (existingInvitation) {
+    if (existingPendingInvite && existingPendingInvite.invitation_type !== 'manager') {
       return NextResponse.json(
         { error: 'Invitation already sent' },
         { status: 400 }
       )
     }
 
-    // Create manager invitation record
-    const { data: invitation, error: invitationError } = await supabase
+    const trimmedInviteMessage =
+      message && typeof message === 'string' && message.trim().length > 0 ? message.trim() : null
+
+    // Add user to managers (same outcome as accepting a manager invite; no separate accept step).
+    const updatedManagers = [...managers, userId]
+    const updatedMetadata = {
+      ...metadata,
+      managers: updatedManagers,
+    }
+
+    const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
+      portfolio_id: portfolioId,
+      new_members: members,
+    })
+
+    if (rpcError) {
+      console.error('Error syncing members via RPC, trying direct update:', rpcError)
+      const { error: directUpdateError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', portfolioId)
+
+      if (directUpdateError) {
+        console.error('Error adding manager (direct update):', directUpdateError)
+        return NextResponse.json(
+          { error: `Failed to add manager: ${directUpdateError.message || directUpdateError.code}` },
+          { status: 500 }
+        )
+      }
+    } else {
+      const { error: managerUpdateError } = await supabase
+        .from('portfolios')
+        .update({ metadata: updatedMetadata })
+        .eq('id', portfolioId)
+
+      if (managerUpdateError) {
+        console.error('Error updating managers:', managerUpdateError)
+        return NextResponse.json({ error: 'Failed to update managers' }, { status: 500 })
+      }
+    }
+
+    const acceptedAt = new Date().toISOString()
+    const { data: upgradedRows, error: upgradeError } = await supabase
       .from('portfolio_invitations')
-      .insert({
+      .update({
+        status: 'accepted',
+        accepted_at: acceptedAt,
+        message: trimmedInviteMessage,
+      })
+      .eq('portfolio_id', portfolioId)
+      .eq('invitee_id', userId)
+      .eq('invitation_type', 'manager')
+      .eq('status', 'pending')
+      .select('id')
+
+    if (upgradeError) {
+      console.error('Error finalizing legacy manager invitation:', upgradeError)
+    }
+
+    if (!upgradedRows?.length) {
+      const { error: insertInvError } = await supabase.from('portfolio_invitations').insert({
         portfolio_id: portfolioId,
         inviter_id: user.id,
         invitee_id: userId,
-        status: 'pending',
+        status: 'accepted',
+        accepted_at: acceptedAt,
         invitation_type: 'manager',
-        message: message && typeof message === 'string' && message.trim().length > 0 ? message.trim() : null,
+        message: trimmedInviteMessage,
       })
-      .select()
-      .single()
-
-    if (invitationError) {
-      console.error('Error creating manager invitation:', invitationError)
-      return NextResponse.json(
-        { error: 'Failed to create invitation' },
-        { status: 500 }
-      )
+      if (insertInvError) {
+        console.error('Error recording manager promotion:', insertInvError)
+      }
     }
 
-    // Get portfolio name for the invitation message
     const basic = metadata?.basic || {}
-    const portfolioName = basic.name || 'this portfolio'
+    const portfolioName = basic.name || 'this space'
+    const customMessage = trimmedInviteMessage ? `\n\nMessage: ${trimmedInviteMessage}` : ''
 
-    // Send invitation message
-    const customMessage =
-      message && typeof message === 'string' && message.trim().length > 0
-        ? `\n\nMessage: ${message.trim()}`
-        : ''
-
-    const { error: messageError } = await supabase
-      .from('messages')
-      .insert({
-        sender_id: user.id,
-        receiver_id: userId,
-        text: `invited you to become a manager of ${portfolioName} (portfolio)${customMessage}`,
-      })
+    const { error: messageError } = await supabase.from('messages').insert({
+      sender_id: user.id,
+      receiver_id: userId,
+      text: `added you as a manager of ${portfolioName} (space)${customMessage}`,
+    })
 
     if (messageError) {
-      console.error('Error sending invitation message:', messageError)
-      // Don't fail the whole request if message fails, invitation is already created
+      console.error('Error sending manager promotion message:', messageError)
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+      fetch(`${baseUrl}/api/process-portfolio-interests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          portfolioId,
+          userId,
+          isPersonalPortfolio: false,
+          description: null,
+        }),
+      }).catch((err) => console.error('Failed to trigger portfolio interest processing:', err))
+    } catch (e) {
+      console.error('Error triggering portfolio interest processing:', e)
     }
 
     return NextResponse.json({ success: true })

@@ -2,40 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { isPortfolioManager, isPortfolioCreator } from '@/lib/portfolio/helpers'
-
-/** Apply member list update to portfolio (uses service client so RLS does not block e.g. member leaving). */
-async function applyMembersUpdate(
-  portfolioId: string,
-  metadata: any,
-  updatedMembers: string[],
-  updatedManagers: string[],
-  updatedMemberRoles: Record<string, string>
-) {
-  const supabase = createServiceClient()
-  const { error: rpcError } = await supabase.rpc('update_portfolio_members', {
-    portfolio_id: portfolioId,
-    new_members: updatedMembers,
-  })
-  const nextMetadata = {
-    ...metadata,
-    members: updatedMembers,
-    managers: updatedManagers,
-    memberRoles: updatedMemberRoles,
-  }
-  if (rpcError) {
-    const { error: directError } = await supabase
-      .from('portfolios')
-      .update({ metadata: nextMetadata })
-      .eq('id', portfolioId)
-    if (directError) throw directError
-  } else {
-    const { error: metaError } = await supabase
-      .from('portfolios')
-      .update({ metadata: nextMetadata })
-      .eq('id', portfolioId)
-    if (metaError) throw metaError
-  }
-}
+import { applyMembersUpdate } from '@/lib/portfolio/applyMembersUpdate'
 
 /**
  * DELETE /api/portfolios/[portfolioId]/members/[userId] - Remove a member from a portfolio

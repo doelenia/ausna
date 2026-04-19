@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { UserMinus, ShieldOff } from 'lucide-react'
 import { Title, Content, UIText, Button, UserAvatar } from '@/components/ui'
 import { getHumanProfileUrl } from '@/lib/portfolio/routes'
 import { approveActivityJoinRequest, respondToActivityJoinRequest } from '@/app/portfolio/[idOrSlug]/actions'
@@ -79,14 +80,21 @@ export function MembersPageClient({
   useEffect(() => {
     setActiveTab(initialTab)
   }, [initialTab])
+
+  useEffect(() => {
+    setSubscribers(subscriberDetails)
+  }, [subscriberDetails])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<UserInfo[]>([])
   const [searching, setSearching] = useState(false)
   const [inviting, setInviting] = useState<string | null>(null) // `${userId}:${kind}`
   const [invitingManager, setInvitingManager] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [demotingManagerId, setDemotingManagerId] = useState<string | null>(null)
   const [inviteMessageInputs, setInviteMessageInputs] = useState<{ [userId: string]: string }>({})
   const [members, setMembers] = useState(memberDetails)
+  const [subscribers, setSubscribers] = useState(subscriberDetails)
+  const [removingFollowerId, setRemovingFollowerId] = useState<string | null>(null)
   // New-user invite-by-email state
   const [newInviteeSuggestion, setNewInviteeSuggestion] = useState<{ email: string; name: string } | null>(null)
   const [newEmailInviteName, setNewEmailInviteName] = useState('')
@@ -349,7 +357,7 @@ export function MembersPageClient({
       })
 
       if (response.ok) {
-        alert('Manager invitation sent successfully!')
+        alert('They are now a manager of this space.')
         setSearchQuery('')
         setSearchResults([])
         router.refresh()
@@ -365,6 +373,41 @@ export function MembersPageClient({
     }
   }
 
+  const ownerCanDemoteManagers =
+    isCreator &&
+    normalizePortfolioType(portfolioType) === 'space' &&
+    !isExternalActivity
+
+  const handleDemoteManager = async (userId: string, displayName: string) => {
+    if (
+      !confirm(
+        `Remove manager permissions for ${displayName}? They will stay in this space as a regular member (not removed).`
+      )
+    ) {
+      return
+    }
+    setDemotingManagerId(userId)
+    try {
+      const response = await fetch(`/api/portfolios/${portfolioId}/managers/${userId}`, {
+        method: 'DELETE',
+      })
+      if (response.ok) {
+        setMembers((prev) =>
+          prev.map((m) => (m.id === userId ? { ...m, isManager: false } : m))
+        )
+        router.refresh()
+      } else {
+        const data = await response.json().catch(() => ({}))
+        alert(data.error || 'Failed to remove manager role')
+      }
+    } catch (error) {
+      console.error('Error removing manager role:', error)
+      alert('Failed to remove manager role')
+    } finally {
+      setDemotingManagerId(null)
+    }
+  }
+
   const handleRemove = async (userId: string, isSelf: boolean = false) => {
     const isRemovingCreator = isCreator && userId === currentUserId
     
@@ -374,9 +417,13 @@ export function MembersPageClient({
       return
     }
 
-    const confirmMessage = isSelf 
-      ? (isManager && !isCreator ? 'Are you sure you want to step down as manager? You will remain as a member.' : 'Are you sure you want to leave this ' + portfolioType + '?')
-      : 'Are you sure you want to remove this member?'
+    const confirmMessage = isSelf
+      ? isManager && !isCreator
+        ? 'Are you sure you want to step down as manager? You will remain as a member.'
+        : 'Are you sure you want to leave this ' + portfolioType + '?'
+      : normalizePortfolioType(portfolioType) === 'space' && !isExternalActivity
+        ? 'Remove this person from the space entirely? They will lose access as a member.'
+        : 'Are you sure you want to remove this member?'
     
     if (!confirm(confirmMessage)) {
       return
@@ -509,7 +556,30 @@ export function MembersPageClient({
     (!!creator && creator.id === userId) || members.some((m) => m.id === userId)
 
   const isUserAlreadyFollower = (userId: string) =>
-    subscriberDetails.some((s) => s.id === userId)
+    subscribers.some((s) => s.id === userId)
+
+  const handleRemoveFollower = async (followerUserId: string) => {
+    if (!canManage) return
+    setRemovingFollowerId(followerUserId)
+    try {
+      const response = await fetch(
+        `/api/portfolios/${portfolioId}/followers/${followerUserId}`,
+        { method: 'DELETE' }
+      )
+      if (response.ok) {
+        setSubscribers((prev) => prev.filter((s) => s.id !== followerUserId))
+        router.refresh()
+      } else {
+        const data = await response.json().catch(() => ({}))
+        alert(data.error || 'Failed to remove follower')
+      }
+    } catch (error) {
+      console.error('Error removing follower:', error)
+      alert('Failed to remove follower')
+    } finally {
+      setRemovingFollowerId(null)
+    }
+  }
 
   const handleCancelInvitation = async (inviteeId: string) => {
     if (!confirm('Cancel this invitation?')) return
@@ -746,7 +816,7 @@ export function MembersPageClient({
               : 'border-transparent text-gray-600 hover:text-gray-900'
           }`}
         >
-          <UIText as="span">Followers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}</UIText>
+          <UIText as="span">Followers {subscribers.length > 0 && `(${subscribers.length})`}</UIText>
         </button>
         {canShowJoinRequestsTab && (
           <button
@@ -861,7 +931,7 @@ export function MembersPageClient({
                         )}
                       </div>
                     </Link>
-                    <div className="flex items-center gap-2">
+                    <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
                       {memberIsCreator && (
                         <UIText as="span" className="px-2 py-1 text-blue-600 bg-blue-100 rounded uppercase">
                           Creator
@@ -926,14 +996,42 @@ export function MembersPageClient({
                           )}
                         </>
                       )}
+                      {ownerCanDemoteManagers &&
+                        memberIsManager &&
+                        !memberIsCreator &&
+                        member.id !== currentUserId && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleDemoteManager(member.id, getDisplayName(member))}
+                          disabled={demotingManagerId === member.id || removing === member.id}
+                          aria-label={`Remove manager role from ${getDisplayName(member)}`}
+                        >
+                          <ShieldOff className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                          <UIText>
+                            {demotingManagerId === member.id ? 'Updating…' : 'Remove manager role'}
+                          </UIText>
+                        </Button>
+                      )}
                       {canManage && member.id !== currentUserId && !memberIsCreator && !isExternalActivity && (
                         <Button
                           variant="danger"
                           size="sm"
                           onClick={() => handleRemove(member.id)}
-                          disabled={removing === member.id}
+                          disabled={removing === member.id || demotingManagerId === member.id}
+                          aria-label={
+                            normalizePortfolioType(portfolioType) === 'space'
+                              ? `Remove ${getDisplayName(member)} from this space`
+                              : `Remove ${getDisplayName(member)}`
+                          }
                         >
-                          <UIText>{removing === member.id ? 'Removing...' : 'Remove'}</UIText>
+                          <UIText>
+                            {removing === member.id
+                              ? 'Removing...'
+                              : normalizePortfolioType(portfolioType) === 'space'
+                                ? 'Remove from space'
+                                : 'Remove'}
+                          </UIText>
                         </Button>
                       )}
                       {isManager && member.id !== currentUserId && !memberIsCreator && !memberIsManager && (
@@ -966,28 +1064,28 @@ export function MembersPageClient({
         <div>
           <div className="mb-3">
             <UIText as="h2">
-              Followers {subscriberDetails.length > 0 && `(${subscriberDetails.length})`}
+              Followers {subscribers.length > 0 && `(${subscribers.length})`}
             </UIText>
           </div>
-          {subscriberDetails.length === 0 ? (
+          {subscribers.length === 0 ? (
             <div><UIText>No followers yet</UIText></div>
           ) : (
             <div className="space-y-2">
-              {subscriberDetails.map((subscriber) => (
+              {subscribers.map((subscriber) => (
                 <div
                   key={subscriber.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
+                  className="group flex items-center justify-between gap-2 p-3 bg-gray-50 rounded-md"
                 >
                   <Link
                     href={getHumanProfileUrl(subscriber.id)}
-                    className="flex items-center gap-3 hover:opacity-80"
+                    className="flex min-w-0 flex-1 items-center gap-3 hover:opacity-80"
                   >
                     <img
                       src={getAvatarUrl(subscriber)}
                       alt={getDisplayName(subscriber)}
-                      className="h-10 w-10 rounded-full"
+                      className="h-10 w-10 shrink-0 rounded-full"
                     />
-                    <div>
+                    <div className="min-w-0">
                       <UIText as="div">
                         {getDisplayName(subscriber)}
                         {subscriber.id === currentUserId && ' (You)'}
@@ -997,6 +1095,19 @@ export function MembersPageClient({
                       )}
                     </div>
                   </Link>
+                  {canManage && (
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      className="shrink-0 px-2 opacity-100 pointer-events-auto md:opacity-0 md:pointer-events-none md:group-hover:pointer-events-auto md:group-hover:opacity-100 md:focus:pointer-events-auto md:focus:opacity-100"
+                      aria-label="Remove follower"
+                      disabled={removingFollowerId === subscriber.id}
+                      onClick={() => handleRemoveFollower(subscriber.id)}
+                    >
+                      <UserMinus className="h-4 w-4" strokeWidth={1.75} aria-hidden />
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

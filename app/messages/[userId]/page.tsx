@@ -7,7 +7,7 @@ import { createHumanPortfolioHelpers } from '@/lib/portfolio/human-client'
 import Link from 'next/link'
 import { PortfolioInvitationCard } from '@/components/portfolio/PortfolioInvitationCard'
 import { ActivityUpdateCard } from '@/components/portfolio/ActivityUpdateCard'
-import { Portfolio, DB_NON_HUMAN_TYPES } from '@/types/portfolio'
+import { Portfolio, DB_NON_HUMAN_TYPES, isHumanPortfolio } from '@/types/portfolio'
 import { getHumanProfileUrl, getSpaceUrl } from '@/lib/portfolio/routes'
 import { MessageNoteCard } from '@/components/notes/MessageNoteCard'
 import { MessagePortfolioCard } from '@/components/messages/MessagePortfolioCard'
@@ -983,6 +983,7 @@ function ConversationViewContent() {
                 messageText.includes('invited you to join') ||
                 messageText.includes('invited you to become a manager') ||
                 messageText.includes('invited you to follow')
+              const isManagerPromotionMessage = messageText.includes('added you as a manager of')
               const isFollowInviteMessage = messageText.includes('invited you to follow')
               const isManagerInviteMessage = messageText.includes('invited you to become a manager')
               const isAcceptMessage =
@@ -991,7 +992,8 @@ function ConversationViewContent() {
                 messageText.includes('accepted your invitation to follow')
               const isFollowAcceptMessage = messageText.includes('accepted your invitation to follow')
               const isManagerAcceptMessage = messageText.includes('accepted your invitation to become a manager')
-              const isPortfolioInvitationMessage = isInviteMessage || isAcceptMessage
+              const isPortfolioInvitationMessage =
+                isInviteMessage || isAcceptMessage || isManagerPromotionMessage
               const isPortfolioShareMessage = message.message_type === 'portfolio_share'
               const portfolioShareParsed = isPortfolioShareMessage
                 ? parsePortfolioShareFromMessage(message.text)
@@ -1007,33 +1009,50 @@ function ConversationViewContent() {
               
               let portfolioInvitation: { invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string } | null = null
               if (isPortfolioInvitationMessage && portfolioInvitations.size > 0 && currentUserId) {
-                const expectedInviterId = isInviteMessage ? message.sender_id : message.receiver_id
-                const expectedInviteeId = isInviteMessage ? message.receiver_id : message.sender_id
+                const isInviteLike = isInviteMessage || isManagerPromotionMessage
+                const expectedInviterId = isInviteLike ? message.sender_id : message.receiver_id
+                const expectedInviteeId = isInviteLike ? message.receiver_id : message.sender_id
 
                 // Backend formats:
                 // - "invited you to join <name> (portfolio)"
                 // - "invited you to follow <name> (space)"
                 // - "invited you to become a manager of <name> (portfolio)"
+                // - "added you as a manager of <name> (space)"
                 // - "accepted your invitation to join <name> (<typeLabel>)"
                 const match = messageText.match(
-                  /(?:invited you to (?:join|follow|become a manager of)|accepted your invitation to (?:join|follow|become a manager of))\s+(.+?)\s+\(([^)]+)\)/i
+                  /(?:invited you to (?:join|follow|become a manager of)|accepted your invitation to (?:join|follow|become a manager of)|added you as a manager of)\s+(.+?)\s+\(([^)]+)\)/i
                 )
                 const portfolioNameFromMessage = match ? match[1].trim() : null
 
                 const matchingInvitations: Array<{ invitationId: string; portfolioId: string; status: 'pending_sent' | 'pending_received' | 'accepted' | 'cancelled' | 'declined' | null; created_at: string; inviter_id: string; invitee_id: string; invitation_type?: string }> = []
                 
-                const expectedType: 'manager' | 'follow' | 'member' =
-                  (isManagerInviteMessage || isManagerAcceptMessage)
-                    ? 'manager'
-                    : (isFollowInviteMessage || isFollowAcceptMessage)
-                      ? 'follow'
-                      : 'member'
+                const expectedType: 'manager' | 'manager_promotion' | 'follow' | 'member' =
+                  isManagerPromotionMessage
+                    ? 'manager_promotion'
+                    : (isManagerInviteMessage || isManagerAcceptMessage)
+                      ? 'manager'
+                      : (isFollowInviteMessage || isFollowAcceptMessage)
+                        ? 'follow'
+                        : 'member'
 
                 portfolioInvitations.forEach((invitation) => {
                   if (invitation.inviter_id === expectedInviterId && 
                       invitation.invitee_id === expectedInviteeId) {
                     const invitationType = invitation.invitation_type || 'member'
-                    if (expectedType === 'manager' && invitationType === 'manager') {
+                    if (expectedType === 'manager_promotion' && invitationType === 'manager') {
+                      if (invitation.status === 'accepted') {
+                        matchingInvitations.push(invitation)
+                      }
+                    } else if (expectedType === 'manager' && invitationType === 'manager') {
+                      if (isManagerInviteMessage && isInviteMessage) {
+                        if (isSent) {
+                          if (invitation.status !== 'pending_sent') return
+                        } else if (invitation.status !== 'pending_received') {
+                          return
+                        }
+                      } else if (isManagerAcceptMessage) {
+                        if (invitation.status !== 'accepted') return
+                      }
                       matchingInvitations.push(invitation)
                     } else if (expectedType === 'follow' && invitationType === 'follow') {
                       matchingInvitations.push(invitation)
@@ -1081,9 +1100,33 @@ function ConversationViewContent() {
               const isReceivedPortfolioInvitation = !isSent && isPortfolioInvitationMessage && portfolioInvitation && portfolioInvitation.status === 'pending_received' && invitationMatchesMessage
               const isSentPortfolioInvitation = isSent && isPortfolioInvitationMessage && portfolioInvitation && portfolioInvitation.status === 'pending_sent' && invitationMatchesMessage
               
-              const portfolio = portfolioInvitation 
-                ? portfolioDetails.get(portfolioInvitation.portfolioId) 
+              const portfolio = portfolioInvitation
+                ? portfolioDetails.get(portfolioInvitation.portfolioId)
                 : null
+
+              const spaceSlugOrId =
+                portfolio && portfolioInvitation
+                  ? String((portfolio as any).slug || portfolioInvitation.portfolioId || '')
+                  : ''
+              const spaceBaseUrl = spaceSlugOrId ? getSpaceUrl(spaceSlugOrId) : ''
+              const showSpaceInviteChoiceRow =
+                isReceivedPortfolioInvitation &&
+                !!portfolio &&
+                !!portfolioInvitation &&
+                !isHumanPortfolio(portfolio as Portfolio) &&
+                (portfolioInvitation.invitation_type === 'member' ||
+                  portfolioInvitation.invitation_type === 'follow')
+              const showLegacyManagerInviteViewSpace =
+                isReceivedPortfolioInvitation &&
+                !!portfolio &&
+                !!portfolioInvitation &&
+                !isHumanPortfolio(portfolio as Portfolio) &&
+                portfolioInvitation.invitation_type === 'manager'
+              const showManagerPromotionViewSpace =
+                !isSent &&
+                isManagerPromotionMessage &&
+                !!portfolio &&
+                !!portfolioInvitation
 
               const activityUpdatePortfolio =
                 isActivityUpdateMessage && activityUpdateRef
@@ -1226,16 +1269,54 @@ function ConversationViewContent() {
                           </Button>
                         </div>
                       )}
-                      {isReceivedPortfolioInvitation && portfolioInvitation && (
+                      {showSpaceInviteChoiceRow && portfolioInvitation && spaceBaseUrl && (
+                        <div className="mt-2 pt-2 border-t border-gray-300 flex flex-col gap-2">
+                          <UIText as="p">
+                            {portfolioInvitation.invitation_type === 'follow'
+                              ? 'Follow = stay updated · Pass = decline for now'
+                              : 'Join = become a member · Follow = stay updated · Pass = decline for now'}
+                          </UIText>
+                          <div className="flex flex-col gap-2">
+                            {portfolioInvitation.invitation_type === 'member' && (
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                fullWidth
+                                asLink
+                                href={`${spaceBaseUrl}?spaceInviteAction=join`}
+                              >
+                                <UIText>Join</UIText>
+                              </Button>
+                            )}
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              fullWidth
+                              asLink
+                              href={`${spaceBaseUrl}?spaceInviteAction=follow`}
+                            >
+                              <UIText>Follow</UIText>
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              fullWidth
+                              asLink
+                              href={`${spaceBaseUrl}?spaceInviteAction=pass`}
+                            >
+                              <UIText>Pass</UIText>
+                            </Button>
+                          </div>
+                          <Button variant="secondary" size="sm" fullWidth asLink href={spaceBaseUrl}>
+                            <UIText>View space</UIText>
+                          </Button>
+                        </div>
+                      )}
+                      {(showLegacyManagerInviteViewSpace || showManagerPromotionViewSpace) &&
+                        spaceBaseUrl && (
                         <div className="mt-2 pt-2 border-t border-gray-300">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            fullWidth
-                            asLink
-                            href={getSpaceUrl((portfolio as any)?.slug || portfolioInvitation.portfolioId)}
-                          >
-                            <UIText>Check invite</UIText>
+                          <Button variant="secondary" size="sm" fullWidth asLink href={spaceBaseUrl}>
+                            <UIText>View space</UIText>
                           </Button>
                         </div>
                       )}
