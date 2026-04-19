@@ -242,64 +242,6 @@ export async function createNote(formData: FormData): Promise<CreateNoteResult> 
       }
     }
 
-    // Resource limit enforcement:
-    // - Projects/activities/community: count resources assigned to that portfolio.
-    // - Human: count resources that are unassigned (assigned_portfolios is empty) and owned by the human user.
-    if (isResource) {
-      const RESOURCE_LIMIT = 6
-      let resourceCount = 0
-
-      if (portfolioIds.length === 1) {
-        const portfolioId = portfolioIds[0]
-        const { count, error } = await supabase
-          .from('notes')
-          .select('id', { count: 'exact', head: true })
-          .eq('type', 'resource')
-          .contains('assigned_portfolios', [portfolioId])
-          .is('deleted_at', null)
-          .is('mentioned_note_id', null)
-
-        if (!error && typeof count === 'number') {
-          resourceCount = count
-        }
-      } else {
-        // Human resources are counted when unassigned.
-        const { count, error } = await supabase
-          .from('notes')
-          .select('id', { count: 'exact', head: true })
-          .eq('type', 'resource')
-          .eq('owner_account_id', user.id)
-          .eq('assigned_portfolios', [])
-          .is('deleted_at', null)
-          .is('mentioned_note_id', null)
-
-        if (!error && typeof count === 'number') {
-          resourceCount = count
-        } else {
-          // Fallback (in case empty-array equality isn't supported in the current DB/client config).
-          const { data } = await supabase
-            .from('notes')
-            .select('assigned_portfolios')
-            .eq('type', 'resource')
-            .eq('owner_account_id', user.id)
-            .is('deleted_at', null)
-            .is('mentioned_note_id', null)
-            .limit(50)
-
-          resourceCount = (data || []).filter(
-            (n: any) => Array.isArray(n.assigned_portfolios) && n.assigned_portfolios.length === 0
-          ).length
-        }
-      }
-
-      if (resourceCount >= RESOURCE_LIMIT) {
-        return {
-          success: false,
-          error: `Resource limit reached (maximum ${RESOURCE_LIMIT} resources per portfolio).`,
-        }
-      }
-    }
-
     // Create note first (we need the ID for image uploads)
     const noteData: Omit<Note, 'id' | 'created_at' | 'updated_at'> = {
       type: noteType,
