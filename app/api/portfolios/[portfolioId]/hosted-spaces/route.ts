@@ -24,15 +24,6 @@ function hostedBySpace(candidate: PortfolioRow, space: PortfolioRow): boolean {
   return getDeclaredHostSpaceIds(candidate).includes(space.id)
 }
 
-function viewerInPortfolio(viewerId: string, p: PortfolioRow): boolean {
-  if (!viewerId) return false
-  if (p.user_id === viewerId) return true
-  const meta = (p.metadata as any) || {}
-  const members: string[] = Array.isArray(meta?.members) ? meta.members : []
-  const managers: string[] = Array.isArray(meta?.managers) ? meta.managers : []
-  return members.includes(viewerId) || managers.includes(viewerId)
-}
-
 export async function GET(_request: NextRequest, { params }: { params: { portfolioId: string } }) {
   try {
     const portfolioId = params.portfolioId
@@ -41,9 +32,6 @@ export async function GET(_request: NextRequest, { params }: { params: { portfol
     }
 
     const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
 
     const { data: target, error: targetError } = await supabase
       .from('portfolios')
