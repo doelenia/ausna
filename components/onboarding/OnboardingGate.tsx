@@ -946,7 +946,6 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
     description?: string
     avatar?: string | null
     emoji?: string | null
-    featuredSource?: 'org' | 'pinned'
     userJoinStatus?: ViewerJoinStatus
   }>>([])
   const [searching, setSearching] = useState(false)
@@ -1137,9 +1136,7 @@ function OnboardingJoinCommunityStep({ onComplete }: { onComplete: () => void })
                         </div>
                       </div>
                       <UIText className="text-green-700 w-full min-w-0 break-words whitespace-pre-wrap">
-                        {s.featuredSource === 'pinned'
-                          ? 'Join this space with one click.'
-                          : `You are verified as part of ${s.name}, please join with one click!`}
+                        You are verified as part of {s.name}, please join with one click!
                       </UIText>
                     </div>
                   ))}
