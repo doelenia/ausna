@@ -5,10 +5,6 @@ import type { HumanPortfolioMetadata } from '@/types/portfolio'
 export const ONBOARDING_STEP_IDS = ['legal', 'profile', 'join_community', 'open_calls'] as const
 export type OnboardingStepId = (typeof ONBOARDING_STEP_IDS)[number]
 
-/** Always surfaced on the “Join a space” onboarding step (with org-eligible spaces). */
-export const ONBOARDING_JOIN_SPACES_PINNED_PORTFOLIO_ID =
-  '9f4fc0af-8997-494e-945c-d2831eaf258a' as const
-
 export interface OnboardingStep {
   id: OnboardingStepId
   label: string
